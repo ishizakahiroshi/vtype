@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    // No "DOM" lib on purpose: core must not create or look up DOM nodes, and it has to run
+    // inside a Chrome extension offscreen document as well as in a regular page. Host
+    // globals (SpeechRecognition, navigator, location, timers, console) are reached through
+    // a typed view of globalThis in recognition.ts, so any `document` use fails to compile.
+    "lib": ["ES2022"],
+    "types": [],
+    "strict": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src"]
+}

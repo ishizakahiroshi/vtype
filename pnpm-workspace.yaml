@@ -1,0 +1,7 @@
+packages:
+  - 'packages/*'
+# pnpm 11 fails install (and every `pnpm <script>`, which verifies deps first) while a
+# dependency's build script is neither allowed nor denied. esbuild (via vitest) does not need
+# its postinstall: the binary comes from its platform-specific optional dependency.
+allowBuilds:
+  esbuild: false
