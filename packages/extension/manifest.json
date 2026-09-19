@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "vtype",
+  "version": "0.0.1",
+  "description": "Voice input for any text field on the web. Uses the browser's built-in speech recognition.",
+  "minimum_chrome_version": "116",
+  "permissions": ["offscreen"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}

@@ -1,0 +1,345 @@
+/*
+ * vtype UI. Lives only inside the closed shadow root of <vtype-root> (see content/anchor.ts),
+ * so page selectors cannot match these elements and these rules cannot match page elements.
+ *
+ * What still crosses the shadow boundary is (a) rules on the host element itself and
+ * (b) inherited properties. Both are shut here: the host is reset with `all: initial` at
+ * !important (an !important declaration from inside the shadow tree beats the page's
+ * !important), and every size below is in px, with box-sizing set explicitly.
+ *
+ * Look ported from many-ai-cli (same author, MIT): web/src/styles/voice.css (#voice-btn,
+ * #input-clear-btn, #voice-bar) and web/src/styles/terminal.css (#send-btn), with the id
+ * selectors turned into classes.
+ */
+
+:host {
+  all: initial !important;
+  display: block !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: visible !important;
+  z-index: 2147483647 !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  transform: none !important;
+  pointer-events: none !important;
+
+  /* many-ai-cli light theme tokens */
+  --vt-bg: #ffffff;
+  --vt-text: #0f172a;
+  --vt-line: #cbd5e1;
+  --vt-muted: #64748b;
+  --vt-accent: #4f46e5;
+  --vt-accent-2: #7c3aed;
+  --vt-red: #ef4444;
+  --vt-red-soft: rgba(220, 38, 38, 0.12);
+  --vt-blue: rgba(96, 165, 250, 0.75);
+  --vt-blue-soft: rgba(96, 165, 250, 0.25);
+  --vt-hover: rgba(15, 23, 42, 0.06);
+  --vt-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+}
+
+@media (prefers-color-scheme: dark) {
+  :host {
+    /* many-ai-cli dark theme tokens */
+    --vt-bg: #15171c;
+    --vt-text: #e2e8f0;
+    --vt-line: rgba(255, 255, 255, 0.14);
+    --vt-muted: #94a3b8;
+    --vt-accent: #6366f1;
+    --vt-accent-2: #8b5cf6;
+    --vt-hover: rgba(255, 255, 255, 0.08);
+    --vt-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+  }
+}
+
+.box,
+.box * {
+  box-sizing: border-box !important;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.box {
+  position: fixed;
+  left: 0;
+  top: 0;
+  margin: 0;
+  padding: 0;
+  pointer-events: auto;
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif !important;
+  font-size: 13px !important;
+  color: var(--vt-text);
+  text-align: left;
+  letter-spacing: normal;
+  direction: ltr;
+}
+
+/* ---- the thin mic beside the field (hover target) -------------------------------------- */
+
+.mic {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--vt-line);
+  border-radius: 8px;
+  background: var(--vt-bg);
+  color: var(--vt-muted);
+  opacity: 0.55;
+  cursor: default;
+  font: inherit;
+  line-height: 1;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+.box:hover .mic,
+.box.open .mic {
+  opacity: 1;
+  color: var(--vt-accent);
+}
+.mic svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+  pointer-events: none;
+}
+
+/* ---- panel ------------------------------------------------------------------------------ */
+
+.panel {
+  position: absolute;
+  top: 24px; /* directly under the mic: no gap for the pointer to fall through */
+  left: 0;
+  width: 240px;
+  margin: 0;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--vt-bg);
+  color: var(--vt-text);
+  border: 1px solid var(--vt-line);
+  border-radius: 12px;
+  box-shadow: var(--vt-shadow);
+}
+/* Not enough room to the right: grow to the left of the mic instead. */
+.box.flip-x .panel {
+  left: auto;
+  right: 0;
+}
+/* Not enough room below: open above the mic. */
+.box.flip-y .panel {
+  top: auto;
+  bottom: 24px;
+}
+
+.transcript {
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.transcript .interim {
+  color: var(--vt-muted);
+}
+.message {
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--vt-red);
+}
+
+/* C7b: the one action a message can carry ("allow the microphone") */
+.message-action {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--vt-accent);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.message-action:focus-visible {
+  outline: 2px solid var(--vt-accent);
+  outline-offset: 1px;
+}
+
+/* ---- toolbar: × / send / mic (many-ai-cli order) --------------------------------------- */
+
+.toolbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+
+.btn {
+  appearance: none;
+  -webkit-appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  border: none;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  text-transform: none;
+  transition: background 0.12s, color 0.12s, opacity 0.15s, transform 0.1s;
+}
+.btn svg {
+  display: block;
+  pointer-events: none;
+}
+.btn:focus-visible {
+  outline: 2px solid var(--vt-accent);
+  outline-offset: 1px;
+}
+
+/* × : visible only when the field has text (many-ai-cli #input-clear-btn / .has-text) */
+.clear {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--vt-muted);
+  opacity: 0;
+  pointer-events: none;
+}
+.clear.has-text {
+  opacity: 1;
+  pointer-events: auto;
+}
+.clear:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+.clear svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* send (many-ai-cli #send-btn) */
+.send {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--vt-accent);
+  color: #ffffff;
+}
+.send:hover {
+  background: var(--vt-accent-2);
+}
+.send:active {
+  transform: scale(0.92);
+}
+.send svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* mic (many-ai-cli #voice-btn) */
+.record {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--vt-muted);
+}
+.record:hover {
+  background: var(--vt-hover);
+  color: var(--vt-accent);
+}
+.record svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ---- states ----------------------------------------------------------------------------- */
+
+/* recording: red, pulsing every 1.2 s (many-ai-cli #voice-btn.recording / voice-pulse) */
+.record.recording,
+.mic.recording {
+  background: var(--vt-red-soft);
+  color: var(--vt-red);
+  opacity: 1;
+  animation: vt-voice-pulse 1.2s ease-in-out infinite;
+}
+.mic.recording {
+  border-color: var(--vt-red);
+}
+@keyframes vt-voice-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* processing: waiting for the recognizer after the audio ended (many-ai-cli
+   #voice-bar.voice-processing / voice-processing-pulse, 1.4 s) */
+.panel.processing {
+  animation: vt-processing-pulse 1400ms ease-in-out infinite;
+}
+.panel.processing .transcript {
+  opacity: 0.6;
+}
+.mic.processing {
+  border-color: var(--vt-blue);
+  opacity: 1;
+}
+@keyframes vt-processing-pulse {
+  0%,
+  100% {
+    border-color: var(--vt-blue-soft);
+  }
+  50% {
+    border-color: var(--vt-blue);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .record.recording,
+  .mic.recording,
+  .panel.processing {
+    animation: none;
+  }
+  .btn,
+  .mic {
+    transition: none;
+  }
+  .panel.processing {
+    border-color: var(--vt-blue);
+  }
+}

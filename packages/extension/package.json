@@ -1,0 +1,21 @@
+{
+  "name": "vtype-extension",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Chrome MV3 extension: dictate into any web text field. Not published to npm; load dist/ unpacked.",
+  "license": "MIT",
+  "author": "ishizakahiroshi <ishizakahiroshi.dev@gmail.com>",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "vtype-core": "workspace:*",
+    "esbuild": "^0.28.2",
+    "happy-dom": "^20.14.5",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

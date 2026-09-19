@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vtype testbed: hostile CSS</title>
+<!--
+  Manual check page for plan C7. Serve it over http (content scripts do not run on file://):
+    node packages/extension/testbed/serve.mjs
+  then open http://127.0.0.1:8787/hostile.html with the unpacked extension loaded.
+  All content is synthetic.
+-->
+<style id="hostile">
+  /* The three rules plan C7 requires the UI to survive. */
+  * { box-sizing: content-box !important }
+  * { font-size: 24px !important }
+  div { display: flex !important }
+
+  /* Extra: rules aimed at vtype's own class names and host element. None may have any effect. */
+  .panel, .box, .btn, .send, .clear, .record, .mic, .toolbar { display: none !important; width: 999px !important; background: magenta !important }
+  vtype-root { display: none !important; position: static !important; font-size: 40px !important }
+  button { border: 4px dashed orange !important; padding: 20px !important }
+  svg { width: 80px !important; height: 80px !important }
+  [hidden] { display: block !important }
+</style>
+<style>
+  body { font-family: sans-serif; margin: 24px; line-height: 1.5; }
+  section { margin: 28px 0; }
+  .note { color: #555; }
+  .scroller { height: 120px; overflow: auto; border: 1px solid #999; padding: 8px; }
+  .scroller .spacer { height: 200px; }
+  .right-edge { text-align: right; }
+  .bottom { margin-top: 900px; }
+  /* A page element that shares vtype's class names: it must NOT look like vtype. */
+  .lookalike { border: 1px solid #999; padding: 4px; }
+</style>
+</head>
+<body>
+<h1>vtype testbed: hostile CSS</h1>
+<p class="note">
+  <label><input type="checkbox" id="toggle" checked> hostile CSS on</label>
+  (toggle it and compare: the vtype mic and panel must look the same either way)
+</p>
+
+<section>
+  <h2>Single-line fields</h2>
+  <p><input type="text" placeholder="type=text" size="30"></p>
+  <p><input type="search" placeholder="type=search" size="30"></p>
+  <p><input type="email" placeholder="type=email" size="30"></p>
+  <p><input type="url" placeholder="type=url" size="30"></p>
+  <p><input type="tel" placeholder="type=tel" size="30"></p>
+  <p><input type="text" value="prefilled text (× should be visible)" size="30"></p>
+</section>
+
+<section>
+  <h2>Multi-line</h2>
+  <p><textarea rows="5" cols="40" placeholder="textarea"></textarea></p>
+  <div contenteditable="true" style="border:1px solid #999; min-height:60px; padding:6px; width:320px">contenteditable (a div, so the hostile div rule hits it)</div>
+</section>
+
+<section>
+  <h2>Must show no mic</h2>
+  <p><input type="password" placeholder="password"></p>
+  <p><input type="text" autocomplete="current-password" placeholder="revealed password (autocomplete)"></p>
+  <p><input type="text" readonly value="readonly"></p>
+  <p><input type="text" disabled value="disabled"></p>
+</section>
+
+<section>
+  <h2>Inside a scroll container</h2>
+  <div class="scroller">
+    <div class="spacer">scroll this box: the mic must follow the field and hide when it scrolls out</div>
+    <input type="text" placeholder="inside the scroller">
+    <div class="spacer"></div>
+  </div>
+</section>
+
+<section class="right-edge">
+  <h2>At the right edge</h2>
+  <input type="text" placeholder="the panel should open towards the left" size="30">
+</section>
+
+<section>
+  <h2>Page elements that share vtype's class names</h2>
+  <div class="panel lookalike">page element with class "panel"</div>
+  <button class="btn send lookalike" type="button">page button with class "btn send"</button>
+  <button class="mic recording lookalike" type="button">page button with class "mic recording"</button>
+</section>
+
+<section class="bottom">
+  <h2>Near the bottom</h2>
+  <input type="text" placeholder="scroll down: the panel should open upwards here" size="30">
+</section>
+
+<script>
+  document.getElementById("toggle").addEventListener("change", (e) => {
+    document.getElementById("hostile").disabled = !e.target.checked;
+  });
+</script>
+</body>
+</html>
