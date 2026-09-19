@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>vtype spike: grant microphone</title>
+</head>
+<body style="font:14px/1.5 system-ui, sans-serif; max-width:520px; margin:40px auto; padding:0 16px;">
+<h1>vtype mic-permission spike</h1>
+<p>
+  This page exists only so the browser can show a microphone permission
+  prompt for this extension's own <code>chrome-extension://</code> origin,
+  once, ahead of time. Click the button below and allow the microphone when
+  asked. This is expected to be the only time you see that dialog for the
+  whole spike.
+</p>
+<p>
+  <button id="grant" type="button">Grant microphone access</button>
+</p>
+<p id="status">not requested yet</p>
+<p>
+  When the status above says "granted", you can close this tab and go test
+  the extension on real pages. See <code>README.md</code> for the rest of
+  the procedure.
+</p>
+<script src="permission.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>vtype spike offscreen document</title>
+</head>
+<body>
+<!--
+  vtype mic-permission spike: this document is never shown to the user
+  (offscreen documents are not focusable/visible). It only runs
+  webkitSpeechRecognition and reports back to background.js. It must never
+  contain UI that a user is expected to interact with.
+-->
+<script src="offscreen.js"></script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "vtype mic-permission spike (throwaway, do not publish)",
+  "version": "0.0.1",
+  "description": "Disposable spike: does an offscreen document let webkitSpeechRecognition run without a per-origin microphone prompt? Not a product build, not for the Chrome Web Store.",
+  "permissions": ["offscreen"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {},
+  "content_scripts": [
+    {
+      "matches": ["*://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
