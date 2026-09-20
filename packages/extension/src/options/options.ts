@@ -8,12 +8,17 @@
 // page with empty elements, and the text filled in here from the browser's language.
 
 import {
+  DEFAULT_MIC_DISPLAY,
   DEFAULT_TRIGGER,
   clearOffsets,
   extensionStorage,
+  isMicDisplay,
   isTriggerMode,
+  readMicDisplay,
   readTrigger,
+  writeMicDisplay,
   writeTrigger,
+  type MicDisplay,
   type StorageView,
   type TriggerMode,
 } from "../shared/settings";
@@ -26,6 +31,11 @@ interface Texts {
   clickHint: string;
   hoverLabel: string;
   hoverHint: string;
+  displayLegend: string;
+  displayAllLabel: string;
+  displayAllHint: string;
+  displayHoverLabel: string;
+  displayHoverHint: string;
   saved: string;
   failed: string;
   positionsTitle: string;
@@ -47,6 +57,13 @@ const TEXTS: Record<"en" | "ja", Texts> = {
     hoverLabel: "Rest the mouse on the mic",
     hoverHint:
       "Recording starts as soon as the panel opens by itself, so you can speak straight away. You can still press the mic to start and stop.",
+    displayLegend: "Where the mic is shown",
+    displayAllLabel: "On every text field on screen (recommended)",
+    displayAllHint:
+      "Each text field you can see gets a faint mic next to it, without you touching anything. On a page with very many fields, only the first ones get one; the rest appear as you move the mouse over them.",
+    displayHoverLabel: "Only on the field I am using",
+    displayHoverHint:
+      "A mic appears on the field the mouse is over, and on the field the caret is in. Moving away takes it back.",
     saved: "Saved.",
     failed: "Could not save the setting. vtype keeps starting when you press the mic.",
     positionsTitle: "Where the mic sits",
@@ -67,6 +84,13 @@ const TEXTS: Record<"en" | "ja", Texts> = {
     hoverLabel: "マイクにマウスを乗せて始める",
     hoverHint:
       "パネルが開いた時点で録音が始まるので、そのまま話せます。マイクを押して始める・止めることもできます。",
+    displayLegend: "マイクを出す場所",
+    displayAllLabel: "画面に見えている入力欄すべて（おすすめ）",
+    displayAllHint:
+      "見えている入力欄の横に、薄いマイクが最初から出ます。操作は要りません。欄がとても多いページでは先頭のぶんだけ出て、残りはマウスを乗せたときに出ます。",
+    displayHoverLabel: "今使っている欄だけ",
+    displayHoverHint:
+      "マウスを乗せた欄と、カーソルがある欄にだけマイクが出ます。離れると消えます。",
     saved: "保存しました。",
     failed: "設定を保存できませんでした。マイクを押して始める動作のままになります。",
     positionsTitle: "マイクの位置",
@@ -109,37 +133,58 @@ export function initOptionsPage(options: OptionsPageOptions = {}): void {
   setText(doc, "click-hint", t.clickHint);
   setText(doc, "hover-label", t.hoverLabel);
   setText(doc, "hover-hint", t.hoverHint);
+  setText(doc, "display-legend", t.displayLegend);
+  setText(doc, "display-all-label", t.displayAllLabel);
+  setText(doc, "display-all-hint", t.displayAllHint);
+  setText(doc, "display-hover-label", t.displayHoverLabel);
+  setText(doc, "display-hover-hint", t.displayHoverHint);
   setText(doc, "positions-title", t.positionsTitle);
   setText(doc, "positions-lead", t.positionsLead);
   setText(doc, "reset", t.reset);
 
-  const radios = [doc.getElementById("click"), doc.getElementById("hover")].filter(
-    (el): el is HTMLInputElement => el instanceof HTMLInputElement,
-  );
-
-  function show(mode: TriggerMode): void {
-    for (const radio of radios) radio.checked = radio.value === mode;
+  function radioGroup(ids: readonly string[]): HTMLInputElement[] {
+    return ids.map((id) => doc.getElementById(id)).filter((el): el is HTMLInputElement => el instanceof HTMLInputElement);
   }
 
-  // The stored value decides what is ticked; an unreadable store shows the default.
-  show(DEFAULT_TRIGGER);
-  void readTrigger(storage).then(show);
-
-  for (const radio of radios) {
-    radio.addEventListener("change", () => {
-      if (!radio.checked || !isTriggerMode(radio.value)) return;
-      const mode = radio.value;
-      void writeTrigger(storage, mode).then((ok) => {
-        if (ok) {
-          setText(doc, "status", t.saved, "ok");
-          return;
-        }
-        // Nothing was stored, so the page must not claim a setting the extension does not have.
-        setText(doc, "status", t.failed, "err");
-        show(DEFAULT_TRIGGER);
+  /** One group of radios: show what is stored, store what is chosen, own the status line. */
+  function wireChoice<T extends string>(
+    ids: readonly string[],
+    fallback: T,
+    isValue: (v: unknown) => v is T,
+    read: (s: StorageView | null) => Promise<T>,
+    write: (s: StorageView | null, v: T) => Promise<boolean>,
+  ): void {
+    const radios = radioGroup(ids);
+    const show = (value: T): void => {
+      for (const radio of radios) radio.checked = radio.value === value;
+    };
+    // The stored value decides what is ticked; an unreadable store shows the default.
+    show(fallback);
+    void read(storage).then(show);
+    for (const radio of radios) {
+      radio.addEventListener("change", () => {
+        if (!radio.checked || !isValue(radio.value)) return;
+        void write(storage, radio.value).then((ok) => {
+          if (ok) {
+            setText(doc, "status", t.saved, "ok");
+            return;
+          }
+          // Nothing was stored, so the page must not claim a setting the extension has not got.
+          setText(doc, "status", t.failed, "err");
+          show(fallback);
+        });
       });
-    });
+    }
   }
+
+  wireChoice<TriggerMode>(["click", "hover"], DEFAULT_TRIGGER, isTriggerMode, readTrigger, writeTrigger);
+  wireChoice<MicDisplay>(
+    ["display-all", "display-hover"],
+    DEFAULT_MIC_DISPLAY,
+    isMicDisplay,
+    readMicDisplay,
+    writeMicDisplay,
+  );
 
   // C7f: forget every dragged mic position. Open pages hear about it through
   // chrome.storage.onChanged and put their mic back without being reloaded.

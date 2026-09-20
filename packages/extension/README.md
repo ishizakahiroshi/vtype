@@ -1,7 +1,9 @@
 # vtype extension (Chrome, Manifest V3)
 
-The browser extension. When a text field on a web page gets focus, a small mic appears just
-outside its right edge; resting the mouse on the mic opens a panel with three buttons,
+The browser extension. Every text field you can see on the page carries a faint little mic just
+outside its right edge — you do not have to click a field first (C7g; the settings page can
+narrow that down to the field you are using). Resting the mouse on a mic opens a panel with
+three buttons,
 × / send / mic, in the same order as many-ai-cli's input bar. Pressing that small mic starts
 the recording and opens the panel in one go (C7e); pressing it again stops. The words appear in
 the field itself, at the caret, and are refined while you talk. The panel's mic does the same
@@ -34,8 +36,10 @@ pnpm -F vtype-extension test
 `dist/` contains `manifest.json`, `content.js`, `background.js` (the service worker),
 `offscreen.html` + `offscreen.js` (runs recognition), `permission.html` + `permission.js`
 (the one-time microphone page) and `options.html` + `options.js` (the settings page, registered
-as `options_ui`). Every script is one self-contained classic bundle; the build
-fails if module syntax is left in an output or a referenced file is missing.
+as `options_ui`), plus `icons/` (the extension's icons, copied from `assets/icons/` at the
+repository root, where they are baked from the single source `assets/icon.svg`). Every script is
+one self-contained classic bundle; the build fails if module syntax is left in an output or a
+referenced file is missing.
 
 ## Load it in Chrome
 
@@ -63,8 +67,9 @@ Check on each:
 
 In the list below, "the mic" is the small, faint mic icon that appears next to the field.
 
-1. Focus the field: the mic appears just outside the field's right edge, centered on
-   the first line. Nothing is drawn inside the field and the field's own look does not change.
+1. Open the page and touch nothing: every text field on screen already has a faint mic just
+   outside its right edge, centered on the first line. Nothing is drawn inside the fields and
+   their own look does not change. Resting the mouse on a mic makes that one solid.
 2. Scroll the page, and scroll any inner scroll area that contains the field: the mic stays
    next to the field. When the field scrolls out of view (including out of an inner scroll
    area) the mic disappears, and it comes back when the field does.
@@ -129,8 +134,8 @@ form), count every microphone permission dialog you see. The expected count is z
 ### The settings page
 
 Open it from `chrome://extensions` (Details -> Extension options), or right-click the
-extension and choose Options. It has one setting, "what starts recording", and one action,
-"put the mic back on every site" (item 32):
+extension and choose Options. It has two settings, "what starts recording" and "where the mic
+is shown" (items 38-39), and one action, "put the mic back on every site" (item 32):
 
 22. "Press the mic" (the default) is what items 4 and 12 describe.
 23. Switch to "Rest the mouse on the mic" and go back to a page **without reloading it**:
@@ -165,6 +170,28 @@ can be dragged aside, and where it was put is remembered for that site.
 32. In the settings page press "Put the mic back on every site": it says how many sites were
     put back, and a page you left open goes back to the normal place **without being
     reloaded**. Pressing it again says the mic has not been moved on any site.
+
+### A mic on every field (C7g)
+
+33. Open a page with several text fields (a form, a search page) and touch nothing: each
+    visible field has its own faint mic. Only one panel exists: it opens at whichever mic the
+    mouse rests on, and follows the mouse to another field's mic.
+34. Scroll: mics appear on the fields that come into view and go from the ones that leave.
+    On a page with very many fields, only the first dozen have one; move the mouse over a
+    field further down and it gets one too.
+35. Password, read-only and disabled fields still have no mic (item 6 above), and neither do
+    fields too small to hang one on (a two-character cell in a grid).
+36. Press the mic of a field you have **not** clicked, one that already has text in it: the
+    caret goes to the end of that text and what you say is added there. Nothing is pushed in
+    front of what was already written, and the page does not jump.
+37. While recording, move the mouse onto another field's mic: the red mic, the waveform and
+    the panel stay with the field being dictated into. Only after you stop does the panel
+    follow the mouse again.
+38. In the settings page choose "Only on the field I am using": the mics disappear except on
+    the field under the mouse and the field with the caret, **without reloading the page**.
+    Move the mouse over a field: its mic appears without a click. Move away: it goes after
+    about half a second — unless its panel is open or it is recording.
+39. Switch back to "On every text field on screen": the mics are all back.
 
 ## Hostile-CSS testbed (plan C7)
 
@@ -203,10 +230,16 @@ Stop the server with Ctrl+C.
 - Frames: the content script runs in every frame (`all_frames`), so fields inside iframes get
   their own mic inside that frame.
 - Settings, in `chrome.storage.sync`: `trigger` (`"click"` or `"hover"`: what starts
-  recording) and `micOffsets` (where the mic was dragged to, one entry per origin, at most 50,
-  oldest dropped first). Every open page follows a change through `chrome.storage.onChanged`,
-  with no reload. Anything missing, unreadable or unexpected means the default: start on a
-  press, mic at its normal place.
+  recording), `micDisplay` (`"all"` or `"hover"`: which fields carry a mic) and `micOffsets`
+  (where the mic was dragged to, one entry per origin, at most 50, oldest dropped first). Every
+  open page follows a change through `chrome.storage.onChanged`, with no reload. Anything
+  missing, unreadable or unexpected means the default: start on a press, a mic on every visible
+  field, at its normal place.
+- At most 12 mics are shown at once. The fields are looked for when the page changes and
+  shortly after scrolling or resizing, never on the frame path: the per-frame position tracking
+  measures only the mics that exist.
+- Fields inside an open shadow root do not get a mic from that page-wide search (a DOM query
+  does not cross that boundary), but they still get one when they are focused or hovered.
 - Not covered: closed shadow roots (the page hides them from extensions), documents in
   `designMode`, and pages the browser does not let extensions script (`chrome://`, the Chrome
   Web Store).

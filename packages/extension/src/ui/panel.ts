@@ -49,6 +49,11 @@ export interface Panel {
    */
   setMessage(text: string | null, action?: MessageAction): void;
   bindField(field: Element | null): void;
+  /**
+   * C7g: the thin mic that mirrors the state. There is one panel and several mics now, so it
+   * changes when the panel moves to another field. The mic it leaves goes back to idle.
+   */
+  setTrigger(next: HTMLElement | null): void;
   /** Re-read whether the field has text (the anchor calls this when the panel opens). */
   refreshHasText(): void;
   /** Remove listeners on the page (on the bound field's root). */
@@ -57,7 +62,7 @@ export interface Panel {
 
 export function createPanel(options: PanelOptions = {}): Panel {
   const doc = options.doc ?? document;
-  const trigger = options.trigger ?? null;
+  let trigger = options.trigger ?? null;
 
   const element = doc.createElement("div");
   element.className = "panel";
@@ -108,6 +113,7 @@ export function createPanel(options: PanelOptions = {}): Panel {
     setTranscript,
     setMessage,
     bindField,
+    setTrigger,
     refreshHasText,
     destroy(): void {
       bindField(null);
@@ -125,6 +131,14 @@ export function createPanel(options: PanelOptions = {}): Panel {
     // disappear when the panel goes idle.
     if (next === "recording" && previous !== "recording") waveform.start();
     else if (next === "idle") waveform.stop();
+  }
+
+  function setTrigger(next: HTMLElement | null): void {
+    if (trigger === next) return;
+    // The mic left behind must not keep glowing as if it were still the one recording.
+    if (trigger !== null) applyStateClass(trigger, "idle");
+    trigger = next;
+    if (trigger !== null) applyStateClass(trigger, state);
   }
 
   function setTranscript(finalText: string, interimText = ""): void {

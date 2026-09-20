@@ -8,25 +8,56 @@
 // the `hover` setting the panel opening starts it by itself. Either way the panel is held open
 // until the recording ends. The setting comes from chrome.storage.sync and can change while the
 // page is open (shared/settings.ts).
+// C7g: fields carry a mic without being clicked. Which ones is the `micDisplay` setting: `all`
+// (the default: every target field visible on screen, up to MAX_MICS) or `hover` (the field
+// under the pointer and the field with the caret). Finding them is a document query, so it runs
+// on DOM changes and on a timer after scrolling — never inside the per-frame position tracking.
 
 import { createAnchor, type Anchor } from "./anchor";
 import { createController, type ContentRuntime, type Controller } from "./controller";
-import { TARGET_DEFINING_ATTRIBUTES, deepActiveElement, resolveTarget } from "./detect";
+import {
+  TARGET_DEFINING_ATTRIBUTES,
+  deepActiveElement,
+  isFieldOnScreen,
+  resolveTarget,
+  visibleTargetFields,
+} from "./detect";
 import { startCompositionTracking } from "./insert";
 import {
+  DEFAULT_MIC_DISPLAY,
   DEFAULT_TRIGGER,
   NO_OFFSET,
   extensionStorage,
+  readMicDisplay,
   readOffsets,
   readTrigger,
+  watchMicDisplay,
   watchOffsets,
   watchTrigger,
   withOffset,
   writeOffsets,
+  type MicDisplay,
   type MicOffsets,
   type StorageView,
   type TriggerMode,
 } from "../shared/settings";
+
+/**
+ * How many mics may be on screen at once. Two jobs: a page with dozens of fields must not turn
+ * into a wall of icons, and the per-frame position tracking measures one rect per shown mic, so
+ * this is what keeps that work constant however many fields the page has.
+ */
+export const MAX_MICS = 12;
+/**
+ * How long a burst of DOM changes or scrolling is collected before the fields are looked up
+ * again. Scrolling fires continuously; without this the query would run on every event.
+ */
+export const RESCAN_DELAY_MS = 200;
+/**
+ * `hover`: how long a field keeps its mic after the pointer has left it, so that moving from
+ * the field to its own mic (which sits outside the field) does not take the mic away first.
+ */
+export const HOVER_LINGER_MS = 600;
 
 /** The only part of the extension API this file touches, typed narrowly instead of @types/chrome. */
 interface ChromeRuntimeView {
@@ -38,6 +69,10 @@ export interface ContentScript {
   readonly controller: Controller;
   /** What starts a recording right now (C7e). Follows the setting while the page is open. */
   readonly trigger: TriggerMode;
+  /** Which fields carry a mic right now (C7g). Follows the setting while the page is open. */
+  readonly micDisplay: MicDisplay;
+  /** Look for the fields to put mics on now, instead of waiting for the timer (C7g). */
+  rescan(): void;
   /** Remove every listener this script added and take the host off the page. */
   stop(): void;
 }
@@ -90,6 +125,23 @@ export function startContentScript(options: StartOptions = {}): ContentScript {
     },
     // While a recording runs the panel must stay: it holds the button that stops it.
     canAutoClose: () => recorder === null || recorder.phase === "idle",
+    // C7g: and it must not walk off to another field while that recording runs either.
+    canSwitchTarget: () => recorder === null || recorder.phase === "idle",
+    // C7g: the anchor already listens for scroll and resize; this is that same news.
+    onViewportChange: () => scheduleRescan(),
+    // C7h: what the page has at a point, so a mic can step aside from the site's own buttons.
+    // happy-dom (and any document without it) simply answers "nothing", which leaves every mic
+    // exactly where vtype has always put it.
+    elementsAt: (x, y) => {
+      const fromPoint = (doc as Document & { elementsFromPoint?: (x: number, y: number) => Element[] })
+        .elementsFromPoint;
+      if (typeof fromPoint !== "function") return [];
+      try {
+        return fromPoint.call(doc, x, y);
+      } catch {
+        return [];
+      }
+    },
     // C7f: the user dragged the mic aside. Remember it for this site, not for the page.
     onOffsetChange: (offset) => {
       offsets = withOffset(offsets, origin, offset);
@@ -126,6 +178,129 @@ export function startContentScript(options: StartOptions = {}): ContentScript {
     applyOffset();
   });
 
+  // ---- C7g: which fields carry a mic ------------------------------------------------------
+
+  let micDisplay: MicDisplay = DEFAULT_MIC_DISPLAY;
+  /** `hover`: the field the pointer is on, and the one it just left (it keeps its mic a while). */
+  let overField: Element | null = null;
+  let leavingField: Element | null = null;
+  let lingerTimer: ReturnType<typeof setTimeout> | null = null;
+  let rescanTimer: ReturnType<typeof setTimeout> | null = null;
+  let fieldObserver: MutationObserver | null = null;
+  /** C7h: the next rescan follows a change to the page itself, so the spots are decided again. */
+  let pageChanged = false;
+
+  function keepAlive(field: Element | null, into: Element[]): void {
+    if (field === null || into.includes(field)) return;
+    if (!field.isConnected || resolveTarget(field) !== field) return;
+    if (!isFieldOnScreen(field, doc)) return;
+    into.push(field);
+  }
+
+  /**
+   * The fields the user is actually dealing with. They come first in both settings: with
+   * `hover` they are the whole list, and with `all` they are what makes the cap bearable — the
+   * field under the pointer gets a mic even on a page with more fields than mics.
+   */
+  function priorityFields(): Element[] {
+    const keep: Element[] = [];
+    keepAlive(overField, keep);
+    keepAlive(leavingField, keep);
+    keepAlive(anchor.hoveredField, keep); // the pointer is on this field's own mic or panel
+    keepAlive(resolveTarget(deepActiveElement(doc)), keep);
+    // Never take the mic away from a panel that is open or a recording that is running.
+    if (anchor.isOpen || controller.phase !== "idle") keepAlive(anchor.target, keep);
+    return keep;
+  }
+
+  function fieldsForMics(): Element[] {
+    const keep = priorityFields();
+    if (micDisplay === "all") {
+      // Document order for the rest, so the page reads the same way from the top every time.
+      for (const field of visibleTargetFields(doc, MAX_MICS)) {
+        if (keep.length >= MAX_MICS) break;
+        keepAlive(field, keep);
+      }
+    }
+    return keep.slice(0, MAX_MICS);
+  }
+
+  function rescan(): void {
+    if (rescanTimer !== null) {
+      clearTimeout(rescanTimer);
+      rescanTimer = null;
+    }
+    if (pageChanged) {
+      // C7h: the page itself is different, so a button may have appeared (or gone) where a mic
+      // sits. Scrolling never gets here: a field and the buttons around it move together.
+      pageChanged = false;
+      anchor.remeasure();
+    }
+    anchor.setMics(fieldsForMics());
+    wireUi();
+  }
+
+  /**
+   * Scrolling and DOM changes arrive in bursts; the fields are looked up once per burst. This
+   * is the only place the whole document is queried, and it is never on the frame path.
+   */
+  function scheduleRescan(fromPageChange = false): void {
+    if (fromPageChange) pageChanged = true;
+    if (rescanTimer !== null) return;
+    rescanTimer = setTimeout(() => {
+      rescanTimer = null;
+      rescan();
+    }, RESCAN_DELAY_MS);
+  }
+
+  /**
+   * Scrolling asks for a rescan and nothing more: handed straight to `scheduleRescan`, the event
+   * would arrive as `fromPageChange` and make every scroll remeasure the spots. Named, because
+   * removing a listener needs the function that was added.
+   */
+  function onWindowScroll(): void {
+    scheduleRescan();
+  }
+
+  function setOverField(field: Element | null): void {
+    if (field === overField) return;
+    if (overField !== null) {
+      // Let the field it left keep its mic for a moment: the mic sits outside the field, so
+      // reaching for it means leaving the field first.
+      leavingField = overField;
+      if (lingerTimer !== null) clearTimeout(lingerTimer);
+      lingerTimer = setTimeout(() => {
+        lingerTimer = null;
+        leavingField = null;
+        rescan();
+      }, HOVER_LINGER_MS);
+    }
+    overField = field;
+    rescan();
+  }
+
+  function onPointerOver(e: Event): void {
+    const path = e.composedPath();
+    if (isOurs(path)) return; // our own mic or panel; the anchor knows the pointer is there
+    const under = path[0];
+    setOverField(under instanceof Element ? resolveTarget(under) : null);
+  }
+
+  function onPageChanged(records: MutationRecord[]): void {
+    const host = anchor.host;
+    // Our own host being added to <html> is not a reason to look at the page again.
+    if (host !== null && records.every((r) => r.target === host || host.contains(r.target))) return;
+    scheduleRescan();
+  }
+
+  function applyMicDisplay(next: MicDisplay): void {
+    micDisplay = next;
+    rescan();
+  }
+
+  void readMicDisplay(storage).then(applyMicDisplay);
+  const unwatchMicDisplay = watchMicDisplay(storage, applyMicDisplay);
+
   // Focus changes between two elements of the same shadow root are not visible from the
   // document (the event stops at the shadow boundary once target and relatedTarget retarget
   // to the same host), so while attached inside a shadow root we also listen on that root.
@@ -136,17 +311,24 @@ export function startContentScript(options: StartOptions = {}): ContentScript {
     return host !== null && path.includes(host);
   }
 
+  /** The panel is created with the first mic; hook its buttons up to the controller. */
+  function wireUi(): void {
+    if (anchor.ui !== null) controller.wire(anchor.ui);
+  }
+
   function follow(field: Element | null): void {
     if (field === null) {
       anchor.detach();
       setExtraRoot(null);
+      // C7g: the field that lost the caret may still deserve a mic (or may not).
+      if (micDisplay === "hover") rescan();
       return;
     }
     anchor.attach(field);
-    // The panel is created on the first attach; hook its buttons up to the controller.
-    if (anchor.ui !== null) controller.wire(anchor.ui);
+    wireUi();
     const root = field.getRootNode();
     setExtraRoot(root instanceof ShadowRoot ? root : null);
+    if (micDisplay === "hover") rescan();
   }
 
   function onFocusIn(e: Event): void {
@@ -184,9 +366,29 @@ export function startContentScript(options: StartOptions = {}): ContentScript {
 
   doc.addEventListener("focusin", onFocusIn, true);
   doc.addEventListener("focusout", onFocusOut, true);
+  // C7g: where the pointer is decides which field has a mic with the `hover` setting, and with
+  // `all` it is what gives a mic to a field that did not fit under the cap.
+  doc.addEventListener("pointerover", onPointerOver, true);
+
+  // C7g: fields appear and disappear (a dialog opens, a list loads). Watching the page is how
+  // the mics follow that without the frame loop ever looking for fields itself.
+  fieldObserver = new MutationObserver(onPageChanged);
+  fieldObserver.observe(doc.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: [...TARGET_DEFINING_ATTRIBUTES],
+  });
+  // Scrolling and resizing change which fields are on screen. While mics exist the anchor is
+  // already listening for both and says so through onViewportChange, so the only listener
+  // added here is for the case where there are no mics yet (every field below the fold):
+  // capture on the window sees scrolling in any container, the same as capture on the document.
+  doc.defaultView?.addEventListener("scroll", onWindowScroll, { capture: true, passive: true });
 
   // The script may be injected after a field already has focus (document_idle).
   follow(resolveTarget(deepActiveElement(doc)));
+  // ... and the visible fields get their mics without anyone touching them (C7g).
+  rescan();
 
   return {
     anchor,
@@ -194,12 +396,25 @@ export function startContentScript(options: StartOptions = {}): ContentScript {
     get trigger() {
       return trigger;
     },
+    get micDisplay() {
+      return micDisplay;
+    },
+    rescan,
     stop(): void {
       doc.removeEventListener("focusin", onFocusIn, true);
       doc.removeEventListener("focusout", onFocusOut, true);
+      doc.removeEventListener("pointerover", onPointerOver, true);
+      doc.defaultView?.removeEventListener("scroll", onWindowScroll, { capture: true });
+      fieldObserver?.disconnect();
+      fieldObserver = null;
+      if (rescanTimer !== null) clearTimeout(rescanTimer);
+      if (lingerTimer !== null) clearTimeout(lingerTimer);
+      rescanTimer = null;
+      lingerTimer = null;
       setExtraRoot(null);
       unwatchTrigger();
       unwatchOffsets();
+      unwatchMicDisplay();
       controller.dispose();
       anchor.destroy();
     },

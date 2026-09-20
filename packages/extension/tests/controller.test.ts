@@ -651,6 +651,58 @@ describe("[C7e] the `hover` setting: a session nobody pressed a button for", () 
   });
 });
 
+describe("[C7g] a field that was never clicked", () => {
+  /** Press the thin mic beside the field, the way C7e wired it (no focus, no click on the field). */
+  function pressFieldMic(s: ContentScript): void {
+    pick(root(s), ".mic").dispatchEvent(new PointerEvent("pointerup", { pointerType: "mouse", bubbles: true }));
+  }
+
+  it("[10] the words go after the text that is already there, not in front of it", async () => {
+    const s = start();
+    const field = pick<HTMLInputElement>(mount(`<input id="f" type="text" value="already here">`), "#f");
+    expect(document.activeElement).not.toBe(field); // nobody ever clicked it
+
+    s.anchor.attach(field); // what hovering its mic does
+    pressFieldMic(s);
+    await flush(vi);
+    expect(s.controller.phase).toBe("recording");
+    expect(document.activeElement).toBe(field); // it was given the caret to write at
+    expect(field.selectionStart).toBe("already here".length);
+
+    const sr = FakeSpeechRecognition.started();
+    sr.fireStart();
+    sr.fireResult("and more", true);
+    await flush(vi);
+    // vtype writes at the caret and invents no spacing of its own (C7d); the point here is
+    // that the caret was at the end, so nothing was pushed in front of the existing text.
+    expect(field.value).toBe("already hereand more");
+  });
+
+  it("[10] a textarea that was never clicked is written at its end too", async () => {
+    const s = start();
+    const field = pick<HTMLTextAreaElement>(mount(`<textarea id="f">first line</textarea>`), "#f");
+    s.anchor.attach(field);
+    pressFieldMic(s);
+    await flush(vi);
+    const sr = FakeSpeechRecognition.started();
+    sr.fireStart();
+    sr.fireResult("second", true);
+    await flush(vi);
+    expect(field.value).toBe("first linesecond");
+  });
+
+  it("[10] a field the user did click keeps the caret where they put it", async () => {
+    const s = start();
+    const field = pick<HTMLInputElement>(mount(`<input id="f" type="text" value="HelloWorld">`), "#f");
+    field.focus();
+    field.setSelectionRange(5, 5); // the user's caret, in the middle
+    const sr = await beginRecording(s);
+    sr.fireResult("there", true);
+    await flush(vi);
+    expect(field.value).toBe("HellothereWorld");
+  });
+});
+
 describe("silence and stop timeout", () => {
   it("a session that ends in silence leaves the text in the field and says so", async () => {
     const s = start();

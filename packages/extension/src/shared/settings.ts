@@ -17,6 +17,15 @@ export type TriggerMode =
 
 export const DEFAULT_TRIGGER: TriggerMode = "click";
 
+/** Which fields carry a mic (C7g). */
+export type MicDisplay =
+  /** Every target field that is visible on screen, without touching anything. */
+  | "all"
+  /** Only the field the pointer is on, and the field that has the caret. */
+  | "hover";
+
+export const DEFAULT_MIC_DISPLAY: MicDisplay = "all";
+
 /**
  * How far the thin mic was dragged from where vtype puts it, in CSS pixels (C7f). Kept as a
  * distance from the field, never as an absolute position: the field moves with the page.
@@ -41,6 +50,7 @@ export const MAX_OFFSET_ORIGINS = 50;
 /** Key inside `chrome.storage.sync`. */
 export const TRIGGER_KEY = "trigger";
 export const OFFSETS_KEY = "micOffsets";
+export const MIC_DISPLAY_KEY = "micDisplay";
 /** The area the setting lives in (it follows the user's Chrome profile). */
 export const SETTINGS_AREA = "sync";
 
@@ -67,6 +77,10 @@ export interface StorageView {
 
 export function isTriggerMode(value: unknown): value is TriggerMode {
   return value === "click" || value === "hover";
+}
+
+export function isMicDisplay(value: unknown): value is MicDisplay {
+  return value === "all" || value === "hover";
 }
 
 function isFinitePixel(value: unknown): value is number {
@@ -138,6 +152,30 @@ export async function writeTrigger(storage: StorageView | null, mode: TriggerMod
   }
 }
 
+/** The stored mic display, or the default when it is unset, unreadable or unknown (C7g). */
+export async function readMicDisplay(storage: StorageView | null): Promise<MicDisplay> {
+  const area = storage?.sync;
+  if (area === undefined) return DEFAULT_MIC_DISPLAY;
+  try {
+    const stored = await area.get([MIC_DISPLAY_KEY]);
+    const value = stored?.[MIC_DISPLAY_KEY];
+    return isMicDisplay(value) ? value : DEFAULT_MIC_DISPLAY;
+  } catch {
+    return DEFAULT_MIC_DISPLAY;
+  }
+}
+
+export async function writeMicDisplay(storage: StorageView | null, display: MicDisplay): Promise<boolean> {
+  const area = storage?.sync;
+  if (area === undefined) return false;
+  try {
+    await area.set({ [MIC_DISPLAY_KEY]: display });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** The stored offsets, or none at all when they cannot be read. */
 export async function readOffsets(storage: StorageView | null): Promise<MicOffsets> {
   const area = storage?.sync;
@@ -184,6 +222,13 @@ export async function clearOffsets(storage: StorageView | null): Promise<number>
 export function watchTrigger(storage: StorageView | null, onChange: (mode: TriggerMode) => void): () => void {
   // A cleared setting means "back to the default", not "keep the old mode".
   return watchKey(storage, TRIGGER_KEY, (value) => onChange(isTriggerMode(value) ? value : DEFAULT_TRIGGER));
+}
+
+/** The same for which fields carry a mic (C7g). */
+export function watchMicDisplay(storage: StorageView | null, onChange: (display: MicDisplay) => void): () => void {
+  return watchKey(storage, MIC_DISPLAY_KEY, (value) =>
+    onChange(isMicDisplay(value) ? value : DEFAULT_MIC_DISPLAY),
+  );
 }
 
 /** The same for the dragged positions: a reset in the options page arrives here. */

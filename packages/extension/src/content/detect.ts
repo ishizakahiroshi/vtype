@@ -103,6 +103,58 @@ export function isTargetField(el: Element | null): el is TargetField {
   return el !== null && resolveTarget(el) === el;
 }
 
+// ---- finding the fields on the page (C7g) -------------------------------------------------
+
+/**
+ * Elements worth asking `resolveTarget` about. Kept as one selector so the scan is a single
+ * query: it runs on a timer and on DOM changes, never per frame.
+ */
+export const TARGET_SELECTOR = "input, textarea, [contenteditable]";
+
+/**
+ * A mic is only shown on a field big enough to have one sitting next to it. Below this a field
+ * is a filter box in a toolbar, a one-character cell in a grid or a hidden 1x1 input, and an
+ * icon beside it would be noise. Chosen as: narrower than about eight characters, or shorter
+ * than a single line of text.
+ */
+export const MIN_FIELD_WIDTH_PX = 60;
+export const MIN_FIELD_HEIGHT_PX = 18;
+
+/** Whether the field is big enough and at least partly inside the window right now. */
+export function isFieldOnScreen(field: Element, doc: Document): boolean {
+  const r = field.getBoundingClientRect();
+  if (r.width < MIN_FIELD_WIDTH_PX || r.height < MIN_FIELD_HEIGHT_PX) return false;
+  const view = doc.defaultView;
+  const vw = doc.documentElement.clientWidth || (view?.innerWidth ?? 0);
+  const vh = doc.documentElement.clientHeight || (view?.innerHeight ?? 0);
+  if (vw <= 0 || vh <= 0) return true; // no measurable window: do not hide everything
+  return r.right > 0 && r.bottom > 0 && r.left < vw && r.top < vh;
+}
+
+/**
+ * The fields that should carry a mic: targets (so no password field, no read-only field), big
+ * enough, on screen, in document order, at most `limit` of them. The limit is what keeps a
+ * page with fifty fields from becoming a wall of icons — and what keeps the per-frame position
+ * tracking constant, since only the mics that exist are measured.
+ *
+ * Fields inside an open shadow root are not found here (a query does not cross that boundary);
+ * they still get a mic when they are focused or hovered, which is how they got one before C7g.
+ */
+export function visibleTargetFields(doc: Document, limit: number): TargetField[] {
+  const found: TargetField[] = [];
+  if (limit <= 0) return found;
+  const seen = new Set<Element>();
+  for (const el of doc.querySelectorAll(TARGET_SELECTOR)) {
+    const field = resolveTarget(el);
+    if (field === null || seen.has(field)) continue;
+    seen.add(field);
+    if (!isFieldOnScreen(field, doc)) continue;
+    found.push(field);
+    if (found.length >= limit) break;
+  }
+  return found;
+}
+
 /** `document.activeElement`, descending into open shadow roots. */
 export function deepActiveElement(doc: Document): Element | null {
   let active: Element | null = doc.activeElement;

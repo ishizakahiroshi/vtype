@@ -1,8 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLOSE_DELAY_MS, HOST_TAG, MIC_GAP_PX, MIC_SIZE_PX, OPEN_DELAY_MS } from "../src/content/anchor";
-import { startContentScript, type ContentScript } from "../src/content/index";
+import {
+  HOVER_LINGER_MS,
+  MAX_MICS,
+  RESCAN_DELAY_MS,
+  startContentScript,
+  type ContentScript,
+} from "../src/content/index";
 import {
   MAX_OFFSET_ORIGINS,
+  MIC_DISPLAY_KEY,
   OFFSETS_KEY,
   SETTINGS_AREA,
   TRIGGER_KEY,
@@ -1071,6 +1078,295 @@ describe("[C7f] the mic can be dragged aside", () => {
     await settle();
     expect(s.anchor.offset).toEqual({ x: 0, y: 0 });
     expect(micPosition(s)).toEqual(DEFAULT_MIC);
+  });
+});
+
+// ---- C7g: a mic on the fields themselves ------------------------------------------------
+// Fields carry a mic without being clicked. Which ones is the `micDisplay` setting: `all` (the
+// default) or `hover`. The mics live in one shadow root and share one panel, which sits in the
+// box of whichever field is current.
+
+/** Every mic that is on screen right now (a pooled or scrolled-out box is hidden). */
+function shownBoxes(s: ContentScript): HTMLElement[] {
+  const root = s.anchor.root;
+  if (root === null) return [];
+  return [...root.querySelectorAll<HTMLElement>(".box")].filter((el) => !el.hidden);
+}
+
+/** Where place() puts the mic of a field with this box: enough to tell the mics apart. */
+function micTopOf(b: Box): string {
+  return `${Math.round(b.top + (Math.min(b.height, 36) - MIC_SIZE_PX) / 2)}px`;
+}
+
+function hasMicFor(s: ContentScript, b: Box): boolean {
+  return shownBoxes(s).some((el) => el.style.top === micTopOf(b));
+}
+
+function micBoxFor(s: ContentScript, b: Box): HTMLElement {
+  const found = shownBoxes(s).find((el) => el.style.top === micTopOf(b));
+  if (found === undefined) throw new Error(`no mic is shown for the field at ${micTopOf(b)}`);
+  return found;
+}
+
+/** The pointer moves onto a page element (what the browser reports as it travels). */
+function pointerOver(el: Element): void {
+  el.dispatchEvent(new PointerEvent("pointerover", { pointerType: "mouse", bubbles: true, composed: true }));
+}
+
+const FIELD_A: Box = { left: 100, top: 50, width: 200, height: 30 };
+const FIELD_B: Box = { left: 100, top: 150, width: 200, height: 30 };
+const FIELD_C: Box = { left: 100, top: 250, width: 200, height: 30 };
+
+describe("[C7g C1] several mics share one panel", () => {
+  it("two fields each get their own mic, and there is still only one panel", () => {
+    const s = start();
+    const page = mount(`<input id="a" type="text"><input id="b" type="text">`);
+    const a = pick(page, "#a");
+    const b = pick(page, "#b");
+    setBox(a, FIELD_A);
+    setBox(b, FIELD_B);
+    s.anchor.setMics([a, b]);
+    expect(shownBoxes(s)).toHaveLength(2);
+    expect(hasMicFor(s, FIELD_A)).toBe(true);
+    expect(hasMicFor(s, FIELD_B)).toBe(true);
+    expect((s.anchor.root as ShadowRoot).querySelectorAll(".panel")).toHaveLength(1);
+  });
+
+  it("the panel opens at the mic the pointer is on, and follows it to another one", () => {
+    const s = start();
+    const page = mount(`<input id="a" type="text"><input id="b" type="text">`);
+    const a = pick(page, "#a");
+    const b = pick(page, "#b");
+    setBox(a, FIELD_A);
+    setBox(b, FIELD_B);
+    s.anchor.setMics([a, b]);
+
+    pointer(micBoxFor(s, FIELD_A), "pointerenter", "mouse");
+    vi.advanceTimersByTime(OPEN_DELAY_MS);
+    expect(s.anchor.target).toBe(a);
+    expect(s.anchor.isOpen).toBe(true);
+    expect(s.anchor.panel?.parentElement).toBe(micBoxFor(s, FIELD_A));
+
+    pointer(micBoxFor(s, FIELD_A), "pointerleave", "mouse");
+    pointer(micBoxFor(s, FIELD_B), "pointerenter", "mouse");
+    expect(s.anchor.target).toBe(b); // the current field moves at once
+    expect(s.anchor.panel?.parentElement).toBe(micBoxFor(s, FIELD_B));
+    vi.advanceTimersByTime(OPEN_DELAY_MS);
+    expect(s.anchor.isOpen).toBe(true);
+  });
+
+  it("a field that loses its mic gives its box back instead of leaving it behind", () => {
+    const s = start();
+    const page = mount(`<input id="a" type="text"><input id="b" type="text">`);
+    const a = pick(page, "#a");
+    const b = pick(page, "#b");
+    setBox(a, FIELD_A);
+    setBox(b, FIELD_B);
+    s.anchor.setMics([a, b]);
+    s.anchor.setMics([b]);
+    expect(shownBoxes(s)).toHaveLength(1);
+    expect(hasMicFor(s, FIELD_B)).toBe(true);
+    expect(s.anchor.fields).toEqual([b]);
+  });
+});
+
+describe("[C7g] which fields get a mic", () => {
+  interface Page {
+    s: ContentScript;
+    rt: StubRuntime;
+    fields: Record<string, HTMLElement>;
+  }
+
+  /** Mount the fields first, then start: the script looks the page over as it starts. */
+  function startOn(html: string, layout: Record<string, Box>, storage: StorageView | null = null): Page {
+    const page = mount(html);
+    const fields: Record<string, HTMLElement> = {};
+    for (const [id, b] of Object.entries(layout)) {
+      const el = pick<HTMLElement>(page, `#${id}`);
+      setBox(el, b);
+      fields[id] = el;
+    }
+    const rt = stubRuntime();
+    const s = start({ runtime: rt.runtime, language: "en", storage, origin: ORIGIN });
+    return { s, rt, fields };
+  }
+
+  it("[1] by default every visible field gets a mic, with nobody clicking anything", () => {
+    const { s } = startOn(
+      `<input id="a" type="text"><textarea id="b"></textarea><div id="c" contenteditable="true"></div>`,
+      { a: FIELD_A, b: FIELD_B, c: FIELD_C },
+    );
+    expect(s.micDisplay).toBe("all");
+    expect(shownBoxes(s)).toHaveLength(3);
+    expect(document.activeElement).not.toBe(s.anchor.target); // nothing was focused
+  });
+
+  it("[2] password, read-only and disabled fields get none", () => {
+    const { s } = startOn(
+      `<input id="a" type="text"><input id="pw" type="password"><input id="ro" type="text" readonly><input id="off" type="text" disabled><input id="np" type="text" autocomplete="new-password">`,
+      { a: FIELD_A, pw: FIELD_B, ro: FIELD_C, off: { ...FIELD_A, top: 350 }, np: { ...FIELD_A, top: 450 } },
+    );
+    expect(shownBoxes(s)).toHaveLength(1);
+    expect(hasMicFor(s, FIELD_A)).toBe(true);
+  });
+
+  it("[2] a field too small for a mic gets none", () => {
+    const { s } = startOn(`<input id="a" type="text"><input id="tiny" type="text">`, {
+      a: FIELD_A,
+      tiny: { left: 10, top: 400, width: 30, height: 12 },
+    });
+    expect(shownBoxes(s)).toHaveLength(1);
+    expect(hasMicFor(s, FIELD_A)).toBe(true);
+  });
+
+  it("[3] a field below the window gets none, and gets one when it is scrolled in", () => {
+    const vh = document.documentElement.clientHeight || window.innerHeight;
+    const below: Box = { left: 100, top: vh + 200, width: 200, height: 30 };
+    const { s, fields } = startOn(`<input id="a" type="text"><input id="far" type="text">`, {
+      a: FIELD_A,
+      far: below,
+    });
+    expect(shownBoxes(s)).toHaveLength(1);
+
+    setBox(fields.far as Element, FIELD_C); // the page scrolled it into view
+    document.dispatchEvent(new Event("scroll"));
+    vi.advanceTimersByTime(RESCAN_DELAY_MS);
+    expect(shownBoxes(s)).toHaveLength(2);
+    expect(hasMicFor(s, FIELD_C)).toBe(true);
+  });
+
+  it("[4] a page with more fields than the cap shows the cap, and the rest on hover", () => {
+    const count = MAX_MICS + 3;
+    const html = Array.from({ length: count }, (_, i) => `<input id="f${i}" type="text">`).join("");
+    const layout: Record<string, Box> = {};
+    for (let i = 0; i < count; i++) layout[`f${i}`] = { left: 100, top: 20 + i * 40, width: 200, height: 30 };
+    const { s, fields } = startOn(html, layout);
+    expect(shownBoxes(s)).toHaveLength(MAX_MICS);
+    expect(hasMicFor(s, layout[`f${count - 1}`] as Box)).toBe(false);
+
+    // the pointer reaches one of the fields that did not fit
+    pointerOver(fields[`f${count - 1}`] as Element);
+    expect(hasMicFor(s, layout[`f${count - 1}`] as Box)).toBe(true);
+    expect(shownBoxes(s).length).toBeLessThanOrEqual(MAX_MICS);
+  });
+
+  it("[11] fields added and removed later are followed", async () => {
+    const { s, fields } = startOn(`<input id="a" type="text">`, { a: FIELD_A });
+    expect(shownBoxes(s)).toHaveLength(1);
+
+    const added = document.createElement("input");
+    added.type = "text";
+    setBox(added, FIELD_B);
+    (fields.a as HTMLElement).parentElement?.append(added);
+    await Promise.resolve(); // MutationObserver callbacks are microtasks
+    vi.advanceTimersByTime(RESCAN_DELAY_MS);
+    expect(shownBoxes(s)).toHaveLength(2);
+
+    added.remove();
+    await Promise.resolve();
+    vi.advanceTimersByTime(RESCAN_DELAY_MS);
+    nextFrames();
+    expect(shownBoxes(s)).toHaveLength(1);
+    expect(hasMicFor(s, FIELD_A)).toBe(true);
+  });
+
+  it("[12] a storage that cannot be read still shows every field", async () => {
+    const { s } = startOn(`<input id="a" type="text"><input id="b" type="text">`, { a: FIELD_A, b: FIELD_B }, stubStorage({}, true).view);
+    await settle();
+    expect(s.micDisplay).toBe("all");
+    expect(shownBoxes(s)).toHaveLength(2);
+  });
+
+  it("[5] the `hover` setting takes effect without a reload, and back again", async () => {
+    const store = stubStorage();
+    const { s, fields } = startOn(`<input id="a" type="text"><input id="b" type="text">`, { a: FIELD_A, b: FIELD_B }, store.view);
+    await settle();
+    expect(shownBoxes(s)).toHaveLength(2);
+
+    store.change(MIC_DISPLAY_KEY, "hover");
+    expect(s.micDisplay).toBe("hover");
+    expect(shownBoxes(s)).toHaveLength(0); // nothing hovered, nothing focused
+
+    // [6] the pointer alone is enough: no click
+    pointerOver(fields.a as Element);
+    expect(shownBoxes(s)).toHaveLength(1);
+    expect(hasMicFor(s, FIELD_A)).toBe(true);
+
+    store.change(MIC_DISPLAY_KEY, "all");
+    expect(shownBoxes(s)).toHaveLength(2);
+  });
+
+  it("[5] the focused field keeps a mic in the `hover` setting", async () => {
+    const store = stubStorage({ [MIC_DISPLAY_KEY]: "hover" });
+    const { s, fields } = startOn(`<input id="a" type="text"><input id="b" type="text">`, { a: FIELD_A, b: FIELD_B }, store.view);
+    await settle();
+    expect(shownBoxes(s)).toHaveLength(0);
+    (fields.b as HTMLElement).focus();
+    expect(hasMicFor(s, FIELD_B)).toBe(true);
+    expect(shownBoxes(s)).toHaveLength(1);
+  });
+
+  it("[7] the mic goes when the pointer leaves, but not while the panel is open", async () => {
+    const store = stubStorage({ [MIC_DISPLAY_KEY]: "hover" });
+    const { s, fields } = startOn(`<input id="a" type="text"><button id="away">x</button>`, { a: FIELD_A }, store.view);
+    await settle();
+
+    pointerOver(fields.a as Element);
+    expect(hasMicFor(s, FIELD_A)).toBe(true);
+    pointerOver(pick(document.body, "#away")); // the pointer moves off the field
+    expect(hasMicFor(s, FIELD_A)).toBe(true); // it lingers: the mic is outside the field
+    vi.advanceTimersByTime(HOVER_LINGER_MS);
+    expect(shownBoxes(s)).toHaveLength(0);
+
+    // now with the panel open it stays
+    pointerOver(fields.a as Element);
+    pointer(micBoxFor(s, FIELD_A), "pointerenter", "mouse");
+    vi.advanceTimersByTime(OPEN_DELAY_MS);
+    expect(s.anchor.isOpen).toBe(true);
+    pointerOver(pick(document.body, "#away"));
+    vi.advanceTimersByTime(HOVER_LINGER_MS);
+    expect(hasMicFor(s, FIELD_A)).toBe(true);
+  });
+
+  it("[7] a recording keeps the mic of the field it is writing into", async () => {
+    const store = stubStorage({ [MIC_DISPLAY_KEY]: "hover" });
+    const { s, rt, fields } = startOn(`<input id="a" type="text"><button id="away">x</button>`, { a: FIELD_A }, store.view);
+    await settle();
+    pointerOver(fields.a as Element);
+    pointer(micBoxFor(s, FIELD_A).querySelector(".mic") as Element, "pointerup", "mouse");
+    expect(sentOfType(rt, "start")).toHaveLength(1);
+    expect(s.controller.phase).toBe("recording");
+
+    pointerOver(pick(document.body, "#away"));
+    vi.advanceTimersByTime(HOVER_LINGER_MS * 2);
+    expect(hasMicFor(s, FIELD_A)).toBe(true);
+    expect(s.controller.phase).toBe("recording");
+  });
+
+  it("[8] the panel opens at the mic the pointer is on", () => {
+    const { s, fields } = startOn(`<input id="a" type="text"><input id="b" type="text">`, { a: FIELD_A, b: FIELD_B });
+    pointer(micBoxFor(s, FIELD_B), "pointerenter", "mouse");
+    vi.advanceTimersByTime(OPEN_DELAY_MS);
+    expect(s.anchor.target).toBe(fields.b);
+    expect(s.anchor.panel?.parentElement).toBe(micBoxFor(s, FIELD_B));
+  });
+
+  it("[9] a running recording does not move to another field's mic", () => {
+    const { s, rt, fields } = startOn(`<input id="a" type="text"><input id="b" type="text">`, { a: FIELD_A, b: FIELD_B });
+    const micA = micBoxFor(s, FIELD_A).querySelector(".mic") as HTMLElement;
+    pointer(micA, "pointerup", "mouse"); // press the mic of field A
+    expect(s.anchor.target).toBe(fields.a);
+    expect(s.controller.phase).toBe("recording");
+    expect(micA.classList.contains("recording")).toBe(true);
+
+    const boxB = micBoxFor(s, FIELD_B);
+    pointer(boxB, "pointerenter", "mouse");
+    vi.advanceTimersByTime(OPEN_DELAY_MS * 2);
+    expect(s.anchor.target).toBe(fields.a); // still the field being dictated into
+    expect(s.anchor.panel?.parentElement).toBe(micBoxFor(s, FIELD_A));
+    expect((boxB.querySelector(".mic") as HTMLElement).classList.contains("recording")).toBe(false);
+    expect(micA.classList.contains("recording")).toBe(true);
+    expect(sentOfType(rt, "start")).toHaveLength(1);
   });
 });
 

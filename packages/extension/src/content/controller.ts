@@ -13,7 +13,7 @@
 //   runs in the offscreen document, reached through the background (shared/messages.ts).
 
 import type { Anchor } from "./anchor";
-import { resolveTarget } from "./detect";
+import { deepActiveElement, resolveTarget } from "./detect";
 import { beginLiveInsert, insertAtCursor, type InsertResult, type LiveInsert, type LiveResult } from "./insert";
 import { submitFrom } from "./submit";
 import type { Panel } from "../ui/panel";
@@ -157,6 +157,42 @@ export function separatorBefore(previous: string, next: string): string {
   return /[A-Za-z0-9.,!?;:)'"]$/.test(previous) && /^[A-Za-z0-9('"]/.test(trimmed) ? " " : "";
 }
 
+/**
+ * C7g: since a mic can be pressed on a field that was never clicked, the field may not have
+ * the caret at all. An unfocused `input` reports `selectionStart` 0, so what is dictated would
+ * be pushed in front of the text that is already there. Focus it — without scrolling the page
+ * out from under the user — and put the caret after the existing text.
+ *
+ * Does nothing when the field already has focus: then the caret is where the user put it, and
+ * C7d's "insert at the caret" is exactly what is wanted.
+ */
+export function focusForDictation(field: Element): void {
+  const doc = field.ownerDocument;
+  if (doc === null || deepActiveElement(doc) === field) return;
+  try {
+    if (field instanceof HTMLElement) field.focus({ preventScroll: true });
+  } catch {
+    return; // a field that refuses focus is still dictated into, at whatever caret it reports
+  }
+  const editable = field as { value?: unknown; setSelectionRange?: (a: number, b: number) => void };
+  try {
+    if (typeof editable.value === "string" && typeof editable.setSelectionRange === "function") {
+      editable.setSelectionRange(editable.value.length, editable.value.length);
+      return;
+    }
+    const selection = doc.defaultView?.getSelection?.();
+    if (selection === null || selection === undefined) return;
+    const range = doc.createRange();
+    range.selectNodeContents(field);
+    range.collapse(false); // after the last child: the end of what is already written
+    selection.removeAllRanges();
+    selection.addRange(range);
+  } catch {
+    // Some inputs throw on setSelectionRange, and a detached selection can refuse a range.
+    // Neither is worth refusing to record over.
+  }
+}
+
 let sessionCounter = 0;
 function newSessionId(): string {
   sessionCounter += 1;
@@ -262,6 +298,8 @@ export function createController(options: ControllerOptions): Controller {
     sessionId = id;
     field = target;
     phase = "recording";
+    // C7g: give the field the caret first if it has none, or the caret reads as position 0.
+    focusForDictation(target);
     // C7d: from this moment what is heard goes into the field itself, at the caret it has now.
     live = beginLiveInsert(target);
     wroteIntoField = false;
