@@ -20,6 +20,8 @@ interface Labels {
   send: string;
   micStart: string;
   micStop: string;
+  /** C9: switch vtype off on this site, from the panel itself. */
+  siteOff: string;
 }
 
 const LABELS: Record<"en" | "ja", Labels> = {
@@ -30,6 +32,7 @@ const LABELS: Record<"en" | "ja", Labels> = {
     send: "Send",
     micStart: "Start voice input",
     micStop: "Stop voice input",
+    siteOff: "Don't use vtype on this site",
   },
   ja: {
     trigger: "vtype 音声入力",
@@ -38,6 +41,7 @@ const LABELS: Record<"en" | "ja", Labels> = {
     send: "送信",
     micStart: "音声入力を開始",
     micStop: "音声入力を停止",
+    siteOff: "このサイトでは使わない",
   },
 };
 
@@ -125,6 +129,22 @@ export function createTrigger(doc: Document): HTMLButtonElement {
   b.setAttribute("aria-haspopup", "true");
   b.setAttribute("aria-expanded", "false");
   b.append(micIcon(doc));
+  return b;
+}
+
+/**
+ * C9: the one line in the panel that switches vtype off on this site. Written as a small text
+ * button rather than a fourth icon: the toolbar row is what the user reaches for while
+ * dictating, and this is the opposite of that — pressed once, and then never again on this
+ * site. The way back is the toolbar icon of the extension (the panel is gone by then).
+ */
+export function createSiteOffButton(doc: Document): HTMLButtonElement {
+  const labels = currentLabels(doc);
+  const b = doc.createElement("button");
+  b.type = "button";
+  b.className = "site-off";
+  b.textContent = labels.siteOff;
+  b.title = labels.siteOff;
   return b;
 }
 

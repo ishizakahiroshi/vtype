@@ -206,6 +206,31 @@
   outline-offset: 1px;
 }
 
+/* C9: "don't use vtype on this site" — a quiet line, not a fourth icon */
+.site-off {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  align-self: flex-end;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--vt-muted);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.site-off:hover {
+  color: var(--vt-accent);
+}
+.site-off:focus-visible {
+  outline: 2px solid var(--vt-accent);
+  outline-offset: 1px;
+}
+
 /* ---- toolbar: × / send / mic (many-ai-cli order) --------------------------------------- */
 
 .toolbar {

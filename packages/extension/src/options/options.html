@@ -15,6 +15,14 @@
   .choice { margin: 12px 0; }
   .choice label { font-weight: 600; cursor: pointer; }
   .choice .hint { margin: 2px 0 0 24px; font-weight: 400; color: #475569; }
+  #site-form { display: flex; gap: 8px; margin: 12px 0; }
+  #site-input { flex: 1 1 auto; min-width: 0; font: inherit; padding: 7px 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: inherit; }
+  #site-list { list-style: none; margin: 12px 0 0; padding: 0; }
+  #site-list li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid #e2e8f0; }
+  #site-list .site { flex: 1 1 auto; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  #site-list button { padding: 4px 10px; font-size: 13px; background: transparent; color: #dc2626; border: 1px solid #cbd5e1; }
+  #site-list button:hover { background: #fee2e2; }
+  #site-empty { color: #475569; }
   #status { margin-top: 16px; font-weight: 600; min-height: 1.6em; }
   #status.ok { color: #16a34a; }
   #status.err { color: #dc2626; }
@@ -22,6 +30,11 @@
     body { background: #0e0f12; color: #e2e8f0; }
     fieldset { border-color: #334155; }
     .choice .hint { color: #94a3b8; }
+    #site-input { background: #16181d; border-color: #334155; }
+    #site-list li { border-top-color: #334155; }
+    #site-list button { border-color: #334155; color: #f87171; }
+    #site-list button:hover { background: #3f1d1d; }
+    #site-empty { color: #94a3b8; }
   }
 </style>
 </head>
@@ -50,6 +63,15 @@
   <p class="hint" id="display-hover-hint"></p>
 </div>
 </fieldset>
+<h2 id="sites-title"></h2>
+<p id="sites-lead"></p>
+<form id="site-form">
+  <input id="site-input" type="text" autocomplete="off" spellcheck="false">
+  <button id="site-add" type="submit"></button>
+</form>
+<p id="site-empty"></p>
+<ul id="site-list"></ul>
+
 <h2 id="positions-title"></h2>
 <p id="positions-lead"></p>
 <p><button id="reset" type="button"></button></p>

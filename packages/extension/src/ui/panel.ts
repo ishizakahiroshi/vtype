@@ -5,13 +5,14 @@
 //   panel.onMic   ... C7b: start / stop recognition
 //   panel.onSend  ... C8: submit the page's form
 //   panel.onClear ... notified after × has cleared the field (× itself calls C6's clearField)
+//   panel.onSiteOff ... C9: "don't use vtype on this site" was pressed
 // State API for C7b: setState("idle" | "recording" | "processing"), setTranscript, setMessage.
 //
 // The field is only read (hasText) and listened to (input events, on its root node). It is
 // never written here except through clearField when the user presses ×.
 
 import { clearField, hasText } from "../content/clear";
-import { applyStateClass, createToolbar, type Toolbar, type UiState } from "./toolbar";
+import { applyStateClass, createSiteOffButton, createToolbar, type Toolbar, type UiState } from "./toolbar";
 import { createWaveform, type Waveform, type WaveformActivity } from "./waveform";
 
 export type { UiState } from "./toolbar";
@@ -38,6 +39,8 @@ export interface Panel {
   onMic: (() => void) | null;
   onSend: (() => void) | null;
   onClear: (() => void) | null;
+  /** C9: the user asked for vtype to stay off on this site. */
+  onSiteOff: (() => void) | null;
   setState(state: UiState): void;
   /** A recognition activity event arrived (C7c): moves the bars. */
   setActivity(kind: WaveformActivity): void;
@@ -54,6 +57,11 @@ export interface Panel {
    * changes when the panel moves to another field. The mic it leaves goes back to idle.
    */
   setTrigger(next: HTMLElement | null): void;
+  /**
+   * C9: whether the "don't use vtype on this site" line is offered. Hidden where pressing it
+   * could not be honoured (no chrome.storage to remember it in), so it never lies.
+   */
+  showSiteOff(show: boolean): void;
   /** Re-read whether the field has text (the anchor calls this when the panel opens). */
   refreshHasText(): void;
   /** Remove listeners on the page (on the bound field's root). */
@@ -87,7 +95,10 @@ export function createPanel(options: PanelOptions = {}): Panel {
   const waveform = createWaveform({ doc });
   waveform.element.hidden = true;
   const toolbar = createToolbar(doc);
-  element.append(waveform.element, transcript, message, toolbar.element);
+  // C9: last, and hidden until the content script says it can be honoured.
+  const siteOff = createSiteOffButton(doc);
+  siteOff.hidden = true;
+  element.append(waveform.element, transcript, message, toolbar.element, siteOff);
 
   let state: UiState = "idle";
   let field: Element | null = null;
@@ -106,6 +117,7 @@ export function createPanel(options: PanelOptions = {}): Panel {
     onMic: null,
     onSend: null,
     onClear: null,
+    onSiteOff: null,
     setState,
     setActivity(kind: WaveformActivity): void {
       waveform.setActivity(kind);
@@ -114,6 +126,9 @@ export function createPanel(options: PanelOptions = {}): Panel {
     setMessage,
     bindField,
     setTrigger,
+    showSiteOff(show: boolean): void {
+      siteOff.hidden = !show;
+    },
     refreshHasText,
     destroy(): void {
       bindField(null);
@@ -199,6 +214,9 @@ export function createPanel(options: PanelOptions = {}): Panel {
   });
   toolbar.micButton.addEventListener("click", () => {
     panel.onMic?.();
+  });
+  siteOff.addEventListener("click", () => {
+    panel.onSiteOff?.();
   });
 
   setState("idle");

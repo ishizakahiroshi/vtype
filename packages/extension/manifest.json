@@ -11,6 +11,9 @@
     "128": "icons/icon128.png"
   },
   "permissions": ["offscreen", "storage"],
+  "action": {
+    "default_title": "vtype: switch this site on or off"
+  },
   "background": {
     "service_worker": "background.js"
   },

@@ -5,7 +5,10 @@
 // - relays content -> offscreen (start / stop) and offscreen -> the owning tab *and frame*
 //   (tabs.sendMessage with {frameId}: the content script runs in every frame);
 // - tells the offscreen document to abort when the owning tab closes or cannot be reached;
-// - opens the microphone permission page on install and when a content script asks.
+// - opens the microphone permission page on install and when a content script asks;
+// - relays the toolbar icon to the tab's top frame (C9), which is where the site's own origin
+//   is known: vtype asks for neither host permissions nor `tabs`, so the background never
+//   learns what site a tab is on and does not need to.
 //
 // Session state (which session is current, who owns it) lives in the offscreen document, which
 // keeps running while Chrome stops and restarts this worker. Nothing here needs to survive a
@@ -14,9 +17,11 @@
 import {
   OFFSCREEN_PATH,
   PERMISSION_PATH,
+  TOGGLE_SITE_ACK,
   isContentToBackground,
   isOffscreenToBackground,
   type BackgroundToContent,
+  type BackgroundToContentToggleSite,
   type BackgroundToOffscreen,
   type Owner,
   type SessionEvent,
@@ -39,6 +44,12 @@ export interface BackgroundChrome {
     onMessage: ChromeEvent<(message: unknown, sender: MessageSender) => void>;
     onInstalled: ChromeEvent<(details: { reason: string }) => void>;
     getContexts?: (filter: { contextTypes: string[]; documentUrls?: string[] }) => Promise<unknown[]>;
+    /** C9: the way to the excluded list where no content script can be reached. */
+    openOptionsPage?: () => Promise<void>;
+  };
+  /** C9: the toolbar icon. Absent in older tests and in a browser without `action`. */
+  action?: {
+    onClicked: ChromeEvent<(tab: { id?: number }) => void>;
   };
   tabs: {
     sendMessage(tabId: number, message: unknown, options?: { frameId?: number }): Promise<unknown>;
@@ -164,6 +175,38 @@ export function createBackground(chrome: BackgroundChrome): Background {
         if (event.kind !== "ended") void toOffscreen({ target: "offscreen", type: "abort", sessionId }).catch(() => undefined);
       });
     }
+  });
+
+  /**
+   * C9: the toolbar icon switches vtype off on the site in the tab, and on again. Sent to the
+   * top frame only: an iframe would answer for its own, different origin.
+   *
+   * Nothing answers on a page with no content script (a chrome:// page, or a tab opened before
+   * vtype was installed), and there the options page is the way to the list.
+   *
+   * The page answers with TOGGLE_SITE_ACK, and only that answer counts as delivered: a send
+   * that no listener answers is reported as a failure by Chrome even where it arrived, so
+   * without the answer the options page would open on every press.
+   */
+  function toggleSite(tabId: number): void {
+    const message: BackgroundToContentToggleSite = { target: "content", type: "toggle-site" };
+    void chrome.tabs
+      .sendMessage(tabId, message, { frameId: 0 })
+      .then((reply) => {
+        if (reply !== TOGGLE_SITE_ACK) openOptionsPage();
+      })
+      .catch(() => openOptionsPage());
+  }
+
+  /** Where the excluded list can be reached when no page answered for itself. */
+  function openOptionsPage(): void {
+    void chrome.runtime.openOptionsPage?.().catch(() => undefined);
+  }
+
+  chrome.action?.onClicked.addListener((tab) => {
+    const tabId = tab?.id;
+    if (tabId === undefined) return;
+    toggleSite(tabId);
   });
 
   chrome.tabs.onRemoved.addListener((tabId) => {

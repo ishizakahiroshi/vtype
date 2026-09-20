@@ -4,6 +4,11 @@
 // open page is already listening to (shared/settings.ts), so a change takes effect at once
 // without reloading anything.
 //
+// C9 adds the list of sites vtype stays off on. It is the one part of this page that is a
+// list rather than a choice, so it is also the one part that is rendered from what is stored
+// rather than only ticked: the entry that goes in is what the user typed, put into the shape
+// the content script matches on (`https://example.com` or `*.example.com`).
+//
 // Built and worded like the permission page (src/permission/): one classic bundle, an HTML
 // page with empty elements, and the text filled in here from the browser's language.
 
@@ -14,10 +19,17 @@ import {
   extensionStorage,
   isMicDisplay,
   isTriggerMode,
+  normalizeExclusion,
+  readExcludedSites,
   readMicDisplay,
   readTrigger,
+  watchExcludedSites,
+  withExcluded,
+  withoutExclusionEntry,
+  writeExcludedSites,
   writeMicDisplay,
   writeTrigger,
+  type ExcludedSites,
   type MicDisplay,
   type StorageView,
   type TriggerMode,
@@ -38,6 +50,16 @@ interface Texts {
   displayHoverHint: string;
   saved: string;
   failed: string;
+  sitesTitle: string;
+  sitesLead: string;
+  sitesPlaceholder: string;
+  sitesAdd: string;
+  sitesEmpty: string;
+  sitesRemove: string;
+  sitesAdded: (site: string) => string;
+  sitesRemoved: (site: string) => string;
+  sitesBadInput: string;
+  sitesFailed: string;
   positionsTitle: string;
   positionsLead: string;
   reset: string;
@@ -66,6 +88,17 @@ const TEXTS: Record<"en" | "ja", Texts> = {
       "A mic appears on the field the mouse is over, and on the field the caret is in. Moving away takes it back.",
     saved: "Saved.",
     failed: "Could not save the setting. vtype keeps starting when you press the mic.",
+    sitesTitle: "Sites vtype stays off on",
+    sitesLead:
+      "vtype is on everywhere by default. A site on this list gets no mic at all. You can also switch the site you are on off from the panel itself, and on again with the vtype button in the toolbar.",
+    sitesPlaceholder: "example.com or *.example.com",
+    sitesAdd: "Add",
+    sitesEmpty: "vtype is on everywhere: no site has been switched off.",
+    sitesRemove: "Switch back on",
+    sitesAdded: (site) => `vtype stays off on ${site}.`,
+    sitesRemoved: (site) => `vtype is on again on ${site}.`,
+    sitesBadInput: "That is not a site address. Write it like example.com, https://example.com or *.example.com.",
+    sitesFailed: "Could not save the list.",
     positionsTitle: "Where the mic sits",
     positionsLead:
       "You can drag the small mic aside on a site where it covers one of the site's own buttons. vtype remembers that for the site. This puts every site back to where vtype normally puts it.",
@@ -93,6 +126,17 @@ const TEXTS: Record<"en" | "ja", Texts> = {
       "マウスを乗せた欄と、カーソルがある欄にだけマイクが出ます。離れると消えます。",
     saved: "保存しました。",
     failed: "設定を保存できませんでした。マイクを押して始める動作のままになります。",
+    sitesTitle: "vtype を使わないサイト",
+    sitesLead:
+      "vtype は既定ですべてのサイトで動きます。ここに入れたサイトではマイクが一切出ません。今開いているサイトはパネルからも切れます。戻すときはツールバーの vtype のボタンを押してください。",
+    sitesPlaceholder: "example.com または *.example.com",
+    sitesAdd: "追加",
+    sitesEmpty: "切ったサイトはありません。すべてのサイトで動きます。",
+    sitesRemove: "また使う",
+    sitesAdded: (site) => `${site} では vtype を使いません。`,
+    sitesRemoved: (site) => `${site} で vtype をまた使います。`,
+    sitesBadInput: "サイトのアドレスとして読めません。example.com / https://example.com / *.example.com の形で書いてください。",
+    sitesFailed: "一覧を保存できませんでした。",
     positionsTitle: "マイクの位置",
     positionsLead:
       "サイト自身のボタンとマイクが重なる場合は、小さなマイクをドラッグしてずらせます。ずらした位置はそのサイトごとに覚えています。ここで全サイトぶんを元の位置に戻せます。",
@@ -138,6 +182,9 @@ export function initOptionsPage(options: OptionsPageOptions = {}): void {
   setText(doc, "display-all-hint", t.displayAllHint);
   setText(doc, "display-hover-label", t.displayHoverLabel);
   setText(doc, "display-hover-hint", t.displayHoverHint);
+  setText(doc, "sites-title", t.sitesTitle);
+  setText(doc, "sites-lead", t.sitesLead);
+  setText(doc, "site-add", t.sitesAdd);
   setText(doc, "positions-title", t.positionsTitle);
   setText(doc, "positions-lead", t.positionsLead);
   setText(doc, "reset", t.reset);
@@ -185,6 +232,70 @@ export function initOptionsPage(options: OptionsPageOptions = {}): void {
     readMicDisplay,
     writeMicDisplay,
   );
+
+  // ---- C9: the sites vtype stays off on --------------------------------------------------
+
+  const siteInput = doc.getElementById("site-input");
+  const siteList = doc.getElementById("site-list");
+  const siteEmpty = doc.getElementById("site-empty");
+  if (siteInput instanceof HTMLInputElement) siteInput.placeholder = t.sitesPlaceholder;
+
+  let sites: ExcludedSites = [];
+
+  function renderSites(next: ExcludedSites): void {
+    sites = next;
+    if (siteEmpty !== null) {
+      siteEmpty.textContent = t.sitesEmpty;
+      siteEmpty.hidden = next.length > 0;
+    }
+    if (siteList === null) return;
+    siteList.replaceChildren();
+    for (const site of next) {
+      const row = doc.createElement("li");
+      const label = doc.createElement("span");
+      label.className = "site";
+      label.textContent = site;
+      const remove = doc.createElement("button");
+      remove.type = "button";
+      remove.textContent = t.sitesRemove;
+      remove.addEventListener("click", () => {
+        void save(withoutExclusionEntry(sites, site), t.sitesRemoved(site));
+      });
+      row.append(label, remove);
+      siteList.append(row);
+    }
+  }
+
+  /** Store the list and say what happened. The list on screen only follows a write that went through. */
+  async function save(next: ExcludedSites, message: string): Promise<void> {
+    const ok = await writeExcludedSites(storage, next);
+    if (!ok) {
+      // Nothing was stored, so the page must not show a list the extension has not got.
+      setText(doc, "status", t.sitesFailed, "err");
+      return;
+    }
+    renderSites(next);
+    setText(doc, "status", message, "ok");
+  }
+
+  renderSites([]);
+  void readExcludedSites(storage).then(renderSites);
+  // Another tab, another device, or the panel's own "don't use vtype on this site".
+  watchExcludedSites(storage, renderSites);
+
+  doc.getElementById("site-form")?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (!(siteInput instanceof HTMLInputElement)) return;
+    const typed = siteInput.value;
+    const pattern = normalizeExclusion(typed);
+    if (pattern === null) {
+      // Said plainly instead of stored: an entry that matches nothing looks like a bug later.
+      setText(doc, "status", t.sitesBadInput, "err");
+      return;
+    }
+    siteInput.value = "";
+    void save(withExcluded(sites, pattern), t.sitesAdded(pattern));
+  });
 
   // C7f: forget every dragged mic position. Open pages hear about it through
   // chrome.storage.onChanged and put their mic back without being reloaded.

@@ -83,6 +83,23 @@ export interface BackgroundToContent {
   readonly event: SessionEvent;
 }
 
+/**
+ * C9: the toolbar icon was pressed. The background does not know what site the tab is on
+ * (vtype asks for no host permissions and no `tabs` permission), and it does not need to: the
+ * page knows its own origin, so the switching on and off happens there.
+ */
+export interface BackgroundToContentToggleSite {
+  readonly target: "content";
+  readonly type: "toggle-site";
+}
+
+/**
+ * What the page answers a `toggle-site` with, so the background knows the press was taken.
+ * Without an answer, Chrome closes the port and the send looks like a failure even though it
+ * arrived — which would send the user to the options page on every press.
+ */
+export const TOGGLE_SITE_ACK = "vtype:toggle-site-taken";
+
 // ---- guards ------------------------------------------------------------------------------
 
 function record(m: unknown): Record<string, unknown> | null {
@@ -147,6 +164,11 @@ export function isBackgroundToContent(m: unknown): m is BackgroundToContent {
     typeof r.sessionId === "string" &&
     isSessionEvent(r.event)
   );
+}
+
+export function isToggleSite(m: unknown): m is BackgroundToContentToggleSite {
+  const r = record(m);
+  return r !== null && r.target === "content" && r.type === "toggle-site";
 }
 
 export const OFFSCREEN_PATH = "offscreen.html";

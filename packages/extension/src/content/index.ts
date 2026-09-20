@@ -12,6 +12,9 @@
 // (the default: every target field visible on screen, up to MAX_MICS) or `hover` (the field
 // under the pointer and the field with the caret). Finding them is a document query, so it runs
 // on DOM changes and on a timer after scrolling — never inside the per-frame position tracking.
+// C9: a site the user has switched vtype off on gets no content script at all. startWhenAllowed
+// is the entry point for that: it reads the excluded list first and only then starts anything,
+// so on an excluded site not one element is ever put on the page.
 
 import { createAnchor, type Anchor } from "./anchor";
 import { createController, type ContentRuntime, type Controller } from "./controller";
@@ -23,19 +26,27 @@ import {
   visibleTargetFields,
 } from "./detect";
 import { startCompositionTracking } from "./insert";
+import { TOGGLE_SITE_ACK, isToggleSite } from "../shared/messages";
 import {
   DEFAULT_MIC_DISPLAY,
   DEFAULT_TRIGGER,
   NO_OFFSET,
   extensionStorage,
+  isExcluded,
+  readExcludedSites,
   readMicDisplay,
   readOffsets,
   readTrigger,
+  watchExcludedSites,
   watchMicDisplay,
   watchOffsets,
   watchTrigger,
+  withExcluded,
   withOffset,
+  withoutExcluded,
+  writeExcludedSites,
   writeOffsets,
+  type ExcludedSites,
   type MicDisplay,
   type MicOffsets,
   type StorageView,
@@ -313,7 +324,16 @@ export function startContentScript(options: StartOptions = {}): ContentScript {
 
   /** The panel is created with the first mic; hook its buttons up to the controller. */
   function wireUi(): void {
-    if (anchor.ui !== null) controller.wire(anchor.ui);
+    const ui = anchor.ui;
+    if (ui === null) return;
+    controller.wire(ui);
+    // C9: the panel offers the one-press way off this site, but only where the answer can be
+    // remembered. What happens next is not this script's business: it writes the list, and
+    // whoever started it (startWhenAllowed) sees the change and takes the mics away.
+    ui.showSiteOff(storage !== null && origin !== "");
+    ui.onSiteOff = () => {
+      void readExcludedSites(storage).then((sites) => writeExcludedSites(storage, withExcluded(sites, origin)));
+    };
   }
 
   function follow(field: Element | null): void {
@@ -421,8 +441,107 @@ export function startContentScript(options: StartOptions = {}): ContentScript {
   };
 }
 
+// ---- C9: the sites vtype stays off on ---------------------------------------------------
+
+export interface SiteGate {
+  /** The site this page is on, as the excluded list spells it (`https://example.test`). */
+  readonly origin: string;
+  /** Whether vtype is switched off here. Unknown (false) until the list has been read. */
+  readonly excluded: boolean;
+  /** The running content script, or null while the site is excluded. */
+  readonly script: ContentScript | null;
+  /** Switch vtype off here, or back on. What the toolbar icon of the extension does. */
+  toggle(): Promise<boolean>;
+  /** Stop the content script (if any) and stop following the list. */
+  stop(): void;
+}
+
+/**
+ * Start the content script unless this site is on the excluded list, and follow that list for
+ * as long as the page lives.
+ *
+ * The list is read *before* anything is started, which is the whole point: an excluded site
+ * must not get a mic that is then taken away again. Until the read answers, nothing exists —
+ * that is a microtask on a page that has just loaded, and the alternative is a flash of
+ * something the user has said they do not want.
+ *
+ * Switching off later (the panel's own line, the options page, another device) stops the
+ * script and takes the host element off the page; switching back on starts a fresh one.
+ */
+export function startWhenAllowed(options: StartOptions = {}): SiteGate {
+  const doc = options.doc ?? document;
+  const storage = options.storage !== undefined ? options.storage : extensionStorage();
+  const runtime = options.runtime !== undefined ? options.runtime : extensionRuntime();
+  const origin = options.origin ?? doc.defaultView?.location.origin ?? "";
+  let excluded = false;
+  let script: ContentScript | null = null;
+  let stopped = false;
+
+  // The first read and the watch race each other: a change that lands while the first read is
+  // still in flight would otherwise be undone by that older answer arriving last, and the site
+  // the user has just switched off would get its mics back until the next change.
+  let followedAChange = false;
+
+  function apply(sites: ExcludedSites, fromChange = false): void {
+    if (stopped) return;
+    if (fromChange) followedAChange = true;
+    else if (followedAChange) return;
+    excluded = isExcluded(sites, origin);
+    if (excluded) {
+      script?.stop();
+      script = null;
+      return;
+    }
+    if (script === null) script = startContentScript({ ...options, storage, origin });
+  }
+
+  void readExcludedSites(storage).then((sites) => apply(sites));
+  const unwatch = watchExcludedSites(storage, (sites) => apply(sites, true));
+
+  /** The toolbar icon: off here if it is on, on again if it is off. */
+  async function toggle(): Promise<boolean> {
+    if (origin === "") return false;
+    const sites = await readExcludedSites(storage);
+    const next = isExcluded(sites, origin) ? withoutExcluded(sites, origin) : withExcluded(sites, origin);
+    return writeExcludedSites(storage, next);
+  }
+
+  // The background cannot see what site a tab is on (vtype asks for no host permissions), so
+  // the toolbar icon arrives here as a message and the page answers for itself. This listener
+  // is the gate's, not the content script's: on an excluded site there is no content script,
+  // and that is exactly when the user needs the way back.
+  // The answer matters as much as the switching: Chrome closes the port when a listener says
+  // nothing, and the background reads that as "no content script here" and opens the options
+  // page. Answering right away (the switching itself carries on in the background) is what
+  // tells it apart from a page vtype does not run on.
+  const onMessage = (message: unknown, _sender?: unknown, sendResponse?: (response?: unknown) => void): void => {
+    if (!isToggleSite(message)) return;
+    void toggle();
+    sendResponse?.(TOGGLE_SITE_ACK);
+  };
+  runtime?.onMessage.addListener(onMessage);
+
+  return {
+    origin,
+    get excluded() {
+      return excluded;
+    },
+    get script() {
+      return script;
+    },
+    toggle,
+    stop(): void {
+      stopped = true;
+      runtime?.onMessage.removeListener(onMessage);
+      unwatch();
+      script?.stop();
+      script = null;
+    },
+  };
+}
+
 // Auto-start only inside an extension context; tests import this module and call
-// startContentScript() themselves.
+// startContentScript() / startWhenAllowed() themselves.
 if (extensionRuntime() !== null) {
-  startContentScript();
+  startWhenAllowed();
 }

@@ -30,11 +30,22 @@ export const STOP_TIMEOUT_MS = 5000;
 /** Give up waiting for `started` (the offscreen document never answered). */
 export const START_TIMEOUT_MS = 10_000;
 
+/**
+ * What `chrome.runtime.onMessage` hands a listener. The sender and the reply are optional
+ * because most of this extension's listeners answer nothing and the tests call them with the
+ * message alone; C9's toolbar-icon listener is the one that answers (see startWhenAllowed).
+ */
+export type ContentMessageListener = (
+  message: unknown,
+  sender?: unknown,
+  sendResponse?: (response?: unknown) => void,
+) => unknown;
+
 export interface ContentRuntime {
   sendMessage(message: unknown): Promise<unknown> | void;
   onMessage: {
-    addListener(listener: (message: unknown) => void): void;
-    removeListener(listener: (message: unknown) => void): void;
+    addListener(listener: ContentMessageListener): void;
+    removeListener(listener: ContentMessageListener): void;
   };
 }
 

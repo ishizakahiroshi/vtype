@@ -51,6 +51,7 @@ export const MAX_OFFSET_ORIGINS = 50;
 export const TRIGGER_KEY = "trigger";
 export const OFFSETS_KEY = "micOffsets";
 export const MIC_DISPLAY_KEY = "micDisplay";
+export const EXCLUDED_KEY = "excludedSites";
 /** The area the setting lives in (it follows the user's Chrome profile). */
 export const SETTINGS_AREA = "sync";
 
@@ -69,6 +70,11 @@ export type StorageChangeListener = (changes: Record<string, StorageChange>, are
 /** The part of `chrome.storage` this extension touches, typed narrowly. */
 export interface StorageView {
   sync?: StorageAreaView;
+  /**
+   * Only the excluded sites use this one, and only as a fallback: see EXCLUDED_AREAS. The
+   * other settings are sync-only, because losing them costs the user a click, not a promise.
+   */
+  local?: StorageAreaView;
   onChanged?: {
     addListener(listener: StorageChangeListener): void;
     removeListener(listener: StorageChangeListener): void;
@@ -236,11 +242,16 @@ export function watchOffsets(storage: StorageView | null, onChange: (offsets: Mi
   return watchKey(storage, OFFSETS_KEY, (value) => onChange(sanitizeOffsets(value)));
 }
 
-function watchKey(storage: StorageView | null, key: string, onValue: (value: unknown) => void): () => void {
+function watchKey(
+  storage: StorageView | null,
+  key: string,
+  onValue: (value: unknown) => void,
+  areas: readonly string[] = [SETTINGS_AREA],
+): () => void {
   const events = storage?.onChanged;
   if (events === undefined) return () => undefined;
   const listener: StorageChangeListener = (changes, area) => {
-    if (area !== SETTINGS_AREA) return;
+    if (!areas.includes(area)) return;
     const change = changes[key];
     if (change === undefined) return;
     onValue(change.newValue);
@@ -257,4 +268,182 @@ function watchKey(storage: StorageView | null, key: string, onValue: (value: unk
       // Nothing to undo: the extension context is gone, and so is the listener.
     }
   };
+}
+
+// ---- C9: sites vtype stays off on -------------------------------------------------------
+//
+// The default is "every site". This list is what the user has taken away, so it is the one
+// setting whose loss is visible as vtype doing something the user told it not to do. That is
+// why it is the only one that also writes to `chrome.storage.local`: sync is refused outright
+// under some enterprise policies, and "the mic came back on the site I switched it off on" is
+// not an acceptable outcome of that. Both areas are written and their contents are read as one
+// list, so removing an entry removes it everywhere.
+
+/**
+ * One entry of the list, in one of two shapes:
+ *   `https://example.com`   exactly this origin (scheme and port included)
+ *   `*.example.com`         this host and everything under it, on http and https alike
+ */
+export type ExcludedSites = readonly string[];
+
+/**
+ * At most this many sites. The same reason as MAX_OFFSET_ORIGINS: chrome.storage.sync allows
+ * about 8 KB per item, and a list that grows without a limit starts failing to save one day,
+ * on whatever site the user happens to be on. The oldest entries go first.
+ */
+export const MAX_EXCLUDED_SITES = 100;
+
+/** Where the list is kept, in the order it is written and read. */
+export const EXCLUDED_AREAS: readonly string[] = [SETTINGS_AREA, "local"];
+
+function parseUrl(text: string): URL | null {
+  try {
+    return new URL(text);
+  } catch {
+    return null;
+  }
+}
+
+/** The host of an origin (`https://a.example.com:8443` -> `a.example.com`), or null. */
+function hostOf(origin: string): string | null {
+  const url = parseUrl(origin);
+  return url === null || url.hostname === "" ? null : url.hostname;
+}
+
+/** A bare host, normalised the way the URL parser would (lower case, IDN -> punycode). */
+function normalizeHost(raw: string): string | null {
+  const text = raw.trim().replace(/\/+$/, "");
+  if (text === "" || /[\s*/]/.test(text)) return null;
+  const url = parseUrl(`https://${text}`);
+  // A port or a path in a wildcard entry would silently not mean what it looks like.
+  if (url === null || url.hostname === "" || url.port !== "" || url.pathname !== "/") return null;
+  return url.hostname;
+}
+
+/**
+ * What the user typed, as an entry of the list — or null when it cannot be read as a site.
+ * `example.com`, `https://example.com/inbox` and `HTTPS://Example.com` all become
+ * `https://example.com`; `*.example.com` stays a wildcard. Anything else (a scheme vtype does
+ * not run on, an empty string, a stray `*`) is refused, so the options page can say so instead
+ * of storing something that will never match.
+ */
+export function normalizeExclusion(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const text = input.trim();
+  if (text === "") return null;
+  if (text.startsWith("*.")) {
+    const host = normalizeHost(text.slice(2));
+    return host === null ? null : `*.${host}`;
+  }
+  // Everything from here on is one site, so a `*` left in it would read as a wildcard that is
+  // not one: `new URL("https://*")` is accepted and would be stored as a site called `*`.
+  if (/[\s*]/.test(text)) return null;
+  // A bare host has no scheme, so it is tried as https:// too; `http://x` keeps its scheme.
+  const url = parseUrl(text) ?? parseUrl(`https://${text}`);
+  if (url === null || (url.protocol !== "http:" && url.protocol !== "https:")) return null;
+  return url.origin;
+}
+
+/** Whether one entry covers `origin` (`https://example.com`). Both are matched lower case. */
+export function matchesExclusion(pattern: string, origin: string): boolean {
+  if (pattern === "" || origin === "") return false;
+  const site = origin.toLowerCase();
+  if (!pattern.startsWith("*.")) return pattern.toLowerCase() === site;
+  const suffix = pattern.slice(2).toLowerCase();
+  const host = hostOf(site);
+  if (host === null || suffix === "") return false;
+  // `example.com.evil.test` must not be caught by `*.example.com`: only a dot may precede it.
+  return host === suffix || host.endsWith(`.${suffix}`);
+}
+
+/** Whether vtype stays off on this origin. An empty list means it runs everywhere. */
+export function isExcluded(sites: ExcludedSites, origin: string): boolean {
+  return sites.some((pattern) => matchesExclusion(pattern, origin));
+}
+
+/**
+ * What was stored, with anything unusable dropped and the rest normalised: another version of
+ * vtype, a hand-edited value or a half-written sync must not switch the list off wholesale.
+ */
+export function sanitizeExcludedSites(value: unknown): ExcludedSites {
+  if (!Array.isArray(value)) return [];
+  const clean: string[] = [];
+  for (const entry of value) {
+    const pattern = normalizeExclusion(entry);
+    if (pattern !== null && !clean.includes(pattern)) clean.push(pattern);
+  }
+  return clean.slice(Math.max(0, clean.length - MAX_EXCLUDED_SITES));
+}
+
+/**
+ * `sites` with `input` added, capped at MAX_EXCLUDED_SITES (the oldest go first). Unchanged
+ * when the input cannot be read as a site or is already covered. Pure: the caller stores it.
+ */
+export function withExcluded(sites: ExcludedSites, input: unknown): ExcludedSites {
+  const pattern = normalizeExclusion(input);
+  if (pattern === null || sites.includes(pattern)) return [...sites];
+  const kept = sites.slice(Math.max(0, sites.length - (MAX_EXCLUDED_SITES - 1)));
+  return [...kept, pattern];
+}
+
+/**
+ * `sites` with every entry that covers `origin` removed. Every one of them, because the site
+ * was switched off once as far as the user is concerned: leaving a `*.example.com` behind
+ * after removing `https://a.example.com` would look like the button did nothing.
+ */
+export function withoutExcluded(sites: ExcludedSites, origin: string): ExcludedSites {
+  return sites.filter((pattern) => !matchesExclusion(pattern, origin));
+}
+
+/** `sites` with `pattern` removed exactly as it is written (the options page's list). */
+export function withoutExclusionEntry(sites: ExcludedSites, pattern: string): ExcludedSites {
+  return sites.filter((entry) => entry !== pattern);
+}
+
+function areasOf(storage: StorageView | null): StorageAreaView[] {
+  return [storage?.sync, storage?.local].filter((area): area is StorageAreaView => area !== undefined);
+}
+
+/** Every stored entry, from both areas, as one list. Empty when nothing can be read. */
+export async function readExcludedSites(storage: StorageView | null): Promise<ExcludedSites> {
+  const found: unknown[] = [];
+  for (const area of areasOf(storage)) {
+    try {
+      const stored = await area.get([EXCLUDED_KEY]);
+      const value = stored?.[EXCLUDED_KEY];
+      if (Array.isArray(value)) found.push(...value);
+    } catch {
+      // This area is unreadable (policy, no extension context): the other one may not be.
+    }
+  }
+  return sanitizeExcludedSites(found);
+}
+
+/**
+ * Store the whole list, in every area there is. True when at least one write went through;
+ * false means nothing was stored and the caller must not claim the site was switched off.
+ */
+export async function writeExcludedSites(storage: StorageView | null, sites: ExcludedSites): Promise<boolean> {
+  let stored = false;
+  for (const area of areasOf(storage)) {
+    try {
+      await area.set({ [EXCLUDED_KEY]: [...sites] });
+      stored = true;
+    } catch {
+      // Sync can be refused by policy or full; local is then what keeps the list.
+    }
+  }
+  return stored;
+}
+
+/**
+ * Call `onChange` when the list changes elsewhere (the options page, another tab, another
+ * device), so a page switches on or off without being reloaded.
+ */
+export function watchExcludedSites(
+  storage: StorageView | null,
+  onChange: (sites: ExcludedSites) => void,
+): () => void {
+  // A cleared list means "vtype runs everywhere again", not "keep the old list".
+  return watchKey(storage, EXCLUDED_KEY, (value) => onChange(sanitizeExcludedSites(value)), EXCLUDED_AREAS);
 }
