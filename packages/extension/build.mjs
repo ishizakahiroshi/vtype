@@ -59,6 +59,19 @@ for (const [entry, out] of scripts) {
   });
 }
 
+// The extension's icons, baked from the one SVG source (assets/icon.svg) by the icon pipeline.
+// Chrome's own names are used in dist/ so the manifest reads like any other extension's.
+const icons = [
+  ["favicon-16.png", "icon16.png"],
+  ["favicon-32.png", "icon32.png"],
+  ["favicon-48.png", "icon48.png"],
+  ["icon-128.png", "icon128.png"],
+];
+await mkdir(join(dist, "icons"), { recursive: true });
+for (const [from, to] of icons) {
+  await copyFile(join(here, "../../assets/icons", from), join(dist, "icons", to));
+}
+
 await copyFile(join(here, "manifest.json"), join(dist, "manifest.json"));
 await copyFile(join(here, "src/offscreen/offscreen.html"), join(dist, "offscreen.html"));
 await copyFile(join(here, "src/permission/permission.html"), join(dist, "permission.html"));
@@ -78,6 +91,7 @@ const referenced = [
   manifest.background?.service_worker,
   manifest.options_ui?.page,
   ...(manifest.content_scripts ?? []).flatMap((s) => s.js ?? []),
+  ...Object.values(manifest.icons ?? {}),
 ].filter(Boolean);
 for (const page of ["offscreen.html", "permission.html", "options.html"]) {
   const html = await readFile(join(dist, page), "utf8");
