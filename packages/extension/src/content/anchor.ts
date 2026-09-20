@@ -13,10 +13,14 @@
 // or stops the recording; `canAutoClose` lets the outside hold the panel open while it runs.
 // Hovering only opens the panel, unless the outside reacts to `onOpenChange` (the `hover`
 // setting does; the default `click` setting does not).
+// C7f: the mic can be dragged aside (some sites have their own button where vtype puts it).
+// The offset is kept as a distance from the field, not as a position on the screen, and a
+// drag past DRAG_THRESHOLD_PX swallows the click that would otherwise start a recording.
 
 import css from "../ui/styles.css?raw";
 import { createPanel, type Panel } from "../ui/panel";
 import { createTrigger } from "../ui/toolbar";
+import { NO_OFFSET, type MicOffset } from "../shared/settings";
 
 /** How long the pointer must rest on the mic before the panel opens (a pass-over must not open it). */
 export const OPEN_DELAY_MS = 350;
@@ -30,6 +34,12 @@ export const PANEL_WIDTH_PX = 240;
 const PANEL_HEIGHT_ESTIMATE_PX = 90;
 /** Gap between the field's right edge and the mic. */
 export const MIC_GAP_PX = 6;
+/**
+ * How far the pointer must travel with the mic held down before it counts as dragging it
+ * (C7f). Under this, letting go is the click that starts or stops the recording (C7e); at or
+ * over it, the same release only ends the drag.
+ */
+export const DRAG_THRESHOLD_PX = 4;
 /** Height of the band at the top of the field the mic is centered in (first line of a textarea). */
 const FIRST_LINE_BAND_PX = 36;
 const VIEWPORT_MARGIN_PX = 2;
@@ -52,6 +62,11 @@ export interface AnchorOptions {
    * the `hover` setting the opening finds this recording already running (see onMicPointerUp).
    */
   onMicPress?: () => void;
+  /**
+   * A drag of the thin mic finished, at this distance from where vtype would put it (C7f).
+   * Only user drags report; `setOffset` does not.
+   */
+  onOffsetChange?: (offset: MicOffset) => void;
   /**
    * Asked before every automatic close (the pointer left). False keeps the panel open and the
    * question is asked again after another CLOSE_DELAY_MS, so the panel closes on its own once
@@ -77,6 +92,12 @@ export interface Anchor {
   readonly isOpen: boolean;
   /** Whether the mic is currently shown (attached and the field is visible). */
   readonly isVisible: boolean;
+  /** How far the user dragged the mic from its default place (C7f). */
+  readonly offset: MicOffset;
+  /** Whether a drag of the mic is going on right now. */
+  readonly isDragging: boolean;
+  /** Put the mic at a stored offset (or back with {x: 0, y: 0}). Does not report back. */
+  setOffset(offset: MicOffset): void;
   attach(field: Element): void;
   detach(): void;
   /**
@@ -158,6 +179,7 @@ export function createAnchor(options: AnchorOptions = {}): Anchor {
   const hoverCapable = options.hoverCapable ?? defaultHoverCapable(doc);
   const onOpenChange = options.onOpenChange;
   const onMicPress = options.onMicPress;
+  const onOffsetChange = options.onOffsetChange;
   const canAutoClose = options.canAutoClose;
 
   let host: HTMLElement | null = null;
@@ -176,6 +198,16 @@ export function createAnchor(options: AnchorOptions = {}): Anchor {
   let dirty = true;
   let lastBox: DOMRect | null = null;
   let attributeObserver: MutationObserver | null = null;
+
+  // C7f: the mic can be dragged aside where a site's own button sits under it.
+  let offset: MicOffset = NO_OFFSET;
+  /** The pointer holding the mic down, or null. Set from the first pointerdown. */
+  let dragPointer: number | null = null;
+  /** True once that pointer passed DRAG_THRESHOLD_PX: the release is then not a click. */
+  let dragging = false;
+  let dragFromX = 0;
+  let dragFromY = 0;
+  let dragBase: MicOffset = NO_OFFSET;
 
   const view = (): (Window & typeof globalThis) | null => doc.defaultView as (Window & typeof globalThis) | null;
 
@@ -215,6 +247,9 @@ export function createAnchor(options: AnchorOptions = {}): Anchor {
   }
 
   function onBoxEnter(e: PointerEvent): void {
+    // While the mic is held the panel neither opens nor closes: a hand that slips must not
+    // start a recording, and the panel must not appear under the pointer mid-drag (C7f).
+    if (dragPointer !== null) return;
     if (!isHoverPointer(e) || target === null) return;
     clearCloseTimer();
     if (!open && openTimer === null) {
@@ -240,6 +275,7 @@ export function createAnchor(options: AnchorOptions = {}): Anchor {
   }
 
   function onBoxLeave(e: PointerEvent): void {
+    if (dragPointer !== null) return;
     if (!isHoverPointer(e)) return;
     clearOpenTimer();
     if (open) scheduleClose();
@@ -258,6 +294,66 @@ export function createAnchor(options: AnchorOptions = {}): Anchor {
     if (target === null) return;
     onMicPress?.();
     setOpen(true);
+  }
+
+  // ---- dragging the mic aside (C7f) ------------------------------------------------------
+  // The pointer is captured so the mic keeps following it over the page's own elements (and
+  // so the browser stops sending the box hover events that would open or close the panel).
+
+  function onMicPointerDown(e: PointerEvent): void {
+    if (target === null || dragPointer !== null) return;
+    dragPointer = e.pointerId;
+    dragging = false;
+    dragFromX = e.clientX;
+    dragFromY = e.clientY;
+    dragBase = offset;
+    clearOpenTimer();
+    clearCloseTimer();
+    try {
+      mic?.setPointerCapture(e.pointerId);
+    } catch {
+      // No capture (an old engine, or a pointer that is already gone): the drag still works
+      // while the pointer stays over the mic, which is where it started.
+    }
+  }
+
+  function onMicPointerMove(e: PointerEvent): void {
+    if (dragPointer !== e.pointerId) return;
+    const dx = e.clientX - dragFromX;
+    const dy = e.clientY - dragFromY;
+    if (!dragging) {
+      if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return; // still a click in the making
+      dragging = true;
+      mic?.classList.add("dragging"); // the cursor says the mic is being moved, not pressed
+    }
+    offset = { x: dragBase.x + dx, y: dragBase.y + dy };
+    update(); // place it now instead of waiting for the next frame
+  }
+
+  /** Let the pointer go. True when this was a drag (and so not a click). */
+  function endDrag(e: PointerEvent): boolean {
+    if (dragPointer !== e.pointerId) return false;
+    dragPointer = null;
+    try {
+      mic?.releasePointerCapture(e.pointerId);
+    } catch {
+      // Already released (the browser does it on pointerup / pointercancel by itself).
+    }
+    if (!dragging) return false;
+    dragging = false;
+    mic?.classList.remove("dragging");
+    // What the user sees is what gets remembered, including a drag cut short by the system.
+    onOffsetChange?.(offset);
+    return true;
+  }
+
+  function onMicPointerUp(e: PointerEvent): void {
+    if (endDrag(e)) return; // moving the mic must not start or stop a recording
+    onMicActivate();
+  }
+
+  function onMicPointerCancel(e: PointerEvent): void {
+    endDrag(e);
   }
 
   function keepFieldFocus(e: Event): void {
@@ -298,7 +394,12 @@ export function createAnchor(options: AnchorOptions = {}): Anchor {
       box.addEventListener("pointerenter", onBoxEnter);
       box.addEventListener("pointerleave", onBoxLeave);
       box.addEventListener("mousedown", keepFieldFocus);
-      mic.addEventListener("pointerup", onMicActivate);
+      // The mic must get the whole touch gesture, or the page scrolls instead of it moving.
+      mic.style.setProperty("touch-action", "none", "important");
+      mic.addEventListener("pointerdown", onMicPointerDown);
+      mic.addEventListener("pointermove", onMicPointerMove);
+      mic.addEventListener("pointerup", onMicPointerUp);
+      mic.addEventListener("pointercancel", onMicPointerCancel);
     }
     if (!host.isConnected) doc.documentElement.append(host);
   }
@@ -332,6 +433,12 @@ export function createAnchor(options: AnchorOptions = {}): Anchor {
     let y = b.top + (Math.min(b.height, FIRST_LINE_BAND_PX) - MIC_SIZE_PX) / 2;
     y = Math.max(y, vis.top);
     y = Math.min(y, vis.bottom - MIC_SIZE_PX);
+    // C7f: where the user dragged it to, measured from the place computed above, so it keeps
+    // its distance while the field moves. The viewport still has the last word: an offset
+    // from another window size must not leave the mic somewhere it cannot be reached.
+    x += offset.x;
+    y += offset.y;
+    if (vw > 0) x = Math.min(Math.max(x, VIEWPORT_MARGIN_PX), vw - MIC_SIZE_PX - VIEWPORT_MARGIN_PX);
     if (vh > 0) y = Math.min(Math.max(y, 0), vh - MIC_SIZE_PX);
     box.style.left = `${Math.round(x)}px`;
     box.style.top = `${Math.round(y)}px`;
@@ -416,6 +523,11 @@ export function createAnchor(options: AnchorOptions = {}): Anchor {
   function detach(): void {
     if (target === null) return;
     target = null;
+    // A drag cannot outlive the mic it was moving; the pointerup that would end it may never
+    // arrive once the host is gone, and a stuck drag would block every later press.
+    dragPointer = null;
+    dragging = false;
+    mic?.classList.remove("dragging");
     removeTrackingListeners();
     attributeObserver?.disconnect();
     attributeObserver = null;
@@ -457,6 +569,18 @@ export function createAnchor(options: AnchorOptions = {}): Anchor {
     },
     get isVisible() {
       return visible;
+    },
+    get offset() {
+      return offset;
+    },
+    get isDragging() {
+      return dragging;
+    },
+    setOffset(next: MicOffset): void {
+      if (dragging) return; // the hand on the mic wins over a value arriving from storage
+      if (next.x === offset.x && next.y === offset.y) return;
+      offset = { x: next.x, y: next.y };
+      update();
     },
     attach,
     detach,

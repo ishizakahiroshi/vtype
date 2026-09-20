@@ -100,7 +100,8 @@
   background: var(--vt-bg);
   color: var(--vt-muted);
   opacity: 0.55;
-  cursor: default;
+  /* It is a button first (press = dictate); dragging it aside is the second thing it does. */
+  cursor: pointer;
   font: inherit;
   line-height: 1;
   appearance: none;
@@ -117,6 +118,11 @@
   height: 14px;
   display: block;
   pointer-events: none;
+}
+/* C7f: while the user is moving the mic out of a site's own button's way. */
+.mic.dragging {
+  cursor: grabbing;
+  opacity: 1;
 }
 
 /* ---- panel ------------------------------------------------------------------------------ */

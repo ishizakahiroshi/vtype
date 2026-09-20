@@ -15,9 +15,15 @@ import { TARGET_DEFINING_ATTRIBUTES, deepActiveElement, resolveTarget } from "./
 import { startCompositionTracking } from "./insert";
 import {
   DEFAULT_TRIGGER,
+  NO_OFFSET,
   extensionStorage,
+  readOffsets,
   readTrigger,
+  watchOffsets,
   watchTrigger,
+  withOffset,
+  writeOffsets,
+  type MicOffsets,
   type StorageView,
   type TriggerMode,
 } from "../shared/settings";
@@ -44,6 +50,8 @@ export interface StartOptions {
   language?: string;
   /** chrome.storage by default; null runs on the default setting and never reads storage. */
   storage?: StorageView | null;
+  /** The site the dragged mic position is remembered for. Default: this page's origin. */
+  origin?: string;
 }
 
 function extensionRuntime(): ContentRuntime | null {
@@ -63,6 +71,10 @@ export function startContentScript(options: StartOptions = {}): ContentScript {
   // Until storage answers (and whenever it cannot), the default setting applies: a hover that
   // starts recording is a surprise, so it is never what an unanswered read falls back to.
   let trigger: TriggerMode = DEFAULT_TRIGGER;
+  const storage = options.storage !== undefined ? options.storage : extensionStorage();
+  // C7f: dragged mic positions are per site, because the button they collide with is.
+  const origin = options.origin ?? doc.defaultView?.location.origin ?? "";
+  let offsets: MicOffsets = {};
   const anchor = createAnchor({
     doc,
     ...(options.hoverCapable !== undefined ? { hoverCapable: options.hoverCapable } : {}),
@@ -78,6 +90,11 @@ export function startContentScript(options: StartOptions = {}): ContentScript {
     },
     // While a recording runs the panel must stay: it holds the button that stops it.
     canAutoClose: () => recorder === null || recorder.phase === "idle",
+    // C7f: the user dragged the mic aside. Remember it for this site, not for the page.
+    onOffsetChange: (offset) => {
+      offsets = withOffset(offsets, origin, offset);
+      void writeOffsets(storage, offsets);
+    },
   });
   const controller = createController({
     anchor,
@@ -86,14 +103,27 @@ export function startContentScript(options: StartOptions = {}): ContentScript {
   });
   recorder = controller;
 
-  // The setting is read once and then followed: a change in the options page (or on another
+  // The settings are read once and then followed: a change in the options page (or on another
   // device) reaches every open page without a reload.
-  const storage = options.storage !== undefined ? options.storage : extensionStorage();
   void readTrigger(storage).then((mode) => {
     trigger = mode;
   });
   const unwatchTrigger = watchTrigger(storage, (mode) => {
     trigger = mode;
+  });
+
+  function applyOffset(): void {
+    anchor.setOffset(offsets[origin] ?? NO_OFFSET);
+  }
+
+  void readOffsets(storage).then((all) => {
+    offsets = all;
+    applyOffset();
+  });
+  // Reaches here when the options page resets the positions, too: the mic goes back at once.
+  const unwatchOffsets = watchOffsets(storage, (all) => {
+    offsets = all;
+    applyOffset();
   });
 
   // Focus changes between two elements of the same shadow root are not visible from the
@@ -122,8 +152,8 @@ export function startContentScript(options: StartOptions = {}): ContentScript {
   function onFocusIn(e: Event): void {
     const path = e.composedPath();
     if (isOurs(path)) return;
-    const origin = path[0];
-    follow(origin instanceof Element ? resolveTarget(origin) : null);
+    const focused = path[0];
+    follow(focused instanceof Element ? resolveTarget(focused) : null);
   }
 
   function onFocusOut(): void {
@@ -169,6 +199,7 @@ export function startContentScript(options: StartOptions = {}): ContentScript {
       doc.removeEventListener("focusout", onFocusOut, true);
       setExtraRoot(null);
       unwatchTrigger();
+      unwatchOffsets();
       controller.dispose();
       anchor.destroy();
     },

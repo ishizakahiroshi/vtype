@@ -9,6 +9,7 @@
 
 import {
   DEFAULT_TRIGGER,
+  clearOffsets,
   extensionStorage,
   isTriggerMode,
   readTrigger,
@@ -27,6 +28,12 @@ interface Texts {
   hoverHint: string;
   saved: string;
   failed: string;
+  positionsTitle: string;
+  positionsLead: string;
+  reset: string;
+  resetDone: (count: number) => string;
+  resetNone: string;
+  resetFailed: string;
 }
 
 const TEXTS: Record<"en" | "ja", Texts> = {
@@ -42,6 +49,13 @@ const TEXTS: Record<"en" | "ja", Texts> = {
       "Recording starts as soon as the panel opens by itself, so you can speak straight away. You can still press the mic to start and stop.",
     saved: "Saved.",
     failed: "Could not save the setting. vtype keeps starting when you press the mic.",
+    positionsTitle: "Where the mic sits",
+    positionsLead:
+      "You can drag the small mic aside on a site where it covers one of the site's own buttons. vtype remembers that for the site. This puts every site back to where vtype normally puts it.",
+    reset: "Put the mic back on every site",
+    resetDone: (count) => `Done: ${count} ${count === 1 ? "site" : "sites"} put back.`,
+    resetNone: "The mic has not been moved on any site.",
+    resetFailed: "Could not clear the saved positions.",
   },
   ja: {
     title: "vtype の設定",
@@ -55,6 +69,13 @@ const TEXTS: Record<"en" | "ja", Texts> = {
       "パネルが開いた時点で録音が始まるので、そのまま話せます。マイクを押して始める・止めることもできます。",
     saved: "保存しました。",
     failed: "設定を保存できませんでした。マイクを押して始める動作のままになります。",
+    positionsTitle: "マイクの位置",
+    positionsLead:
+      "サイト自身のボタンとマイクが重なる場合は、小さなマイクをドラッグしてずらせます。ずらした位置はそのサイトごとに覚えています。ここで全サイトぶんを元の位置に戻せます。",
+    reset: "すべてのサイトでマイクの位置を元に戻す",
+    resetDone: (count) => `${count} 件のサイトの位置を元に戻しました。`,
+    resetNone: "位置をずらしたサイトはありません。",
+    resetFailed: "保存された位置を消せませんでした。",
   },
 };
 
@@ -88,6 +109,9 @@ export function initOptionsPage(options: OptionsPageOptions = {}): void {
   setText(doc, "click-hint", t.clickHint);
   setText(doc, "hover-label", t.hoverLabel);
   setText(doc, "hover-hint", t.hoverHint);
+  setText(doc, "positions-title", t.positionsTitle);
+  setText(doc, "positions-lead", t.positionsLead);
+  setText(doc, "reset", t.reset);
 
   const radios = [doc.getElementById("click"), doc.getElementById("hover")].filter(
     (el): el is HTMLInputElement => el instanceof HTMLInputElement,
@@ -116,6 +140,18 @@ export function initOptionsPage(options: OptionsPageOptions = {}): void {
       });
     });
   }
+
+  // C7f: forget every dragged mic position. Open pages hear about it through
+  // chrome.storage.onChanged and put their mic back without being reloaded.
+  doc.getElementById("reset")?.addEventListener("click", () => {
+    if (storage === null) {
+      setText(doc, "status", t.resetFailed, "err");
+      return;
+    }
+    void clearOffsets(storage).then((count) => {
+      setText(doc, "status", count === 0 ? t.resetNone : t.resetDone(count), "ok");
+    });
+  });
 }
 
 if (typeof document !== "undefined" && document.getElementById("click") !== null) initOptionsPage();

@@ -2,13 +2,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLOSE_DELAY_MS, HOST_TAG, MIC_GAP_PX, MIC_SIZE_PX, OPEN_DELAY_MS } from "../src/content/anchor";
 import { startContentScript, type ContentScript } from "../src/content/index";
 import {
+  MAX_OFFSET_ORIGINS,
+  OFFSETS_KEY,
   SETTINGS_AREA,
   TRIGGER_KEY,
-  isTriggerMode,
+  clearOffsets,
+  type MicOffset,
   type StorageChangeListener,
   type StorageView,
-  type TriggerMode,
 } from "../src/shared/settings";
+
+/** What storage holds when the `hover` setting was chosen. */
+const HOVER_STORED: Record<string, unknown> = { [TRIGGER_KEY]: "hover" };
 
 // ---- synthetic layout -------------------------------------------------------------------
 // happy-dom does no layout, so element boxes come from this table. The stub is installed on
@@ -76,8 +81,14 @@ function micPosition(s: ContentScript): { left: number; top: number } {
   return { left: parseFloat(b.style.left), top: parseFloat(b.style.top) };
 }
 
-function pointer(target: EventTarget, type: string, pointerType: string): void {
-  target.dispatchEvent(new PointerEvent(type, { pointerType, bubbles: type !== "pointerenter" && type !== "pointerleave" }));
+function pointer(target: EventTarget, type: string, pointerType: string, init: PointerEventInit = {}): void {
+  target.dispatchEvent(
+    new PointerEvent(type, {
+      pointerType,
+      bubbles: type !== "pointerenter" && type !== "pointerleave",
+      ...init,
+    }),
+  );
 }
 
 function nextFrames(n = 2): void {
@@ -426,25 +437,40 @@ function stubRuntime(): StubRuntime {
 
 interface StubStorage {
   readonly view: StorageView;
-  /** The options page (or another device) stored a new value; undefined clears it. */
-  change(mode: TriggerMode | undefined): void;
+  /** What is in storage right now (what another page would read). */
+  items(): Record<string, unknown>;
+  /** The options page or another device stored a value; undefined clears it. */
+  change(key: string, value: unknown): void;
 }
 
 /** `broken`: a profile where storage is unavailable (policy, quota, no extension context). */
-function stubStorage(initial?: TriggerMode, broken = false): StubStorage {
-  let stored = initial;
+function stubStorage(initial: Record<string, unknown> = {}, broken = false): StubStorage {
+  const items: Record<string, unknown> = structuredClone(initial);
   const listeners: StorageChangeListener[] = [];
   const refuse = (): never => {
     throw new Error("storage is unavailable");
   };
+  const notify = (changes: Record<string, { newValue?: unknown }>): void => {
+    for (const l of [...listeners]) l(changes, SETTINGS_AREA);
+  };
   return {
     view: {
       sync: {
-        get: async () => (broken ? refuse() : stored === undefined ? {} : { [TRIGGER_KEY]: stored }),
-        set: async (items) => {
+        get: async (keys) => {
           if (broken) refuse();
-          const value = items[TRIGGER_KEY];
-          stored = isTriggerMode(value) ? value : undefined;
+          const wanted = keys === null ? Object.keys(items) : typeof keys === "string" ? [keys] : keys;
+          const out: Record<string, unknown> = {};
+          for (const key of wanted) if (key in items) out[key] = structuredClone(items[key]);
+          return out;
+        },
+        set: async (next) => {
+          if (broken) refuse();
+          const changes: Record<string, { newValue?: unknown }> = {};
+          for (const [key, value] of Object.entries(next)) {
+            items[key] = structuredClone(value);
+            changes[key] = { newValue: structuredClone(value) };
+          }
+          notify(changes); // chrome tells every page about a write, including the writer's own
         },
       },
       onChanged: {
@@ -458,9 +484,11 @@ function stubStorage(initial?: TriggerMode, broken = false): StubStorage {
         },
       },
     },
-    change(mode: TriggerMode | undefined): void {
-      stored = mode;
-      for (const l of [...listeners]) l({ [TRIGGER_KEY]: { newValue: mode } }, SETTINGS_AREA);
+    items: () => structuredClone(items),
+    change(key: string, value: unknown): void {
+      if (value === undefined) delete items[key];
+      else items[key] = structuredClone(value);
+      notify({ [key]: { newValue: value } });
     },
   };
 }
@@ -478,9 +506,12 @@ interface Setup {
   rt: StubRuntime;
 }
 
-function setupWith(storage: StorageView | null): Setup {
+/** A made-up origin: no test may depend on a real site (or on the test runner's own URL). */
+const ORIGIN = "https://example.test";
+
+function setupWith(storage: StorageView | null, origin = ORIGIN): Setup {
   const rt = stubRuntime();
-  const s = start({ runtime: rt.runtime, language: "en", storage });
+  const s = start({ runtime: rt.runtime, language: "en", storage, origin });
   const field = pick<HTMLInputElement>(mount(`<input id="f" type="text">`), "#f");
   setBox(field, FIELD);
   field.focus();
@@ -654,7 +685,7 @@ describe("[C7e] pressing the thin mic starts and stops (the default `click` sett
 
 describe("[C7e 10] the `hover` setting: the panel opening starts the recording", () => {
   async function setup(): Promise<Setup> {
-    const ready = setupWith(stubStorage("hover").view);
+    const ready = setupWith(stubStorage(HOVER_STORED).view);
     await settle();
     expect(ready.s.trigger).toBe("hover");
     return ready;
@@ -792,7 +823,7 @@ describe("[C7e] the setting itself", () => {
     const store = stubStorage();
     const { s, b, rt } = setupWith(store.view);
     await settle();
-    store.change("whatever" as TriggerMode); // an older or newer version wrote something else
+    store.change(TRIGGER_KEY, "whatever"); // an older or newer version wrote something else
     expect(s.trigger).toBe("click");
     hoverOpen(b);
     expect(sentOfType(rt, "start")).toHaveLength(0);
@@ -808,18 +839,18 @@ describe("[C7e] the setting itself", () => {
     vi.advanceTimersByTime(CLOSE_DELAY_MS);
     expect(s.anchor.isOpen).toBe(false);
 
-    store.change("hover"); // the options page saves; the page is not reloaded
+    store.change(TRIGGER_KEY, "hover"); // the options page saves; the page is not reloaded
     expect(s.trigger).toBe("hover");
     hoverOpen(b);
     expect(sentOfType(rt, "start")).toHaveLength(1);
   });
 
   it("[11] switching back to click stops the automatic start", async () => {
-    const store = stubStorage("hover");
+    const store = stubStorage(HOVER_STORED);
     const { s, b, rt } = setupWith(store.view);
     await settle();
     expect(s.trigger).toBe("hover");
-    store.change("click");
+    store.change(TRIGGER_KEY, "click");
     expect(s.trigger).toBe("click");
     hoverOpen(b);
     expect(sentOfType(rt, "start")).toHaveLength(0);
@@ -828,17 +859,17 @@ describe("[C7e] the setting itself", () => {
   });
 
   it("[11] clearing the setting goes back to click", async () => {
-    const store = stubStorage("hover");
+    const store = stubStorage(HOVER_STORED);
     const { s, b, rt } = setupWith(store.view);
     await settle();
-    store.change(undefined);
+    store.change(TRIGGER_KEY, undefined);
     expect(s.trigger).toBe("click");
     hoverOpen(b);
     expect(sentOfType(rt, "start")).toHaveLength(0);
   });
 
   it("[12] a storage that cannot be read breaks nothing: it behaves as click", async () => {
-    const { s, b, rt } = setupWith(stubStorage("hover", true).view);
+    const { s, b, rt } = setupWith(stubStorage(HOVER_STORED, true).view);
     await settle();
     expect(s.trigger).toBe("click");
     hoverOpen(b);
@@ -856,6 +887,190 @@ describe("[C7e] the setting itself", () => {
     expect(sentOfType(rt, "start")).toHaveLength(0);
     pressMic(s);
     expect(sentOfType(rt, "start")).toHaveLength(1);
+  });
+});
+
+// ---- C7f: dragging the mic aside --------------------------------------------------------
+// Some sites have a button of their own exactly where vtype puts the mic, so the mic can be
+// dragged. The offset is a distance from the field (never a place on the screen) and is
+// remembered per origin, because the collision belongs to the site.
+
+/** Press the mic, move the pointer by (dx, dy), let go. One drag gesture. */
+function dragMic(s: ContentScript, dx: number, dy: number, pointerType = "mouse"): void {
+  const mic = pick(s.anchor.root as ShadowRoot, ".mic");
+  const from = { pointerId: 7, clientX: 500, clientY: 400 };
+  pointer(mic, "pointerdown", pointerType, from);
+  pointer(mic, "pointermove", pointerType, { ...from, clientX: from.clientX + dx, clientY: from.clientY + dy });
+  pointer(mic, "pointerup", pointerType, { ...from, clientX: from.clientX + dx, clientY: from.clientY + dy });
+}
+
+/** Where the mic sits with no offset: outside the field's right edge, on its first line. */
+const DEFAULT_MIC = {
+  left: FIELD.left + FIELD.width + MIC_GAP_PX,
+  top: FIELD.top + (FIELD.height - MIC_SIZE_PX) / 2,
+};
+
+function storedOffsets(store: StubStorage): Record<string, MicOffset> {
+  return (store.items()[OFFSETS_KEY] ?? {}) as Record<string, MicOffset>;
+}
+
+describe("[C7f] the mic can be dragged aside", () => {
+  it("[1] pressing the mic and moving it puts the mic that much further away", () => {
+    const { s } = setupWith(null);
+    expect(micPosition(s)).toEqual(DEFAULT_MIC);
+    dragMic(s, -40, 12);
+    expect(s.anchor.offset).toEqual({ x: -40, y: 12 });
+    expect(micPosition(s)).toEqual({ left: DEFAULT_MIC.left - 40, top: DEFAULT_MIC.top + 12 });
+  });
+
+  it("[1] a touch drag moves it the same way", () => {
+    const { s } = setupWith(null);
+    dragMic(s, -30, 0, "touch");
+    expect(micPosition(s).left).toBe(DEFAULT_MIC.left - 30);
+  });
+
+  it("[2] a drag starts nothing and stops nothing", () => {
+    const { s, rt } = setupWith(null);
+    dragMic(s, -40, 0);
+    expect(sentOfType(rt, "start")).toHaveLength(0);
+    expect(s.controller.phase).toBe("idle");
+    expect(s.anchor.isOpen).toBe(false); // and it does not open the panel either
+
+    pressMic(s); // now record, and drag while recording
+    expect(s.controller.phase).toBe("recording");
+    dragMic(s, -20, 0);
+    expect(sentOfType(rt, "stop")).toHaveLength(0);
+    expect(s.controller.phase).toBe("recording");
+    expect(micPosition(s).left).toBe(DEFAULT_MIC.left - 60);
+  });
+
+  it("[2] the panel neither opens nor closes while the mic is held", () => {
+    const { s, b } = setupWith(null);
+    hoverOpen(b);
+    expect(s.anchor.isOpen).toBe(true);
+    const mic = pick(s.anchor.root as ShadowRoot, ".mic");
+    pointer(mic, "pointerdown", "mouse", { pointerId: 7, clientX: 500, clientY: 400 });
+    pointer(mic, "pointermove", "mouse", { pointerId: 7, clientX: 460, clientY: 400 });
+    pointer(b, "pointerleave", "mouse"); // the pointer left the box on its way
+    vi.advanceTimersByTime(CLOSE_DELAY_MS * 2);
+    expect(s.anchor.isOpen).toBe(true);
+    pointer(mic, "pointerup", "mouse", { pointerId: 7, clientX: 460, clientY: 400 });
+    expect(s.anchor.isOpen).toBe(true);
+  });
+
+  it("[3] a press that hardly moves is still the click that starts recording", () => {
+    const { s, rt } = setupWith(null);
+    const mic = pick(s.anchor.root as ShadowRoot, ".mic");
+    pointer(mic, "pointerdown", "mouse", { pointerId: 7, clientX: 500, clientY: 400 });
+    pointer(mic, "pointermove", "mouse", { pointerId: 7, clientX: 502, clientY: 401 }); // a shaky hand
+    pointer(mic, "pointerup", "mouse", { pointerId: 7, clientX: 502, clientY: 401 });
+    expect(sentOfType(rt, "start")).toHaveLength(1);
+    expect(s.controller.phase).toBe("recording");
+    expect(micPosition(s)).toEqual(DEFAULT_MIC); // and it did not move
+    expect(s.anchor.isOpen).toBe(true);
+  });
+
+  it("[4] the dragged mic keeps its distance when the field moves", () => {
+    const { s, field } = setupWith(null);
+    dragMic(s, -40, 10);
+    setBox(field, { ...FIELD, top: 300 });
+    document.dispatchEvent(new Event("scroll"));
+    nextFrames();
+    expect(micPosition(s)).toEqual({
+      left: DEFAULT_MIC.left - 40,
+      top: 300 + (FIELD.height - MIC_SIZE_PX) / 2 + 10,
+    });
+  });
+
+  it("[5] an offset that would take the mic off screen is kept inside the window", () => {
+    const { s } = setupWith(null);
+    const vw = document.documentElement.clientWidth || window.innerWidth;
+    const vh = document.documentElement.clientHeight || window.innerHeight;
+    dragMic(s, -5000, -5000);
+    expect(micPosition(s).left).toBeGreaterThanOrEqual(0);
+    expect(micPosition(s).top).toBeGreaterThanOrEqual(0);
+    dragMic(s, 10_000, 10_000);
+    expect(micPosition(s).left + MIC_SIZE_PX).toBeLessThanOrEqual(vw);
+    expect(micPosition(s).top + MIC_SIZE_PX).toBeLessThanOrEqual(vh);
+  });
+
+  it("[6] the position is remembered for the site and applied the next time", async () => {
+    const store = stubStorage();
+    const first = setupWith(store.view, ORIGIN);
+    await settle();
+    dragMic(first.s, -40, 8);
+    await settle();
+    expect(storedOffsets(store)[ORIGIN]).toEqual({ x: -40, y: 8 });
+    first.s.stop();
+
+    const second = setupWith(store.view, ORIGIN); // the same site, opened again
+    await settle();
+    expect(second.s.anchor.offset).toEqual({ x: -40, y: 8 });
+    expect(micPosition(second.s)).toEqual({ left: DEFAULT_MIC.left - 40, top: DEFAULT_MIC.top + 8 });
+  });
+
+  it("[7] another site is not moved", async () => {
+    const store = stubStorage({ [OFFSETS_KEY]: { [ORIGIN]: { x: -40, y: 8 } } });
+    const { s } = setupWith(store.view, "https://other.test");
+    await settle();
+    expect(s.anchor.offset).toEqual({ x: 0, y: 0 });
+    expect(micPosition(s)).toEqual(DEFAULT_MIC);
+  });
+
+  it("[8] only the newest sites are kept, and the write still goes through", async () => {
+    const many: Record<string, MicOffset> = {};
+    for (let i = 0; i < MAX_OFFSET_ORIGINS; i++) many[`https://site-${i}.test`] = { x: i + 1, y: 0 };
+    const store = stubStorage({ [OFFSETS_KEY]: many });
+    const { s } = setupWith(store.view, "https://newcomer.test");
+    await settle();
+    dragMic(s, -30, 0);
+    await settle();
+
+    const kept = storedOffsets(store);
+    expect(Object.keys(kept)).toHaveLength(MAX_OFFSET_ORIGINS);
+    expect(kept["https://newcomer.test"]).toEqual({ x: -30, y: 0 });
+    expect(kept["https://site-0.test"]).toBeUndefined(); // the oldest made room
+    expect(kept["https://site-1.test"]).toEqual({ x: 2, y: 0 });
+  });
+
+  it("[9] resetting the positions puts an open page back with no reload", async () => {
+    const store = stubStorage({ [OFFSETS_KEY]: { [ORIGIN]: { x: -40, y: 8 }, "https://other.test": { x: 5, y: 5 } } });
+    const { s } = setupWith(store.view, ORIGIN);
+    await settle();
+    expect(micPosition(s)).toEqual({ left: DEFAULT_MIC.left - 40, top: DEFAULT_MIC.top + 8 });
+
+    const forgotten = await clearOffsets(store.view); // the settings page's button
+    expect(forgotten).toBe(2); // and it can say how many sites were put back
+    await settle();
+    expect(s.anchor.offset).toEqual({ x: 0, y: 0 });
+    expect(micPosition(s)).toEqual(DEFAULT_MIC);
+    expect(storedOffsets(store)).toEqual({});
+  });
+
+  it("[9] resetting with nothing stored reports nothing to put back", async () => {
+    const store = stubStorage();
+    expect(await clearOffsets(store.view)).toBe(0);
+  });
+
+  it("[10] a storage that cannot be read leaves the default place, and dragging still works", async () => {
+    const store = stubStorage({ [OFFSETS_KEY]: { [ORIGIN]: { x: -40, y: 8 } } }, true);
+    const { s } = setupWith(store.view, ORIGIN);
+    await settle();
+    expect(s.anchor.offset).toEqual({ x: 0, y: 0 });
+    expect(micPosition(s)).toEqual(DEFAULT_MIC);
+
+    dragMic(s, -25, 0); // the failing write must not reach the user
+    await settle();
+    expect(micPosition(s).left).toBe(DEFAULT_MIC.left - 25);
+    expect(s.controller.phase).toBe("idle");
+  });
+
+  it("[10] a stored value that is not a position is ignored", async () => {
+    const store = stubStorage({ [OFFSETS_KEY]: { [ORIGIN]: { x: "left", y: null }, "": { x: 1, y: 1 } } });
+    const { s } = setupWith(store.view, ORIGIN);
+    await settle();
+    expect(s.anchor.offset).toEqual({ x: 0, y: 0 });
+    expect(micPosition(s)).toEqual(DEFAULT_MIC);
   });
 });
 

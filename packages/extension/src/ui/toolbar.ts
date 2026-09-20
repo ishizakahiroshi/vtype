@@ -14,6 +14,8 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 
 interface Labels {
   trigger: string;
+  /** Tooltip on the thin mic: it is both a button and something you can drag aside (C7f). */
+  triggerHint: string;
   clear: string;
   send: string;
   micStart: string;
@@ -23,6 +25,7 @@ interface Labels {
 const LABELS: Record<"en" | "ja", Labels> = {
   en: {
     trigger: "vtype voice input",
+    triggerHint: "Press to dictate. Drag to move it out of the way.",
     clear: "Clear the field",
     send: "Send",
     micStart: "Start voice input",
@@ -30,6 +33,7 @@ const LABELS: Record<"en" | "ja", Labels> = {
   },
   ja: {
     trigger: "vtype 音声入力",
+    triggerHint: "押すと音声入力。ドラッグでずらせます。",
     clear: "入力欄を空にする",
     send: "送信",
     micStart: "音声入力を開始",
@@ -105,9 +109,10 @@ export function applyStateClass(el: Element, state: UiState): void {
 }
 
 /**
- * The thin mic shown beside the focused field. It opens the panel on hover (or tap); it is
- * not a click target, so it is kept out of the tab order. v1 has no keyboard path to open the
- * panel (the hotkey was dropped).
+ * The thin mic shown beside the focused field. Hovering opens the panel; pressing starts and
+ * stops the recording (C7e) and dragging moves it aside (C7f), which the tooltip says because
+ * nothing else shows it. It is kept out of the tab order: v1 has no keyboard path to it (the
+ * hotkey was dropped).
  */
 export function createTrigger(doc: Document): HTMLButtonElement {
   const labels = currentLabels(doc);
@@ -116,6 +121,7 @@ export function createTrigger(doc: Document): HTMLButtonElement {
   b.className = "mic";
   b.tabIndex = -1;
   b.setAttribute("aria-label", labels.trigger);
+  b.title = labels.triggerHint;
   b.setAttribute("aria-haspopup", "true");
   b.setAttribute("aria-expanded", "false");
   b.append(micIcon(doc));

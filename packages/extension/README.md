@@ -129,7 +129,8 @@ form), count every microphone permission dialog you see. The expected count is z
 ### The settings page
 
 Open it from `chrome://extensions` (Details -> Extension options), or right-click the
-extension and choose Options. It has one setting, "what starts recording":
+extension and choose Options. It has one setting, "what starts recording", and one action,
+"put the mic back on every site" (item 32):
 
 22. "Press the mic" (the default) is what items 4 and 12 describe.
 23. Switch to "Rest the mouse on the mic" and go back to a page **without reloading it**:
@@ -144,6 +145,26 @@ extension and choose Options. It has one setting, "what starts recording":
     the first hover says the microphone is not allowed, and hovering again does not repeat the
     attempt; pressing the mic still tries. After a start succeeds, hovering starts recordings
     again.
+
+### Moving the mic out of the way (C7f)
+
+On some sites the mic lands on a button of the site's own (a × inside the search field). It
+can be dragged aside, and where it was put is remembered for that site.
+
+26. Press the mic and move the mouse a few centimetres before letting go: the mic (and the
+    panel, if it is open) follows the pointer, and letting go does **not** start a recording.
+    Press it again without moving: that still starts one.
+27. Do the same while a recording runs: the mic moves and the recording keeps going.
+28. Scroll the page and resize the window: the mic keeps the distance you gave it, next to the
+    field.
+29. Drag it far off the edge of the window: it stops at the edge instead of disappearing.
+30. Reload the page, and open a second page on the same site: the mic is where you put it.
+    Open a different site: the mic is back at its normal place there.
+31. On a touch device, drag the mic with one finger: it moves and the page does not scroll
+    under it. A tap without moving still starts and stops recording.
+32. In the settings page press "Put the mic back on every site": it says how many sites were
+    put back, and a page you left open goes back to the normal place **without being
+    reloaded**. Pressing it again says the mic has not been moved on any site.
 
 ## Hostile-CSS testbed (plan C7)
 
@@ -181,10 +202,11 @@ Stop the server with Ctrl+C.
   Read-only and disabled fields are excluded.
 - Frames: the content script runs in every frame (`all_frames`), so fields inside iframes get
   their own mic inside that frame.
-- Settings: one setting (what starts recording), stored in `chrome.storage.sync` under
-  `trigger` (`"click"` or `"hover"`). Every open page follows a change through
-  `chrome.storage.onChanged`, with no reload. When the value is missing, unreadable or
-  anything else, vtype behaves as `click`.
+- Settings, in `chrome.storage.sync`: `trigger` (`"click"` or `"hover"`: what starts
+  recording) and `micOffsets` (where the mic was dragged to, one entry per origin, at most 50,
+  oldest dropped first). Every open page follows a change through `chrome.storage.onChanged`,
+  with no reload. Anything missing, unreadable or unexpected means the default: start on a
+  press, mic at its normal place.
 - Not covered: closed shadow roots (the page hides them from extensions), documents in
   `designMode`, and pages the browser does not let extensions script (`chrome://`, the Chrome
   Web Store).
