@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLOSE_DELAY_MS, HOST_TAG, MIC_GAP_PX, MIC_SIZE_PX, OPEN_DELAY_MS } from "../src/content/anchor";
 import { startContentScript, type ContentScript } from "../src/content/index";
+import {
+  SETTINGS_AREA,
+  TRIGGER_KEY,
+  isTriggerMode,
+  type StorageChangeListener,
+  type StorageView,
+  type TriggerMode,
+} from "../src/shared/settings";
 
 // ---- synthetic layout -------------------------------------------------------------------
 // happy-dom does no layout, so element boxes come from this table. The stub is installed on
@@ -319,10 +327,12 @@ describe("hover opens after a delay and closes after a separate delay", () => {
     expect(s.anchor.mic?.parentElement).toBe(b);
   });
 
-  it("a mouse click does not open the panel on a hover-capable device", () => {
+  // C7e: pressing the mic used to do nothing where the pointer can hover (hover was the only
+  // way to open the panel). A press is now the way to start a recording, so it opens too.
+  it("a mouse press on the mic opens the panel at once, without the hover delay", () => {
     const { s, mic } = setup();
     pointer(mic, "pointerup", "mouse");
-    expect(s.anchor.isOpen).toBe(false);
+    expect(s.anchor.isOpen).toBe(true);
   });
 
   it("pressing the mic does not take focus away from the field", () => {
@@ -342,12 +352,15 @@ describe("tap opens on touch / no-hover devices", () => {
     return { s, b: box(s), mic: pick(s.anchor.root as ShadowRoot, ".mic") };
   }
 
-  it("a touch tap toggles the panel immediately", () => {
+  // C7e: a second tap used to close the panel. It now starts and stops the recording instead,
+  // so it leaves the panel open (that is where the recording is stopped from); the panel goes
+  // away when the field loses focus.
+  it("a touch tap opens the panel immediately, and tapping again keeps it open", () => {
     const { s, mic } = setup();
     pointer(mic, "pointerup", "touch");
     expect(s.anchor.isOpen).toBe(true);
     pointer(mic, "pointerup", "touch");
-    expect(s.anchor.isOpen).toBe(false);
+    expect(s.anchor.isOpen).toBe(true);
   });
 
   it("touch pointerenter does not start the hover timer", () => {
@@ -365,6 +378,484 @@ describe("tap opens on touch / no-hover devices", () => {
     expect(s.anchor.isOpen).toBe(false);
     pointer(mic, "pointerup", "mouse");
     expect(s.anchor.isOpen).toBe(true);
+  });
+});
+
+// ---- C7e: what starts a recording -------------------------------------------------------
+// Two settings: `click` (the default: the thin mic beside the field starts and stops) and
+// `hover` (the panel opening starts it by itself). The whole extension bus is not needed here:
+// this checks the wiring between the panel, the setting and the controller, so the runtime is a
+// stub that records what the content script sends and can hand back session events, and the
+// storage is a stub that can be changed while the page runs. (The end-to-end path with the real
+// background, offscreen document and recognizer runs in controller.test.ts.)
+
+interface StubRuntime {
+  /** Everything the content script sent to the background. */
+  readonly sent: Array<Record<string, unknown>>;
+  /** Deliver a session event for the session that is currently running. */
+  emit(event: Record<string, unknown>): void;
+  readonly runtime: NonNullable<Parameters<typeof startContentScript>[0]>["runtime"];
+}
+
+function stubRuntime(): StubRuntime {
+  const sent: Array<Record<string, unknown>> = [];
+  const listeners: Array<(m: unknown) => void> = [];
+  return {
+    sent,
+    emit(event: Record<string, unknown>): void {
+      const started = [...sent].reverse().find((m) => m.type === "start");
+      const sessionId = started?.sessionId ?? "";
+      for (const l of [...listeners]) l({ target: "content", type: "session-event", sessionId, event });
+    },
+    runtime: {
+      sendMessage: (message: unknown) => {
+        sent.push(message as Record<string, unknown>);
+      },
+      onMessage: {
+        addListener: (l: (m: unknown) => void) => {
+          listeners.push(l);
+        },
+        removeListener: (l: (m: unknown) => void) => {
+          const i = listeners.indexOf(l);
+          if (i >= 0) listeners.splice(i, 1);
+        },
+      },
+    },
+  };
+}
+
+interface StubStorage {
+  readonly view: StorageView;
+  /** The options page (or another device) stored a new value; undefined clears it. */
+  change(mode: TriggerMode | undefined): void;
+}
+
+/** `broken`: a profile where storage is unavailable (policy, quota, no extension context). */
+function stubStorage(initial?: TriggerMode, broken = false): StubStorage {
+  let stored = initial;
+  const listeners: StorageChangeListener[] = [];
+  const refuse = (): never => {
+    throw new Error("storage is unavailable");
+  };
+  return {
+    view: {
+      sync: {
+        get: async () => (broken ? refuse() : stored === undefined ? {} : { [TRIGGER_KEY]: stored }),
+        set: async (items) => {
+          if (broken) refuse();
+          const value = items[TRIGGER_KEY];
+          stored = isTriggerMode(value) ? value : undefined;
+        },
+      },
+      onChanged: {
+        addListener: (l) => {
+          if (broken) refuse();
+          listeners.push(l);
+        },
+        removeListener: (l) => {
+          const i = listeners.indexOf(l);
+          if (i >= 0) listeners.splice(i, 1);
+        },
+      },
+    },
+    change(mode: TriggerMode | undefined): void {
+      stored = mode;
+      for (const l of [...listeners]) l({ [TRIGGER_KEY]: { newValue: mode } }, SETTINGS_AREA);
+    },
+  };
+}
+
+/** Let the storage read (a promise chain, not a timer) finish. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+}
+
+interface Setup {
+  s: ContentScript;
+  b: HTMLElement;
+  mic: HTMLElement;
+  field: HTMLInputElement;
+  rt: StubRuntime;
+}
+
+function setupWith(storage: StorageView | null): Setup {
+  const rt = stubRuntime();
+  const s = start({ runtime: rt.runtime, language: "en", storage });
+  const field = pick<HTMLInputElement>(mount(`<input id="f" type="text">`), "#f");
+  setBox(field, FIELD);
+  field.focus();
+  return { s, b: box(s), mic: pick(s.anchor.root as ShadowRoot, ".mic"), field, rt };
+}
+
+function sentOfType(rt: StubRuntime, type: string): Array<Record<string, unknown>> {
+  return rt.sent.filter((m) => m.type === type);
+}
+
+function hoverOpen(b: HTMLElement): void {
+  pointer(b, "pointerenter", "mouse");
+  vi.advanceTimersByTime(OPEN_DELAY_MS);
+}
+
+/** Press the thin mic beside the field (a click; a tap arrives the same way). */
+function pressMic(s: ContentScript, pointerType = "mouse"): void {
+  pointer(pick(s.anchor.root as ShadowRoot, ".mic"), "pointerup", pointerType);
+}
+
+function panelMic(s: ContentScript): HTMLButtonElement {
+  return pick<HTMLButtonElement>(s.anchor.root as ShadowRoot, ".record");
+}
+
+function messageLine(s: ContentScript): HTMLElement {
+  return pick(s.anchor.root as ShadowRoot, ".message");
+}
+
+describe("[C7e] pressing the thin mic starts and stops (the default `click` setting)", () => {
+  /** No storage at all: the default setting, and nothing is ever read. */
+  function setup(): Setup {
+    return setupWith(null);
+  }
+
+  it("[1] pressing the mic opens the panel and starts one session", () => {
+    const { s, rt } = setup();
+    expect(s.anchor.isOpen).toBe(false);
+    pressMic(s);
+    expect(s.anchor.isOpen).toBe(true);
+    expect(sentOfType(rt, "start")).toHaveLength(1);
+    expect(s.controller.phase).toBe("recording");
+    expect(s.anchor.ui?.state).toBe("recording");
+  });
+
+  it("[1] a tap does the same on a touch / no-hover device", () => {
+    hoverCapable = false;
+    const { s, rt } = setup();
+    pressMic(s, "touch");
+    expect(s.anchor.isOpen).toBe(true);
+    expect(sentOfType(rt, "start")).toHaveLength(1);
+    expect(s.controller.phase).toBe("recording");
+  });
+
+  it("[2] hovering only opens the panel; nothing starts", () => {
+    const { s, b, rt } = setup();
+    hoverOpen(b);
+    expect(s.anchor.isOpen).toBe(true);
+    vi.advanceTimersByTime(OPEN_DELAY_MS * 3); // and waiting longer changes nothing
+    expect(sentOfType(rt, "start")).toHaveLength(0);
+    expect(s.controller.phase).toBe("idle");
+    expect(s.anchor.ui?.state).toBe("idle");
+    expect(messageLine(s).hidden).toBe(true);
+  });
+
+  it("[2] a pass-over neither opens the panel nor starts anything", () => {
+    const { s, b, rt } = setup();
+    pointer(b, "pointerenter", "mouse");
+    vi.advanceTimersByTime(OPEN_DELAY_MS - 50);
+    pointer(b, "pointerleave", "mouse");
+    vi.advanceTimersByTime(OPEN_DELAY_MS * 3);
+    expect(s.anchor.isOpen).toBe(false);
+    expect(sentOfType(rt, "start")).toHaveLength(0);
+  });
+
+  it("[3] pressing the mic again stops the recording", () => {
+    const { s, rt } = setup();
+    pressMic(s);
+    pressMic(s);
+    expect(sentOfType(rt, "stop")).toHaveLength(1);
+    expect(sentOfType(rt, "stop")[0]?.sessionId).toBe(sentOfType(rt, "start")[0]?.sessionId);
+    expect(s.controller.phase).toBe("stopping");
+    expect(s.anchor.isOpen).toBe(true); // the panel is where the user sees it stop
+    rt.emit({ kind: "ended", reason: "user" });
+    expect(s.controller.phase).toBe("idle");
+    expect(sentOfType(rt, "start")).toHaveLength(1); // the second press started nothing
+  });
+
+  it("[4] the panel stays open while recording, however long the pointer is away", () => {
+    const { s, b } = setup();
+    pressMic(s);
+    pointer(b, "pointerleave", "mouse");
+    vi.advanceTimersByTime(CLOSE_DELAY_MS * 4);
+    expect(s.controller.phase).toBe("recording");
+    expect(s.anchor.isOpen).toBe(true);
+    expect(s.anchor.panel?.hidden).toBe(false);
+  });
+
+  it("[5] once the recording has ended, leaving closes the panel as before", () => {
+    const { s, b, rt } = setup();
+    pressMic(s);
+    panelMic(s).click(); // stop from inside the panel
+    rt.emit({ kind: "ended", reason: "user" });
+    expect(s.controller.phase).toBe("idle");
+    pointer(b, "pointerleave", "mouse");
+    vi.advanceTimersByTime(CLOSE_DELAY_MS - 1);
+    expect(s.anchor.isOpen).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(s.anchor.isOpen).toBe(false);
+  });
+
+  it("[5] a close that was held back happens as soon as the recording ends", () => {
+    const { s, b, rt } = setup();
+    pressMic(s);
+    pointer(b, "pointerleave", "mouse"); // the pointer is already gone while recording
+    vi.advanceTimersByTime(CLOSE_DELAY_MS * 2);
+    expect(s.anchor.isOpen).toBe(true);
+    // With the pointer away, the end comes from the session itself (a long silence).
+    rt.emit({ kind: "ended", reason: "silence" });
+    expect(s.controller.phase).toBe("idle");
+    vi.advanceTimersByTime(CLOSE_DELAY_MS);
+    expect(s.anchor.isOpen).toBe(false);
+  });
+
+  it("[6] a refused microphone is shown in the panel, with the way to allow it", () => {
+    const { s, rt } = setup();
+    pressMic(s);
+    rt.emit({ kind: "ended", reason: "error", code: "not-allowed" });
+    const line = messageLine(s);
+    expect(line.hidden).toBe(false);
+    expect(line.textContent).toContain("not allowed");
+    pick<HTMLButtonElement>(line, ".message-action").click();
+    expect(sentOfType(rt, "open-permission")).toHaveLength(1);
+    // A press is a press: the click path keeps no memory of the refusal and tries again.
+    pressMic(s);
+    expect(sentOfType(rt, "start")).toHaveLength(2);
+  });
+
+  it("[7] a field that is not a target starts nothing and says why", () => {
+    const { s, field, rt } = setup();
+    field.type = "password"; // the page's "show password" toggle; the observer runs later
+    pressMic(s);
+    expect(sentOfType(rt, "start")).toHaveLength(0);
+    expect(s.controller.phase).toBe("idle");
+    expect(messageLine(s).textContent).toContain("text field"); // the press gets an answer
+  });
+
+  it("[7] with no field the mic does nothing at all", () => {
+    const { s, rt } = setup();
+    blurTo(null);
+    expect(s.anchor.target).toBeNull();
+    pressMic(s);
+    expect(s.anchor.isOpen).toBe(false);
+    expect(sentOfType(rt, "start")).toHaveLength(0);
+    expect(s.controller.phase).toBe("idle");
+  });
+
+  it("[8] pressing the mic leaves the field focused, with the caret where it was", () => {
+    const { s, mic, field, rt } = setup();
+    field.value = "hello world";
+    field.setSelectionRange(5, 5);
+    const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+    mic.dispatchEvent(down);
+    expect(down.defaultPrevented).toBe(true); // this is what keeps the focus in a browser
+    pressMic(s);
+    expect(document.activeElement).toBe(field);
+    expect(field.selectionStart).toBe(5);
+    expect(field.selectionEnd).toBe(5);
+    expect(sentOfType(rt, "start")).toHaveLength(1); // and the press did start the recording
+  });
+});
+
+describe("[C7e 10] the `hover` setting: the panel opening starts the recording", () => {
+  async function setup(): Promise<Setup> {
+    const ready = setupWith(stubStorage("hover").view);
+    await settle();
+    expect(ready.s.trigger).toBe("hover");
+    return ready;
+  }
+
+  /** The user pressed the panel's mic to stop, and the session ended. */
+  function stopByUser(s: ContentScript, rt: StubRuntime): void {
+    panelMic(s).click();
+    rt.emit({ kind: "ended", reason: "user" });
+  }
+
+  it("hovering the mic until the panel opens starts one session", async () => {
+    const { s, b, rt } = await setup();
+    expect(s.controller.phase).toBe("idle");
+    hoverOpen(b);
+    expect(s.anchor.isOpen).toBe(true);
+    expect(sentOfType(rt, "start")).toHaveLength(1);
+    expect(s.controller.phase).toBe("recording");
+    expect(s.anchor.ui?.state).toBe("recording");
+  });
+
+  it("a pass-over neither opens the panel nor starts anything", async () => {
+    const { s, b, rt } = await setup();
+    pointer(b, "pointerenter", "mouse");
+    vi.advanceTimersByTime(OPEN_DELAY_MS - 50);
+    pointer(b, "pointerleave", "mouse");
+    vi.advanceTimersByTime(OPEN_DELAY_MS * 3);
+    expect(s.anchor.isOpen).toBe(false);
+    expect(sentOfType(rt, "start")).toHaveLength(0);
+    expect(s.controller.phase).toBe("idle");
+  });
+
+  it("pressing the thin mic still starts once, and stops", async () => {
+    const { s, rt } = await setup();
+    pressMic(s); // opening the panel must not start a second session on top of this one
+    expect(sentOfType(rt, "start")).toHaveLength(1);
+    expect(s.controller.phase).toBe("recording");
+    pressMic(s);
+    expect(sentOfType(rt, "stop")).toHaveLength(1);
+    expect(sentOfType(rt, "start")).toHaveLength(1);
+  });
+
+  it("the panel stays open while recording, however long the pointer is away", async () => {
+    const { s, b } = await setup();
+    hoverOpen(b);
+    pointer(b, "pointerleave", "mouse");
+    vi.advanceTimersByTime(CLOSE_DELAY_MS * 4);
+    expect(s.controller.phase).toBe("recording");
+    expect(s.anchor.isOpen).toBe(true);
+  });
+
+  it("once the recording has ended, leaving closes the panel as before", async () => {
+    const { s, b, rt } = await setup();
+    hoverOpen(b);
+    stopByUser(s, rt);
+    pointer(b, "pointerleave", "mouse");
+    vi.advanceTimersByTime(CLOSE_DELAY_MS);
+    expect(s.anchor.isOpen).toBe(false);
+  });
+
+  it("a recording the user stopped does not start again while the panel stays open", async () => {
+    const { s, b, rt } = await setup();
+    hoverOpen(b);
+    stopByUser(s, rt);
+    expect(s.controller.phase).toBe("idle");
+    expect(s.anchor.isOpen).toBe(true);
+    pointer(b, "pointerenter", "mouse"); // the pointer keeps moving over the open panel
+    vi.advanceTimersByTime(OPEN_DELAY_MS * 3);
+    expect(s.anchor.isOpen).toBe(true);
+    expect(s.controller.phase).toBe("idle");
+    expect(sentOfType(rt, "start")).toHaveLength(1);
+  });
+
+  it("closing the panel and opening it again starts a new session", async () => {
+    const { s, b, rt } = await setup();
+    hoverOpen(b);
+    stopByUser(s, rt);
+    pointer(b, "pointerleave", "mouse");
+    vi.advanceTimersByTime(CLOSE_DELAY_MS);
+    expect(s.anchor.isOpen).toBe(false);
+    hoverOpen(b);
+    expect(s.controller.phase).toBe("recording");
+    expect(sentOfType(rt, "start")).toHaveLength(2);
+    expect(sentOfType(rt, "start")[0]?.sessionId).not.toBe(sentOfType(rt, "start")[1]?.sessionId);
+  });
+
+  it("after the microphone was refused, opening no longer starts; the mic still tries", async () => {
+    const { s, b, rt } = await setup();
+    hoverOpen(b);
+    rt.emit({ kind: "ended", reason: "error", code: "not-allowed" });
+    expect(messageLine(s).textContent).toContain("not allowed");
+
+    pointer(b, "pointerleave", "mouse");
+    vi.advanceTimersByTime(CLOSE_DELAY_MS);
+    hoverOpen(b); // opening again must not ask the microphone a second time
+    expect(s.anchor.isOpen).toBe(true);
+    expect(sentOfType(rt, "start")).toHaveLength(1);
+
+    panelMic(s).click(); // pressing is still allowed to try
+    expect(sentOfType(rt, "start")).toHaveLength(2);
+    expect(s.controller.phase).toBe("recording");
+  });
+
+  it("a field that is no longer a target starts nothing, and says nothing", async () => {
+    const { s, b, field, rt } = await setup();
+    field.type = "password"; // the page's "show password" toggle; the observer runs later
+    hoverOpen(b);
+    expect(s.anchor.isOpen).toBe(true);
+    expect(sentOfType(rt, "start")).toHaveLength(0);
+    expect(messageLine(s).hidden).toBe(true); // a hover must not produce an error message
+  });
+
+  it("with no field at all nothing starts", async () => {
+    const { s, rt } = await setup();
+    blurTo(null);
+    expect(s.anchor.target).toBeNull();
+    s.controller.autoStart();
+    expect(sentOfType(rt, "start")).toHaveLength(0);
+    expect(s.controller.phase).toBe("idle");
+  });
+});
+
+describe("[C7e] the setting itself", () => {
+  it("[9] with nothing stored it behaves as click", async () => {
+    const { s, b, rt } = setupWith(stubStorage().view);
+    await settle();
+    expect(s.trigger).toBe("click");
+    hoverOpen(b);
+    expect(sentOfType(rt, "start")).toHaveLength(0);
+    pressMic(s);
+    expect(sentOfType(rt, "start")).toHaveLength(1);
+  });
+
+  it("[9] a stored value that is not one of the two modes behaves as click", async () => {
+    const store = stubStorage();
+    const { s, b, rt } = setupWith(store.view);
+    await settle();
+    store.change("whatever" as TriggerMode); // an older or newer version wrote something else
+    expect(s.trigger).toBe("click");
+    hoverOpen(b);
+    expect(sentOfType(rt, "start")).toHaveLength(0);
+  });
+
+  it("[10] switching to hover takes effect without reloading the page", async () => {
+    const store = stubStorage();
+    const { s, b, rt } = setupWith(store.view);
+    await settle();
+    hoverOpen(b);
+    expect(sentOfType(rt, "start")).toHaveLength(0); // click setting: hover does not start
+    pointer(b, "pointerleave", "mouse");
+    vi.advanceTimersByTime(CLOSE_DELAY_MS);
+    expect(s.anchor.isOpen).toBe(false);
+
+    store.change("hover"); // the options page saves; the page is not reloaded
+    expect(s.trigger).toBe("hover");
+    hoverOpen(b);
+    expect(sentOfType(rt, "start")).toHaveLength(1);
+  });
+
+  it("[11] switching back to click stops the automatic start", async () => {
+    const store = stubStorage("hover");
+    const { s, b, rt } = setupWith(store.view);
+    await settle();
+    expect(s.trigger).toBe("hover");
+    store.change("click");
+    expect(s.trigger).toBe("click");
+    hoverOpen(b);
+    expect(sentOfType(rt, "start")).toHaveLength(0);
+    pressMic(s); // and the mic still works
+    expect(sentOfType(rt, "start")).toHaveLength(1);
+  });
+
+  it("[11] clearing the setting goes back to click", async () => {
+    const store = stubStorage("hover");
+    const { s, b, rt } = setupWith(store.view);
+    await settle();
+    store.change(undefined);
+    expect(s.trigger).toBe("click");
+    hoverOpen(b);
+    expect(sentOfType(rt, "start")).toHaveLength(0);
+  });
+
+  it("[12] a storage that cannot be read breaks nothing: it behaves as click", async () => {
+    const { s, b, rt } = setupWith(stubStorage("hover", true).view);
+    await settle();
+    expect(s.trigger).toBe("click");
+    hoverOpen(b);
+    expect(sentOfType(rt, "start")).toHaveLength(0);
+    pressMic(s);
+    expect(sentOfType(rt, "start")).toHaveLength(1);
+    expect(s.controller.phase).toBe("recording");
+  });
+
+  it("[12] with no chrome.storage at all it behaves as click", async () => {
+    const { s, b, rt } = setupWith(null);
+    await settle();
+    expect(s.trigger).toBe("click");
+    hoverOpen(b);
+    expect(sentOfType(rt, "start")).toHaveLength(0);
+    pressMic(s);
+    expect(sentOfType(rt, "start")).toHaveLength(1);
   });
 });
 

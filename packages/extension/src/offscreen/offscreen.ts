@@ -117,6 +117,12 @@ export function createOffscreen(options: OffscreenOptions): Offscreen {
     }
   });
 
+  recognizer.on("activity", ({ recognitionId, kind }) => {
+    const s = session;
+    if (s === null || recognitionId < s.firstRecognitionId) return;
+    post(s, { kind: "activity", recognitionId, activity: kind });
+  });
+
   recognizer.on("result", (r) => {
     const s = session;
     if (s === null || r.recognitionId < s.firstRecognitionId) return;

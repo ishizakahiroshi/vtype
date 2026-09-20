@@ -9,6 +9,10 @@
 // C5: position tracking, hover open/close with separate delays, tap on no-hover devices.
 // C7: the look (ui/styles.css), the thin mic (ui/toolbar.ts) and the panel (ui/panel.ts).
 // C7b wires recognition through the `ui` handle (setState / onMic / ...).
+// C7e: pressing the thin mic opens the panel and tells the outside (`onMicPress`), which starts
+// or stops the recording; `canAutoClose` lets the outside hold the panel open while it runs.
+// Hovering only opens the panel, unless the outside reacts to `onOpenChange` (the `hover`
+// setting does; the default `click` setting does not).
 
 import css from "../ui/styles.css?raw";
 import { createPanel, type Panel } from "../ui/panel";
@@ -40,7 +44,22 @@ export interface AnchorOptions {
   isStillTarget?: (field: Element) => boolean;
   /** Attributes whose change triggers `isStillTarget`. */
   observedAttributes?: readonly string[];
+  /** The panel opened or closed. The `hover` setting starts a recording from this. */
   onOpenChange?: (open: boolean) => void;
+  /**
+   * The thin mic beside the field was pressed (a click, or a tap on a touch device). C7e: this
+   * is what starts and stops a recording. It runs *before* the panel is opened, so that with
+   * the `hover` setting the opening finds this recording already running (see onMicPointerUp).
+   */
+  onMicPress?: () => void;
+  /**
+   * Asked before every automatic close (the pointer left). False keeps the panel open and the
+   * question is asked again after another CLOSE_DELAY_MS, so the panel closes on its own once
+   * the answer turns true. C7e uses it to keep the panel while a recording runs: closing it
+   * would take away the waveform and the button that stops the recording.
+   * Explicit closes (a tap on the mic, the field going away, detach) do not ask.
+   */
+  canAutoClose?: () => boolean;
 }
 
 export interface Anchor {
@@ -138,6 +157,8 @@ export function createAnchor(options: AnchorOptions = {}): Anchor {
   const doc = options.doc ?? document;
   const hoverCapable = options.hoverCapable ?? defaultHoverCapable(doc);
   const onOpenChange = options.onOpenChange;
+  const onMicPress = options.onMicPress;
+  const canAutoClose = options.canAutoClose;
 
   let host: HTMLElement | null = null;
   let root: ShadowRoot | null = null;
@@ -204,21 +225,39 @@ export function createAnchor(options: AnchorOptions = {}): Anchor {
     }
   }
 
+  function scheduleClose(): void {
+    if (closeTimer !== null) return;
+    closeTimer = setTimeout(() => {
+      closeTimer = null;
+      if (!open) return;
+      // Not allowed to close yet (a recording is running): keep the panel and ask again.
+      if (canAutoClose !== undefined && !canAutoClose()) {
+        scheduleClose();
+        return;
+      }
+      setOpen(false);
+    }, CLOSE_DELAY_MS);
+  }
+
   function onBoxLeave(e: PointerEvent): void {
     if (!isHoverPointer(e)) return;
     clearOpenTimer();
-    if (open && closeTimer === null) {
-      closeTimer = setTimeout(() => {
-        closeTimer = null;
-        setOpen(false);
-      }, CLOSE_DELAY_MS);
-    }
+    if (open) scheduleClose();
   }
 
-  function onMicPointerUp(e: PointerEvent): void {
-    // Tap: touch input, or any pointer on a device whose primary pointer cannot hover.
+  function onMicActivate(): void {
+    // C7e: a press on the thin mic means the same on every device (mouse click, touch tap,
+    // tap on a device that cannot hover): start or stop the recording, and show the panel.
+    // It never closes the panel — while a recording runs the panel holds the only button that
+    // stops it, and once idle the pointer leaving closes it as before. Where there is no hover
+    // (touch), the panel goes when the field loses focus.
+    //
+    // The press is handed on *before* the panel opens on purpose: with the `hover` setting the
+    // opening starts a recording of its own, and it must find this one already running instead
+    // of starting a second one that this press would then immediately stop.
     if (target === null) return;
-    if (e.pointerType === "touch" || !hoverCapable()) setOpen(!open);
+    onMicPress?.();
+    setOpen(true);
   }
 
   function keepFieldFocus(e: Event): void {
@@ -259,7 +298,7 @@ export function createAnchor(options: AnchorOptions = {}): Anchor {
       box.addEventListener("pointerenter", onBoxEnter);
       box.addEventListener("pointerleave", onBoxLeave);
       box.addEventListener("mousedown", keepFieldFocus);
-      mic.addEventListener("pointerup", onMicPointerUp);
+      mic.addEventListener("pointerup", onMicActivate);
     }
     if (!host.isConnected) doc.documentElement.append(host);
   }

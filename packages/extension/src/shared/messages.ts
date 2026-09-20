@@ -33,6 +33,8 @@ export interface Owner {
 
 export type SessionEvent =
   | { readonly kind: "started"; readonly recognitionId: number }
+  /** vtype-core `activity` (audiostart / soundstart / speechstart / ...): drives the waveform. */
+  | { readonly kind: "activity"; readonly recognitionId: number; readonly activity: string }
   | {
       readonly kind: "result";
       readonly recognitionId: number;
@@ -96,6 +98,7 @@ function isSessionEvent(e: unknown): e is SessionEvent {
   const r = record(e);
   if (r === null) return false;
   if (r.kind === "started") return typeof r.recognitionId === "number";
+  if (r.kind === "activity") return typeof r.recognitionId === "number" && typeof r.activity === "string";
   if (r.kind === "result") {
     return (
       typeof r.recognitionId === "number" &&

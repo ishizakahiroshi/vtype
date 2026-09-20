@@ -1,22 +1,23 @@
-// Content-script side of voice input (plan C7b C3): the panel's mic starts and stops a
-// session, results are shown in the panel only, and on stop the text goes into the field that
-// had focus when recording started.
+// Content-script side of voice input (plan C7b C3, rewritten for C7d): the panel's mic starts
+// and stops a session, and what is heard goes into the field as it is heard.
 //
-// - The field is remembered at start. Moving focus elsewhere does not change where text goes.
-// - Interim and final results are shown in the panel (setTranscript) and never written to the
-//   field while recording ("no auto-confirm on silence" is the decided spec).
-// - On the user's stop the confirmed text, plus an interim tail Chrome did not finalise, is
-//   inserted once at the caret through C6 insertAtCursor (which waits for IME composition).
-// - When the text cannot be inserted (field gone, turned into a password field, IME timeout)
-//   or the session ended some other way (silence, error, superseded), the text stays in the
-//   panel. The next recording continues after it, so it goes into the field on the next stop.
+// - The field and the caret are remembered at start (beginLiveInsert). Moving focus elsewhere
+//   does not change where the text goes.
+// - Every interim result replaces the previous one in the field; a final one stays there and
+//   the next interim follows it. Stopping only ends recognition: nothing is inserted again, so
+//   the text cannot land twice (C7d replaced the old "collect in the panel, insert on stop").
+// - The panel's text line is now only a fallback: it shows what could not be written into the
+//   field (field gone, turned into a password field, IME still composing). That leftover is
+//   inserted on the next stop or send.
 // - The content script never touches the speech recognition or microphone APIs: recognition
 //   runs in the offscreen document, reached through the background (shared/messages.ts).
 
 import type { Anchor } from "./anchor";
 import { resolveTarget } from "./detect";
-import { insertAtCursor, type InsertResult } from "./insert";
+import { beginLiveInsert, insertAtCursor, type InsertResult, type LiveInsert, type LiveResult } from "./insert";
+import { submitFrom } from "./submit";
 import type { Panel } from "../ui/panel";
+import type { WaveformActivity } from "../ui/waveform";
 import {
   isBackgroundToContent,
   type ContentToBackground,
@@ -57,6 +58,14 @@ export interface Controller {
   wire(ui: Panel): void;
   /** What the panel's mic does. */
   toggle(): void;
+  /**
+   * C7e, the `hover` setting only: start a session that no one pressed a button for (the panel
+   * opened by itself on hover). Unlike `toggle` it never stops a session and never shows a
+   * message: a hover is not a press, so it must not produce errors the user did not ask for.
+   * It does nothing while a session runs, without a usable field, outside an extension, or
+   * after the microphone was refused on this page (a later successful start allows it again).
+   */
+  autoStart(): void;
   dispose(): void;
 }
 
@@ -77,6 +86,8 @@ interface Texts {
   keptNotTarget: string;
   keptComposing: string;
   keptSilence: string;
+  stoppedSilence: string;
+  notSubmitted: string;
 }
 
 const TEXTS: Record<"en" | "ja", Texts> = {
@@ -97,6 +108,8 @@ const TEXTS: Record<"en" | "ja", Texts> = {
     keptNotTarget: "That field cannot take the text, so it was kept here.",
     keptComposing: "Text entry was busy (IME), so the text was kept here.",
     keptSilence: "Stopped after silence. Press the mic to continue; the text is kept.",
+    stoppedSilence: "Stopped after a silence. Press the mic to go on.",
+    notSubmitted: "The text is in the field. vtype could not tell how this page is sent, so it sent nothing.",
   },
   ja: {
     noField: "先に入力欄をクリックしてください。",
@@ -115,6 +128,8 @@ const TEXTS: Record<"en" | "ja", Texts> = {
     keptNotTarget: "この欄には入れられないため、文字をここに残しました。",
     keptComposing: "変換中のため入れられませんでした。文字をここに残しました。",
     keptSilence: "無音が続いたため停止しました。マイクを押すと続けられます（文字は残っています）。",
+    stoppedSilence: "無音が続いたため停止しました。マイクを押すと続けられます。",
+    notSubmitted: "文字は欄に入れました。このページの送信方法が分からないため、送信はしていません。",
   },
 };
 
@@ -132,8 +147,14 @@ export function joinSegments(a: string, b: string): string {
   const next = b.trim();
   if (next === "") return a;
   if (a === "") return next;
-  const needsSpace = /[A-Za-z0-9.,!?;:)'"]$/.test(a) && /^[A-Za-z0-9('"]/.test(next);
-  return a + (needsSpace ? " " : "") + next;
+  return a + separatorBefore(a, next) + next;
+}
+
+/** "" or " ": what has to go between `previous` and `next` (no space inside Japanese text). */
+export function separatorBefore(previous: string, next: string): string {
+  const trimmed = next.trim();
+  if (previous === "" || trimmed === "") return "";
+  return /[A-Za-z0-9.,!?;:)'"]$/.test(previous) && /^[A-Za-z0-9('"]/.test(trimmed) ? " " : "";
 }
 
 let sessionCounter = 0;
@@ -151,13 +172,20 @@ export function createController(options: ControllerOptions): Controller {
   let phase: ControllerPhase = "idle";
   let sessionId: string | null = null;
   let field: Element | null = null;
+  /** Text that could not be written into the field and is shown in the panel instead. */
   let confirmed = "";
-  let interim = "";
+  let live: LiveInsert | null = null;
+  /** Whether this session managed to write anything into the field (for the end message). */
+  let wroteIntoField = false;
+  let submitAfterFinish = false;
+  /** C7e: cleared when the microphone is refused, so a hover does not retry it every time. */
+  let autoStartAllowed = true;
   let startTimer: ReturnType<typeof setTimeout> | null = null;
   let stopTimer: ReturnType<typeof setTimeout> | null = null;
 
   function render(): void {
-    ui?.setTranscript(confirmed, interim);
+    // C7d: the panel shows text only when it could not be written into the field.
+    ui?.setTranscript(confirmed, "");
   }
 
   function message(text: string | null, withPermissionAction = false): void {
@@ -210,10 +238,10 @@ export function createController(options: ControllerOptions): Controller {
     ui?.setState("idle");
   }
 
-  /** End the session without the background (unreachable): keep the text. */
+  /** End the session without the background (unreachable): keep whatever the panel holds. */
   function failLocally(text: string): void {
-    confirmed = joinSegments(confirmed, interim);
-    interim = "";
+    live?.end();
+    live = null;
     field = null;
     toIdle();
     render();
@@ -234,7 +262,9 @@ export function createController(options: ControllerOptions): Controller {
     sessionId = id;
     field = target;
     phase = "recording";
-    interim = "";
+    // C7d: from this moment what is heard goes into the field itself, at the caret it has now.
+    live = beginLiveInsert(target);
+    wroteIntoField = false;
     ui?.setState("recording");
     message(null);
     render();
@@ -257,11 +287,22 @@ export function createController(options: ControllerOptions): Controller {
     }, STOP_TIMEOUT_MS);
   }
 
-  function keptMessage(result: InsertResult): string {
+  function keptMessage(result: InsertResult | LiveResult): string {
     if (result.ok) return "";
     if (result.reason === "disconnected") return t.keptFieldGone;
     if (result.reason === "composition-timeout") return t.keptComposing;
+    if (result.reason === "ended") return t.keptNotTarget;
     return t.keptNotTarget;
+  }
+
+  /**
+   * A live write did not reach the field: keep that text in the panel instead, so nothing the
+   * user dictated is lost. It is inserted on the next successful stop or send.
+   */
+  function keepInPanel(text: string, result: LiveResult): void {
+    if (text !== "") confirmed = joinSegments(confirmed, text);
+    render();
+    message(keptMessage(result));
   }
 
   function errorText(code: string | undefined): { text: string; permission: boolean } {
@@ -274,17 +315,71 @@ export function createController(options: ControllerOptions): Controller {
     return { text: t.otherError(code ?? "unknown"), permission: false };
   }
 
+  function doSubmit(target: Element): void {
+    const result = submitFrom(target);
+    message(result.submitted ? null : t.notSubmitted);
+  }
+
+  /**
+   * Send button (C8). While recognition runs it interrupts, in this order: stop recognition,
+   * insert the confirmed text at the caret, submit. It does not wait for the offscreen grace
+   * period (up to 1.5 s for a trailing final result): pressing send should act at once, and
+   * what the panel shows is what gets inserted. Nothing is submitted when the insert fails:
+   * submitting an empty field is worse than not submitting.
+   */
+  async function onSend(): Promise<void> {
+    if (phase !== "idle") {
+      submitAfterFinish = true;
+      const id = sessionId;
+      if (id !== null) {
+        send({ target: "background", type: "stop", sessionId: id });
+        sessionId = null; // the session's later events (including its `ended`) no longer apply
+      }
+      await finish("user");
+      return;
+    }
+    const target = anchor.target;
+    if (target === null || resolveTarget(target) !== target) {
+      message(t.noField);
+      return;
+    }
+    if (confirmed !== "") {
+      const text = confirmed;
+      const result = await insertAtCursor(target, text);
+      if (!result.ok) {
+        message(keptMessage(result));
+        return;
+      }
+      confirmed = confirmed.startsWith(text) ? confirmed.slice(text.length).trimStart() : confirmed;
+      render();
+    }
+    doSubmit(target);
+  }
+
   async function finish(reason: EndReason, code?: string): Promise<void> {
     const target = field;
-    const text = joinSegments(confirmed, interim); // an interim tail Chrome never finalised is kept
-    confirmed = text;
-    interim = "";
+    // C7d: what was heard is already in the field. Only text that could not be written there
+    // is still held in the panel, and that is what may have to be inserted now.
+    live?.end();
+    live = null;
+    const wroteAnything = wroteIntoField;
+    wroteIntoField = false;
+    const text = confirmed;
     field = null;
     toIdle();
     render();
 
+    const wantSubmit = submitAfterFinish;
+    submitAfterFinish = false;
+
     if (reason === "user") {
-      if (text === "" || target === null) return;
+      if (text === "" || target === null) {
+        // Nothing to insert: send still submits what is already in the field.
+        const fallback = target ?? anchor.target;
+        if (wantSubmit && fallback !== null) doSubmit(fallback);
+        else if (wantSubmit) message(t.noField);
+        return;
+      }
       // The text stays visible while insertAtCursor may wait for an IME composition to end.
       const result = await insertAtCursor(target, text);
       if (result.ok) {
@@ -292,38 +387,84 @@ export function createController(options: ControllerOptions): Controller {
         confirmed = confirmed.startsWith(text) ? confirmed.slice(text.length).trimStart() : confirmed;
         render();
         if (phase === "idle") message(null);
+        if (wantSubmit) doSubmit(target);
       } else {
+        // No submit: the text is not in the field, and an empty submit cannot be taken back.
         message(keptMessage(result));
       }
       return;
     }
     if (reason === "silence") {
-      message(text === "" ? t.noSpeech : t.keptSilence);
+      if (text !== "") message(t.keptSilence);
+      else message(wroteAnything ? t.stoppedSilence : t.noSpeech);
     } else if (reason === "superseded") {
       message(t.superseded);
     } else if (reason === "aborted") {
       message(t.aborted);
     } else {
       const e = errorText(code);
+      // C7e: a refused microphone would fail again on the next hover, so stop trying by
+      // itself. The panel's mic still starts (it is what the "Allow it" action leads back to).
+      if (e.permission) autoStartAllowed = false;
       message(e.text, e.permission);
     }
+  }
+
+  /**
+   * C7d: a result goes into the field right away. A final segment stays (the next interim
+   * follows it); an interim replaces the previous one. What cannot be written is kept in the
+   * panel instead.
+   */
+  async function writeLive(transcript: string, isFinal: boolean): Promise<void> {
+    const session = live;
+    if (session === null) return;
+    const body = transcript.trim();
+    if (isFinal) {
+      if (body === "") {
+        // Chrome sends empty finals during silence: just drop the interim shown so far.
+        await session.update("");
+        return;
+      }
+      // Text the panel is still holding (an earlier write failed) goes in ahead of this
+      // segment, so the order stays the order it was spoken in.
+      const carried = confirmed;
+      const segment = carried === "" ? body : joinSegments(carried, body);
+      const result = await session.commit(separatorBefore(session.committedText, segment) + segment);
+      if (!result.ok) {
+        keepInPanel(body, result);
+        return;
+      }
+      if (carried !== "" && confirmed.startsWith(carried)) {
+        confirmed = confirmed.slice(carried.length).trimStart();
+        render();
+        message(null);
+      }
+      wroteIntoField = true;
+      return;
+    }
+    if (body === "") return;
+    const result = await session.update(separatorBefore(session.committedText, body) + body);
+    if (!result.ok && result.reason !== "ended") keepInPanel("", result);
   }
 
   function handle(event: SessionEvent): void {
     if (event.kind === "started") {
       if (startTimer !== null) clearTimeout(startTimer);
       startTimer = null;
+      // Recognition really started, so the microphone is allowed: a refusal that switched
+      // auto-start off earlier (the user has granted it since) no longer applies.
+      autoStartAllowed = true;
+      return;
+    }
+    if (event.kind === "activity") {
+      // C7c: the waveform is driven by these events, never by microphone volume.
+      ui?.setActivity(event.activity as WaveformActivity);
       return;
     }
     if (event.kind === "result") {
       // Late results of a replaced instance (isCurrent: false) are kept on purpose.
-      if (event.isFinal) {
-        confirmed = joinSegments(confirmed, event.transcript);
-        interim = "";
-      } else {
-        interim = event.transcript;
-      }
-      render();
+      ui?.waveform.noteTranscript(event.transcript, event.isFinal);
+      void writeLive(event.transcript, event.isFinal);
       return;
     }
     void finish(event.reason, event.code);
@@ -340,6 +481,22 @@ export function createController(options: ControllerOptions): Controller {
   function toggle(): void {
     if (phase === "idle") start();
     else if (phase === "recording") stop();
+  }
+
+  function autoStart(): void {
+    if (phase !== "idle" || !autoStartAllowed || runtime === null) return;
+    const target = anchor.target;
+    if (target === null || resolveTarget(target) !== target) return;
+    start();
+  }
+
+  function sendHandler(): void {
+    void onSend();
+  }
+
+  /** × emptied the field: start writing again from the beginning of the empty field (C7d 6). */
+  function clearHandler(): void {
+    live?.resync();
   }
 
   return {
@@ -359,14 +516,21 @@ export function createController(options: ControllerOptions): Controller {
       if (ui === panel) return;
       ui = panel;
       panel.onMic = toggle;
+      panel.onSend = sendHandler;
+      panel.onClear = clearHandler;
       render();
     },
     toggle,
+    autoStart,
     dispose(): void {
       if (sessionId !== null) send({ target: "background", type: "stop", sessionId });
       clearTimers();
       runtime?.onMessage.removeListener(onMessage);
       if (ui !== null && ui.onMic === toggle) ui.onMic = null;
+      if (ui !== null && ui.onSend === sendHandler) ui.onSend = null;
+      if (ui !== null && ui.onClear === clearHandler) ui.onClear = null;
+      live?.end();
+      live = null;
     },
   };
 }

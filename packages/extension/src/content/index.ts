@@ -4,11 +4,23 @@
 // (anchor.ts) to it. The panel's mic drives controller.ts, which asks the background to run
 // recognition in the offscreen document; nothing here touches the speech or media APIs.
 // v1 has no keyboard shortcut (owner's decision, 2026-09-19).
+// C7e: pressing the thin mic starts and stops the recording (the default `click` setting); with
+// the `hover` setting the panel opening starts it by itself. Either way the panel is held open
+// until the recording ends. The setting comes from chrome.storage.sync and can change while the
+// page is open (shared/settings.ts).
 
 import { createAnchor, type Anchor } from "./anchor";
 import { createController, type ContentRuntime, type Controller } from "./controller";
 import { TARGET_DEFINING_ATTRIBUTES, deepActiveElement, resolveTarget } from "./detect";
 import { startCompositionTracking } from "./insert";
+import {
+  DEFAULT_TRIGGER,
+  extensionStorage,
+  readTrigger,
+  watchTrigger,
+  type StorageView,
+  type TriggerMode,
+} from "../shared/settings";
 
 /** The only part of the extension API this file touches, typed narrowly instead of @types/chrome. */
 interface ChromeRuntimeView {
@@ -18,6 +30,8 @@ interface ChromeRuntimeView {
 export interface ContentScript {
   readonly anchor: Anchor;
   readonly controller: Controller;
+  /** What starts a recording right now (C7e). Follows the setting while the page is open. */
+  readonly trigger: TriggerMode;
   /** Remove every listener this script added and take the host off the page. */
   stop(): void;
 }
@@ -28,6 +42,8 @@ export interface StartOptions {
   /** chrome.runtime by default; null runs without an extension (tests of detection only). */
   runtime?: ContentRuntime | null;
   language?: string;
+  /** chrome.storage by default; null runs on the default setting and never reads storage. */
+  storage?: StorageView | null;
 }
 
 function extensionRuntime(): ContentRuntime | null {
@@ -41,16 +57,43 @@ export function startContentScript(options: StartOptions = {}): ContentScript {
   // Before anything can be inserted: a composition that starts before tracking is invisible,
   // and insertAtCursor would then write into the middle of it (C6).
   startCompositionTracking(doc);
+  // The anchor is built before the controller (the controller needs it), so the two callbacks
+  // below reach the controller through this box, which is filled in right after.
+  let recorder: Controller | null = null;
+  // Until storage answers (and whenever it cannot), the default setting applies: a hover that
+  // starts recording is a surprise, so it is never what an unanswered read falls back to.
+  let trigger: TriggerMode = DEFAULT_TRIGGER;
   const anchor = createAnchor({
     doc,
     ...(options.hoverCapable !== undefined ? { hoverCapable: options.hoverCapable } : {}),
     isStillTarget: (field) => resolveTarget(field) === field,
     observedAttributes: TARGET_DEFINING_ATTRIBUTES,
+    // C7e, `click` (default): pressing the thin mic opens the panel and starts or stops the
+    // recording. The panel's own mic keeps doing the same through controller.wire.
+    onMicPress: () => recorder?.toggle(),
+    // C7e, `hover`: opening the panel is itself the start. autoStart stays silent when it
+    // cannot start, because nobody pressed anything.
+    onOpenChange: (open) => {
+      if (open && trigger === "hover") recorder?.autoStart();
+    },
+    // While a recording runs the panel must stay: it holds the button that stops it.
+    canAutoClose: () => recorder === null || recorder.phase === "idle",
   });
   const controller = createController({
     anchor,
     runtime: options.runtime !== undefined ? options.runtime : extensionRuntime(),
     ...(options.language !== undefined ? { language: options.language } : {}),
+  });
+  recorder = controller;
+
+  // The setting is read once and then followed: a change in the options page (or on another
+  // device) reaches every open page without a reload.
+  const storage = options.storage !== undefined ? options.storage : extensionStorage();
+  void readTrigger(storage).then((mode) => {
+    trigger = mode;
+  });
+  const unwatchTrigger = watchTrigger(storage, (mode) => {
+    trigger = mode;
   });
 
   // Focus changes between two elements of the same shadow root are not visible from the
@@ -118,10 +161,14 @@ export function startContentScript(options: StartOptions = {}): ContentScript {
   return {
     anchor,
     controller,
+    get trigger() {
+      return trigger;
+    },
     stop(): void {
       doc.removeEventListener("focusin", onFocusIn, true);
       doc.removeEventListener("focusout", onFocusOut, true);
       setExtraRoot(null);
+      unwatchTrigger();
       controller.dispose();
       anchor.destroy();
     },

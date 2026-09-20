@@ -4,9 +4,13 @@
   "version": "0.0.1",
   "description": "Voice input for any text field on the web. Uses the browser's built-in speech recognition.",
   "minimum_chrome_version": "116",
-  "permissions": ["offscreen"],
+  "permissions": ["offscreen", "storage"],
   "background": {
     "service_worker": "background.js"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
   },
   "content_scripts": [
     {

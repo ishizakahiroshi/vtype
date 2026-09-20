@@ -270,3 +270,252 @@ function insertWithRange(host: HTMLElement, sel: Selection | null, text: string)
   }
   dispatchInput(host, "insertText", text);
 }
+
+// ---- live insertion (plan C7d) ------------------------------------------------------------
+//
+// While recognition runs, what was heard so far is written into the field itself and replaced
+// as it is refined, instead of being collected in the panel. `insertAtCursor` above is a
+// single shot and stays as it is (C8 still uses it).
+//
+// input / textarea: the text around the caret is remembered at the start
+// (many-ai-cli's voice.ts keeps an `interimStart` index the same way, though it appends at the
+// end of the field; vtype writes at the caret, as decided for this product), and every update
+// rewrites "prefix + confirmed + interim + suffix" through the native setter.
+//
+// contenteditable: the previous interim is selected and replaced with
+// execCommand("insertText"), never by rebuilding nodes: rich editors keep their own model of
+// the document and would fight DOM surgery. Only when execCommand is unavailable or refuses is
+// a Range used.
+
+export type LiveInsertFailure = "disconnected" | "not-a-target" | "composition-timeout" | "ended";
+export type LiveResult = { ok: true } | { ok: false; reason: LiveInsertFailure };
+
+export interface LiveInsert {
+  readonly field: Element;
+  /** False once the session ended or the field became unusable. */
+  readonly active: boolean;
+  /** What this session has put into the field (confirmed text plus the current interim). */
+  readonly text: string;
+  /** Only the confirmed part (the interim tail can still be replaced). */
+  readonly committedText: string;
+  /** Show `interim` as the not-yet-final tail, replacing the previous one. */
+  update(interim: string): Promise<LiveResult>;
+  /** Keep `segment` in the field for good; later interim text goes after it. */
+  commit(segment: string): Promise<LiveResult>;
+  /** Take the field as it is now as the new starting point (after × emptied it, or the user typed). */
+  resync(): void;
+  /** Stop writing. The text written so far stays in the field. */
+  end(): void;
+}
+
+interface TextControlAnchor {
+  kind: "text-control";
+  prefix: string;
+  suffix: string;
+}
+
+interface EditableAnchor {
+  kind: "editable";
+  /** Number of characters of the current interim that a new one replaces. */
+  interimLength: number;
+  /** Where the caret was left after our last write, to notice the user moving it. */
+  caretNode: Node | null;
+  caretOffset: number;
+}
+
+function readCaret(sel: Selection | null): { node: Node | null; offset: number } {
+  if (sel === null || sel.rangeCount === 0) return { node: null, offset: 0 };
+  const range = sel.getRangeAt(0);
+  return { node: range.endContainer, offset: range.endOffset };
+}
+
+/** Select the `count` characters before the caret, inside `host`. */
+function selectBefore(host: HTMLElement, sel: Selection, count: number): boolean {
+  if (count <= 0 || sel.rangeCount === 0) return false;
+  const doc = host.ownerDocument;
+  const end = sel.getRangeAt(0);
+  const walker = doc.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+  const texts: Text[] = [];
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) texts.push(node as Text);
+  let index = texts.indexOf(end.endContainer as Text);
+  let offset = end.endOffset;
+  if (index === -1) {
+    // The caret sits between elements: start from the last text node before it.
+    index = texts.length - 1;
+    offset = texts[index]?.data.length ?? 0;
+    if (index < 0) return false;
+  }
+  let remaining = count;
+  while (remaining > 0) {
+    if (offset >= remaining) {
+      offset -= remaining;
+      remaining = 0;
+      break;
+    }
+    remaining -= offset;
+    index -= 1;
+    if (index < 0) return false;
+    offset = texts[index]?.data.length ?? 0;
+  }
+  const start = texts[index];
+  if (start === undefined) return false;
+  const range = doc.createRange();
+  range.setStart(start, offset);
+  range.setEnd(end.endContainer, end.endOffset);
+  sel.removeAllRanges();
+  sel.addRange(range);
+  return true;
+}
+
+export function beginLiveInsert(field: Element, options: InsertOptions = {}): LiveInsert {
+  startCompositionTracking(field.ownerDocument);
+  const timeoutMs = options.compositionTimeoutMs ?? COMPOSITION_TIMEOUT_MS;
+  let active = true;
+  let confirmed = "";
+  let interim = "";
+  let anchor: TextControlAnchor | EditableAnchor = isTextControl(field)
+    ? { kind: "text-control", prefix: "", suffix: "" }
+    : { kind: "editable", interimLength: 0, caretNode: null, caretOffset: 0 };
+  /** The value this session wrote last, to notice edits made by anyone else. */
+  let lastWritten: string | null = null;
+
+  function anchorNow(): void {
+    lastWritten = null;
+    if (isTextControl(field)) {
+      const value = readNativeValue(field);
+      const start = field.selectionStart ?? value.length;
+      const end = field.selectionEnd ?? start;
+      anchor = { kind: "text-control", prefix: value.slice(0, start), suffix: value.slice(end) };
+    } else {
+      anchor = { kind: "editable", interimLength: 0, caretNode: null, caretOffset: 0 };
+    }
+  }
+
+  function writeTextControl(): void {
+    if (!isTextControl(field)) return;
+    let a = anchor as TextControlAnchor;
+    // Someone else changed the field since our last write (the user typed, the page reset it,
+    // × emptied it): take the field as it is now as the new base. The text still to be shown
+    // is kept; what was confirmed earlier is gone with the old content.
+    if (lastWritten !== null && readNativeValue(field) !== lastWritten) {
+      confirmed = "";
+      anchorNow();
+      a = anchor as TextControlAnchor;
+    }
+    const body = confirmed + interim;
+    const next = a.prefix + body + a.suffix;
+    writeNativeValue(field, next, "insertText", interim === "" ? confirmed : interim);
+    lastWritten = next;
+    const caret = (a.prefix + body).length;
+    try {
+      field.setSelectionRange(caret, caret);
+    } catch {
+      // input types without a selection API
+    }
+  }
+
+  function writeEditable(text: string): void {
+    const host = field as HTMLElement;
+    const a = anchor as EditableAnchor;
+    const sel = prepareEditable(host);
+    if (sel === null) return;
+    const caret = readCaret(sel);
+    // The caret is not where we left it (the user clicked elsewhere, or × emptied the field):
+    // start a new interim here instead of eating their text.
+    if (a.caretNode !== null && (caret.node !== a.caretNode || caret.offset !== a.caretOffset)) {
+      a.interimLength = 0;
+    }
+    const replacing = a.interimLength > 0 && selectBefore(host, sel, a.interimLength);
+    if (text === "") {
+      if (replacing) {
+        if (!tryExecCommand(host.ownerDocument, "delete")) {
+          const range = sel.getRangeAt(0);
+          range.deleteContents();
+          dispatchInput(host, "deleteContent", null);
+        }
+      }
+    } else if (!tryExecCommand(host.ownerDocument, "insertText", text)) {
+      // Selected text is replaced by the Range path as well (deleteContents first).
+      insertWithRange(host, sel, text);
+    }
+    a.interimLength = text.length;
+    const after = readCaret(selectionFor(host));
+    a.caretNode = after.node;
+    a.caretOffset = after.offset;
+  }
+
+  function write(): void {
+    if (isTextControl(field)) writeTextControl();
+    else writeEditable(interim === "" ? confirmed : interim);
+  }
+
+  async function apply(): Promise<LiveResult> {
+    if (!active) return { ok: false, reason: "ended" };
+    if (!field.isConnected) {
+      active = false;
+      return { ok: false, reason: "disconnected" };
+    }
+    if (resolveTarget(field) !== field) {
+      active = false;
+      return { ok: false, reason: "not-a-target" };
+    }
+    if (isComposing(field)) {
+      // Never rewrite the field in the middle of an IME composition (C6). The state written
+      // afterwards is the latest one, so waiting callers coalesce.
+      if (!(await waitForCompositionEnd(field, timeoutMs))) return { ok: false, reason: "composition-timeout" };
+      // `active` is not re-checked here on purpose: a write that was legitimate when it was
+      // asked for still lands after the composition ends, even if the user stopped recognition
+      // while the IME was busy. Otherwise that text would be lost.
+      if (!field.isConnected) {
+        active = false;
+        return { ok: false, reason: "disconnected" };
+      }
+      if (resolveTarget(field) !== field) {
+        active = false;
+        return { ok: false, reason: "not-a-target" };
+      }
+    }
+    write();
+    return { ok: true };
+  }
+
+  anchorNow();
+
+  return {
+    field,
+    get active() {
+      return active;
+    },
+    get text() {
+      return confirmed + interim;
+    },
+    get committedText() {
+      return confirmed;
+    },
+    async update(next: string): Promise<LiveResult> {
+      interim = next;
+      return apply();
+    },
+    async commit(segment: string): Promise<LiveResult> {
+      // The segment becomes part of the confirmed text; the next interim follows it.
+      interim = segment;
+      const result = await apply();
+      if (result.ok) {
+        confirmed += segment;
+        interim = "";
+        if (anchor.kind === "editable") anchor.interimLength = 0;
+      } else {
+        interim = "";
+      }
+      return result;
+    },
+    resync(): void {
+      confirmed = "";
+      interim = "";
+      anchorNow();
+    },
+    end(): void {
+      active = false;
+    },
+  };
+}

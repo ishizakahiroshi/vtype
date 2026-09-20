@@ -12,6 +12,7 @@
 
 import { clearField, hasText } from "../content/clear";
 import { applyStateClass, createToolbar, type Toolbar, type UiState } from "./toolbar";
+import { createWaveform, type Waveform, type WaveformActivity } from "./waveform";
 
 export type { UiState } from "./toolbar";
 
@@ -29,6 +30,8 @@ export interface PanelOptions {
 export interface Panel {
   readonly element: HTMLElement;
   readonly toolbar: Toolbar;
+  /** The bars shown while recording (C7c). */
+  readonly waveform: Waveform;
   readonly state: UiState;
   /** The field × clears and whose text decides whether × is shown. */
   readonly field: Element | null;
@@ -36,6 +39,8 @@ export interface Panel {
   onSend: (() => void) | null;
   onClear: (() => void) | null;
   setState(state: UiState): void;
+  /** A recognition activity event arrived (C7c): moves the bars. */
+  setActivity(kind: WaveformActivity): void;
   /** Confirmed text and the not-yet-final tail (shown dimmed). Empty strings hide the line. */
   setTranscript(finalText: string, interimText?: string): void;
   /**
@@ -74,8 +79,10 @@ export function createPanel(options: PanelOptions = {}): Panel {
   message.setAttribute("role", "status");
   message.hidden = true;
 
+  const waveform = createWaveform({ doc });
+  waveform.element.hidden = true;
   const toolbar = createToolbar(doc);
-  element.append(transcript, message, toolbar.element);
+  element.append(waveform.element, transcript, message, toolbar.element);
 
   let state: UiState = "idle";
   let field: Element | null = null;
@@ -84,6 +91,7 @@ export function createPanel(options: PanelOptions = {}): Panel {
   const panel: Panel = {
     element,
     toolbar,
+    waveform,
     get state() {
       return state;
     },
@@ -94,20 +102,29 @@ export function createPanel(options: PanelOptions = {}): Panel {
     onSend: null,
     onClear: null,
     setState,
+    setActivity(kind: WaveformActivity): void {
+      waveform.setActivity(kind);
+    },
     setTranscript,
     setMessage,
     bindField,
     refreshHasText,
     destroy(): void {
       bindField(null);
+      waveform.stop();
     },
   };
 
   function setState(next: UiState): void {
+    const previous = state;
     state = next;
     toolbar.setState(next);
     applyStateClass(element, next);
     if (trigger !== null) applyStateClass(trigger, next);
+    // The bars run while the microphone is open and while the last result is awaited; they
+    // disappear when the panel goes idle.
+    if (next === "recording" && previous !== "recording") waveform.start();
+    else if (next === "idle") waveform.stop();
   }
 
   function setTranscript(finalText: string, interimText = ""): void {

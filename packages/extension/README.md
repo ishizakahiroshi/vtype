@@ -2,10 +2,16 @@
 
 The browser extension. When a text field on a web page gets focus, a small mic appears just
 outside its right edge; resting the mouse on the mic opens a panel with three buttons,
-× / send / mic, in the same order as many-ai-cli's input bar. Press the panel's mic, speak,
-and press it again: what you said is inserted at the caret of the field. While you speak the
-text is shown only in the panel, never in the field. × empties the field and is shown only
-while the field has text. Send comes in a later step (it renders but does nothing yet).
+× / send / mic, in the same order as many-ai-cli's input bar. Pressing that small mic starts
+the recording and opens the panel in one go (C7e); pressing it again stops. The words appear in
+the field itself, at the caret, and are refined while you talk. The panel's mic does the same
+as the small one, and the text is already where it belongs when recognition ends. While the
+recording runs the panel does not close by itself, so the waveform and the stop button stay
+within reach. The settings page offers a second way to start: with "rest the mouse on the mic",
+the panel opening is itself the start, so you can speak without pressing anything. Send stops
+recognition and submits the page. × empties the field and is shown only while the field has
+text. The panel's text line is a fallback: it shows text that could not be written into the
+field (the field was removed, or an IME composition was in the way).
 
 Recognition is the browser's own (Web Speech API), run in the extension's offscreen document,
 so the microphone is allowed once for the extension (a page opens for that on install) and no
@@ -26,8 +32,9 @@ pnpm -F vtype-extension test
 ```
 
 `dist/` contains `manifest.json`, `content.js`, `background.js` (the service worker),
-`offscreen.html` + `offscreen.js` (runs recognition) and `permission.html` + `permission.js`
-(the one-time microphone page). Every script is one self-contained classic bundle; the build
+`offscreen.html` + `offscreen.js` (runs recognition), `permission.html` + `permission.js`
+(the one-time microphone page) and `options.html` + `options.js` (the settings page, registered
+as `options_ui`). Every script is one self-contained classic bundle; the build
 fails if module syntax is left in an output or a referenced file is missing.
 
 ## Load it in Chrome
@@ -64,8 +71,9 @@ In the list below, "the mic" is the small, faint mic icon that appears next to t
 3. Resize the window, and make the layout move the field (open a sidebar, expand text above
    it): the mic follows.
 4. Move the mouse quickly across the mic: the panel does **not** open. Rest on it for about
-   a third of a second: the panel opens below the mic. Move from the mic into the panel:
-   it stays open. Leave both: it closes about half a second later.
+   a third of a second: the panel opens below the mic, and **nothing starts recording** (that
+   is the default `click` setting). Move from the mic into the panel: it stays open. Leave
+   both: it closes about half a second later.
 5. Pressing on the mic or the panel does not move focus out of the field (the caret stays).
 6. Click the password field: no mic at all. If the form has a "show password" button,
    press it and focus the revealed field: still no mic (fields marked
@@ -74,38 +82,68 @@ In the list below, "the mic" is the small, faint mic icon that appears next to t
 8. Click empty page space: the mic disappears. Switch to another window and back: the
    mic is still next to the field.
 9. On a touch device (or Chrome DevTools device emulation with touch), tap the mic: the
-   panel opens immediately; tap again: it closes.
+   panel opens immediately and the recording starts; tap again: it stops. The panel stays open
+   (that is where the recording is stopped from) and goes away when the field loses focus.
 10. A field near the right edge of the window: the mic is tucked inside the field's right
     edge instead of being pushed off screen, and the panel grows to the left.
 11. The panel shows × / send / mic from left to right. × is invisible while the field is empty
     and appears as soon as you type; pressing it empties the field (the page reacts as if you
-    had deleted the text yourself) and × disappears again. Send does nothing yet.
+    had deleted the text yourself) and × disappears again. Send submits the page (C8): it
+    interrupts a running recording, and when vtype cannot tell how the page is sent it says so
+    and sends nothing.
 
 ### Speaking into a field
 
 On three sites of different origins (for example a search box, a webmail body and a contact
 form), count every microphone permission dialog you see. The expected count is zero.
 
-12. Put the caret in the middle of existing text, open the panel and press its mic: the mic
-    turns red and pulses. No permission dialog appears on the site.
-13. Speak a sentence. The words appear in the panel (the not-yet-final part in grey); the field
-    does not change while you speak.
+12. Put the caret in the middle of existing text and press the small mic next to the field:
+    the panel opens, its mic turns red and pulses, and a row of blue bars appears and moves
+    while you speak. The caret does not move out of the field when you press. No permission
+    dialog appears on the site.
+13. Speak a sentence. The words appear in the field as you speak and are corrected in place
+    (they do not pile up), with the text before and after the caret intact. On a site built
+    with React or a rich editor, check the page reacts as if you had typed (character
+    counters, send buttons becoming active).
 14. Pause and keep speaking: recording continues until you press the mic again (after a long
-    silence, three of Chrome's no-speech timeouts in a row, it stops by itself and keeps the
-    text in the panel; pressing the mic again continues after that text).
-15. Press the mic again: the panel's text is inserted once at the caret, the text before and
-    after the caret is intact, and the panel empties. On a site built with React or a rich
-    editor, check the page reacts as if you had typed (character counters, send buttons
-    becoming active).
-16. Start recording, then click another field and stop: the text goes into the field where you
+    silence, three of Chrome's no-speech timeouts in a row, it stops by itself; what was
+    already written stays in the field).
+15. Press the small mic again (or the panel's mic): recognition stops, nothing is added a
+    second time, and the text in the field stays exactly as it was. The panel stays open;
+    pressing the mic once more starts a new recording.
+16. Start recording, then click another field and speak: the words go into the field where you
     started, not the one you clicked.
 17. Start recording in one tab, then start it in another tab: the first tab stops and says so,
-    keeping its text in the panel.
-18. With a Japanese IME, start composing in the field, then stop recording: the text is
-    inserted after you finish (or cancel) the composition, not in the middle of it.
-19. To see the permission path: in `chrome://settings/content/microphone`, block the
-    extension's origin, press the mic: the panel says the microphone is not allowed and offers
-    "Allow it", which opens the permission page.
+    and what it had already written stays in its field.
+18. With a Japanese IME, start composing in the field and keep speaking: the field is not
+    rewritten until you finish (or cancel) the composition, and the spoken text lands after it.
+19. Press × while recording: the field empties and the next words start from the beginning of
+    the empty field.
+20. Press send while speaking: recognition stops and the page is submitted with what is in the
+    field. If the text could not be written (see the panel's message), nothing is submitted.
+21. To see the permission path: in `chrome://settings/content/microphone`, block the
+    extension's origin, then press the mic: the panel says the microphone is not allowed and
+    offers "Allow it", which opens the permission page. Pressing the mic again tries again
+    (a press always tries).
+
+### The settings page
+
+Open it from `chrome://extensions` (Details -> Extension options), or right-click the
+extension and choose Options. It has one setting, "what starts recording":
+
+22. "Press the mic" (the default) is what items 4 and 12 describe.
+23. Switch to "Rest the mouse on the mic" and go back to a page **without reloading it**:
+    resting on the mic now opens the panel *and* starts recording at once; a quick pass-over
+    still does nothing. Pressing the mic still starts and stops. While recording, moving the
+    pointer away leaves the panel open; it closes about half a second after the recording ends.
+    Stopping with the panel's mic does not restart it while the panel stays open; let the panel
+    close and open it again for the next recording.
+24. Switch back to "Press the mic", again without reloading: resting on the mic only opens the
+    panel.
+25. With the "Rest the mouse on the mic" setting and the microphone blocked (see item 21):
+    the first hover says the microphone is not allowed, and hovering again does not repeat the
+    attempt; pressing the mic still tries. After a start succeeds, hovering starts recordings
+    again.
 
 ## Hostile-CSS testbed (plan C7)
 
@@ -143,6 +181,10 @@ Stop the server with Ctrl+C.
   Read-only and disabled fields are excluded.
 - Frames: the content script runs in every frame (`all_frames`), so fields inside iframes get
   their own mic inside that frame.
+- Settings: one setting (what starts recording), stored in `chrome.storage.sync` under
+  `trigger` (`"click"` or `"hover"`). Every open page follows a change through
+  `chrome.storage.onChanged`, with no reload. When the value is missing, unreadable or
+  anything else, vtype behaves as `click`.
 - Not covered: closed shadow roots (the page hides them from extensions), documents in
   `designMode`, and pages the browser does not let extensions script (`chrome://`, the Chrome
   Web Store).

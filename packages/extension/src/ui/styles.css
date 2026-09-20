@@ -41,6 +41,7 @@
   --vt-red-soft: rgba(220, 38, 38, 0.12);
   --vt-blue: rgba(96, 165, 250, 0.75);
   --vt-blue-soft: rgba(96, 165, 250, 0.25);
+  --vt-deep: rgba(15, 23, 42, 0.06);
   --vt-hover: rgba(15, 23, 42, 0.06);
   --vt-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
 }
@@ -54,6 +55,7 @@
     --vt-muted: #94a3b8;
     --vt-accent: #6366f1;
     --vt-accent-2: #8b5cf6;
+    --vt-deep: rgba(0, 0, 0, 0.35);
     --vt-hover: rgba(255, 255, 255, 0.08);
     --vt-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
   }
@@ -144,6 +146,17 @@
 .box.flip-y .panel {
   top: auto;
   bottom: 24px;
+}
+
+/* C7c: the bars shown while recording (ported from many-ai-cli's .voice-waveform) */
+.waveform {
+  display: block;
+  width: 100%;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border-radius: 8px;
+  background: var(--vt-deep);
 }
 
 .transcript {

@@ -63,6 +63,34 @@ describe("offscreen recognition session", () => {
     expect(hub.offscreen?.sessionId).toBe("s1");
   });
 
+  it("[C7c] forwards the recognizer's activity events to the owner", async () => {
+    const sr = await startSession(1, "s1");
+    sr.onaudiostart?.({});
+    sr.onsoundstart?.({});
+    sr.onspeechstart?.({});
+    sr.onspeechend?.({});
+    sr.onaudioend?.({});
+    await flush(vi);
+    expect(events(1).filter((e) => e.kind === "activity").map((e) => e.activity)).toEqual([
+      "audiostart",
+      "soundstart",
+      "speechstart",
+      "speechend",
+      "audioend",
+    ]);
+    expect(events(1).every((e) => e.kind !== "activity" || typeof e.recognitionId === "number")).toBe(true);
+  });
+
+  it("[C7c] activity events of an instance older than the session are dropped", async () => {
+    const first = await startSession(1, "s1");
+    await hub.contentRuntime(2, 0).sendMessage({ target: "background", type: "start", sessionId: "s2" });
+    await flush(vi);
+    const before = events(2).length;
+    first.onsoundstart?.({}); // the superseded instance still fires
+    await flush(vi);
+    expect(events(2).length).toBe(before);
+  });
+
   it("user stop with nothing pending ends at once with reason user", async () => {
     const sr = await startSession(1, "s1");
     sr.fireResult("done", true);

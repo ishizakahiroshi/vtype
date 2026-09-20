@@ -39,6 +39,7 @@ const scripts = [
   ["src/background/index.ts", "background.js"],
   ["src/offscreen/offscreen.ts", "offscreen.js"],
   ["src/permission/permission.ts", "permission.js"],
+  ["src/options/options.ts", "options.js"],
 ];
 
 for (const [entry, out] of scripts) {
@@ -61,6 +62,7 @@ for (const [entry, out] of scripts) {
 await copyFile(join(here, "manifest.json"), join(dist, "manifest.json"));
 await copyFile(join(here, "src/offscreen/offscreen.html"), join(dist, "offscreen.html"));
 await copyFile(join(here, "src/permission/permission.html"), join(dist, "permission.html"));
+await copyFile(join(here, "src/options/options.html"), join(dist, "options.html"));
 
 for (const [, out] of scripts) {
   const code = await readFile(join(dist, out), "utf8");
@@ -74,9 +76,10 @@ for (const [, out] of scripts) {
 const manifest = JSON.parse(await readFile(join(dist, "manifest.json"), "utf8"));
 const referenced = [
   manifest.background?.service_worker,
+  manifest.options_ui?.page,
   ...(manifest.content_scripts ?? []).flatMap((s) => s.js ?? []),
 ].filter(Boolean);
-for (const page of ["offscreen.html", "permission.html"]) {
+for (const page of ["offscreen.html", "permission.html", "options.html"]) {
   const html = await readFile(join(dist, page), "utf8");
   for (const m of html.matchAll(/<script[^>]*\bsrc="([^"]+)"/g)) referenced.push(m[1]);
 }

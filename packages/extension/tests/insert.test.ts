@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { COMPOSITION_TIMEOUT_MS, insertAtCursor, isComposing, startCompositionTracking } from "../src/content/insert";
+import {
+  COMPOSITION_TIMEOUT_MS,
+  beginLiveInsert,
+  insertAtCursor,
+  isComposing,
+  startCompositionTracking,
+} from "../src/content/insert";
 
 // Plan C6 検証方法 numbers are in the describe titles ([1] .. [8]).
 
@@ -53,8 +59,16 @@ function stubExecCommand(impl: ((command: string, ui?: boolean, value?: string) 
 function editorLikeInsertText(command: string, _ui?: boolean, value?: string): boolean {
   if (command !== "insertText" || value === undefined) return false;
   const sel = document.getSelection();
-  const node = sel?.anchorNode;
-  if (sel === null || node === null || node === undefined) return false;
+  if (sel === null || sel.rangeCount === 0) return false;
+  // Chrome's insertText replaces whatever is selected; a collapsed caret deletes nothing.
+  const selected = sel.getRangeAt(0);
+  if (!selected.collapsed) {
+    selected.deleteContents();
+    sel.removeAllRanges();
+    sel.addRange(selected);
+  }
+  const node = sel.anchorNode;
+  if (node === null || node === undefined) return false;
   const offset = sel.anchorOffset;
   if (node.nodeType === Node.TEXT_NODE) {
     (node as Text).insertData(offset, value);
@@ -346,6 +360,166 @@ describe("[8] contenteditable: execCommand missing or false falls back to Range"
     expect(host.textContent).toBe("boldplXain" + "it");
     expect(host.querySelector("b")?.textContent).toBe("bold");
     expect(host.querySelector("i")?.textContent).toBe("it");
+  });
+});
+
+// ---- [C7d] live insertion ----------------------------------------------------------------
+
+describe("[C7d 1] live insert into input / textarea", () => {
+  it("writes at the caret and replaces the previous interim, keeping both sides", async () => {
+    const input = pick<HTMLInputElement>(mount(`<input id="f" type="text" value="HelloWorld">`), "#f");
+    input.setSelectionRange(5, 5);
+    const events = recordInputs(input);
+    const live = beginLiveInsert(input);
+
+    expect(await live.update("goo")).toEqual({ ok: true });
+    expect(input.value).toBe("HellogooWorld");
+    expect(await live.update("good day")).toEqual({ ok: true });
+    expect(input.value).toBe("Hellogood dayWorld"); // replaced, not appended
+    expect(input.selectionStart).toBe("Hellogood day".length);
+
+    expect(await live.commit("good day")).toEqual({ ok: true });
+    expect(await live.update(" to you")).toEqual({ ok: true });
+    expect(input.value).toBe("Hellogood day to youWorld"); // the confirmed part stayed
+    expect(live.committedText).toBe("good day");
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.every((e) => e.inputType === "insertText")).toBe(true);
+  });
+
+  it("an empty interim removes what was shown", async () => {
+    const ta = pick<HTMLTextAreaElement>(mount(`<textarea id="f">keep</textarea>`), "#f");
+    ta.setSelectionRange(4, 4);
+    const live = beginLiveInsert(ta);
+    await live.update("noise");
+    expect(ta.value).toBe("keepnoise");
+    await live.update("");
+    expect(ta.value).toBe("keep");
+  });
+
+  it("resync takes the field as it is now (× emptied it)", async () => {
+    const input = pick<HTMLInputElement>(mount(`<input id="f" type="text" value="">`), "#f");
+    const live = beginLiveInsert(input);
+    await live.update("before");
+    expect(input.value).toBe("before");
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "");
+    live.resync();
+    await live.update("after");
+    expect(input.value).toBe("after");
+  });
+
+  it("an edit made by someone else is not overwritten; the text follows it", async () => {
+    const input = pick<HTMLInputElement>(mount(`<input id="f" type="text" value="">`), "#f");
+    const live = beginLiveInsert(input);
+    await live.commit("spoken");
+    // the user types at the end themselves
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "spoken typed");
+    input.setSelectionRange("spoken typed".length, "spoken typed".length);
+    await live.update("more");
+    expect(input.value).toBe("spoken typedmore");
+  });
+
+  it("stops when the field is gone or is no longer a target", async () => {
+    const input = pick<HTMLInputElement>(mount(`<input id="f" type="text" value="">`), "#f");
+    const live = beginLiveInsert(input);
+    input.readOnly = true;
+    expect(await live.update("x")).toEqual({ ok: false, reason: "not-a-target" });
+    expect(live.active).toBe(false);
+
+    const other = pick<HTMLInputElement>(mount(`<input id="g" type="text" value="">`), "#g");
+    const live2 = beginLiveInsert(other);
+    other.remove();
+    expect(await live2.update("x")).toEqual({ ok: false, reason: "disconnected" });
+  });
+
+  it("end() stops further writing", async () => {
+    const input = pick<HTMLInputElement>(mount(`<input id="f" type="text" value="">`), "#f");
+    const live = beginLiveInsert(input);
+    live.end();
+    expect(await live.update("x")).toEqual({ ok: false, reason: "ended" });
+    expect(input.value).toBe("");
+  });
+});
+
+describe("[C7d 4] live insert into contenteditable goes through execCommand", () => {
+  it("replaces the previous interim with insertText and never rebuilds nodes", async () => {
+    const exec = stubExecCommand(editorLikeInsertText);
+    const insertNode = vi.spyOn(Range.prototype, "insertNode");
+    const host = pick(mount(`<div id="f" contenteditable="true" tabindex="0"></div>`), "#f");
+    host.focus();
+    const live = beginLiveInsert(host);
+
+    expect(await live.update("こん")).toEqual({ ok: true });
+    expect(host.textContent).toBe("こん");
+    expect(await live.update("こんにちは")).toEqual({ ok: true });
+    expect(host.textContent).toBe("こんにちは"); // replaced in place, not stacked
+    expect(await live.commit("こんにちは")).toEqual({ ok: true });
+    expect(await live.update("みなさん")).toEqual({ ok: true });
+    expect(host.textContent).toBe("こんにちはみなさん");
+
+    expect(insertNode).not.toHaveBeenCalled(); // no DOM surgery: the editor did the writing
+    expect(exec?.mock.calls.map((c) => c[0])).toEqual(["insertText", "insertText", "insertText", "insertText"]);
+  });
+
+  it("keeps the text that was already in the editor", async () => {
+    stubExecCommand(editorLikeInsertText);
+    const host = pick(mount(`<div id="f" contenteditable="true" tabindex="0">draft </div>`), "#f");
+    host.focus();
+    const sel = document.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(host);
+    range.collapse(false);
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    const live = beginLiveInsert(host);
+    await live.update("spoken");
+    expect(host.textContent).toBe("draft spoken");
+    await live.update("spoken words");
+    expect(host.textContent).toBe("draft spoken words");
+  });
+
+  it("falls back to a Range when the browser has no execCommand", async () => {
+    stubExecCommand(undefined);
+    const insertNode = vi.spyOn(Range.prototype, "insertNode");
+    const host = pick(mount(`<div id="f" contenteditable="true" tabindex="0"></div>`), "#f");
+    host.focus();
+    const live = beginLiveInsert(host);
+    await live.update("first");
+    expect(host.textContent).toBe("first");
+    await live.update("first and more");
+    expect(host.textContent).toBe("first and more");
+    expect(insertNode).toHaveBeenCalled();
+  });
+});
+
+describe("[C7d 5] live insert waits for the IME", () => {
+  it("writes nothing while composing and writes the latest text afterwards", async () => {
+    vi.useFakeTimers();
+    const input = pick<HTMLInputElement>(mount(`<input id="f" type="text" value="">`), "#f");
+    startCompositionTracking(document);
+    const live = beginLiveInsert(input);
+    input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, composed: true }));
+    const first = live.update("early");
+    const second = live.update("early words");
+    await vi.advanceTimersByTimeAsync(500);
+    expect(input.value).toBe("");
+    input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, composed: true }));
+    await vi.advanceTimersByTimeAsync(5);
+    expect(await first).toEqual({ ok: true });
+    expect(await second).toEqual({ ok: true });
+    expect(input.value).toBe("early words"); // the latest state, written once
+  });
+
+  it("gives up if the composition never ends", async () => {
+    vi.useFakeTimers();
+    const input = pick<HTMLInputElement>(mount(`<input id="f" type="text" value="">`), "#f");
+    startCompositionTracking(document);
+    const live = beginLiveInsert(input, { compositionTimeoutMs: 100 });
+    input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, composed: true }));
+    const pending = live.update("never");
+    await vi.advanceTimersByTimeAsync(150);
+    expect(await pending).toEqual({ ok: false, reason: "composition-timeout" });
+    expect(input.value).toBe("");
+    input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, composed: true }));
   });
 });
 

@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vtype: settings</title>
+<style>
+  body { font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif; max-width: 560px; margin: 48px auto; padding: 0 16px; color: #0f172a; }
+  h1 { font-size: 20px; }
+  fieldset { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 16px 16px; }
+  legend { padding: 0 6px; font-weight: 600; }
+  .choice { margin: 12px 0; }
+  .choice label { font-weight: 600; cursor: pointer; }
+  .choice .hint { margin: 2px 0 0 24px; font-weight: 400; color: #475569; }
+  #status { margin-top: 16px; font-weight: 600; min-height: 1.6em; }
+  #status.ok { color: #16a34a; }
+  #status.err { color: #dc2626; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #0e0f12; color: #e2e8f0; }
+    fieldset { border-color: #334155; }
+    .choice .hint { color: #94a3b8; }
+  }
+</style>
+</head>
+<body>
+<h1 id="title"></h1>
+<p id="lead"></p>
+<fieldset>
+<legend id="legend"></legend>
+<div class="choice">
+  <label for="click"><input type="radio" id="click" name="trigger" value="click"> <span id="click-label"></span></label>
+  <p class="hint" id="click-hint"></p>
+</div>
+<div class="choice">
+  <label for="hover"><input type="radio" id="hover" name="trigger" value="hover"> <span id="hover-label"></span></label>
+  <p class="hint" id="hover-hint"></p>
+</div>
+</fieldset>
+<p id="status" role="status"></p>
+<script src="options.js"></script>
+</body>
+</html>

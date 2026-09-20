@@ -3,6 +3,9 @@ import css from "../src/ui/styles.css?raw";
 import { HOST_TAG, OPEN_DELAY_MS } from "../src/content/anchor";
 import { startContentScript, type ContentScript } from "../src/content/index";
 import { labelsFor } from "../src/ui/toolbar";
+import { SMOOTHING, START_TARGET, TRANSCRIPT_TARGET, createWaveform } from "../src/ui/waveform";
+// The waveform's own source, to prove no microphone API is used (plan C7c 検証 4).
+import waveformSource from "../src/ui/waveform.ts?raw";
 
 // happy-dom does no layout: boxes come from a table (stubbed on the prototype, never on the
 // field). It does apply stylesheets with shadow-DOM scoping, which the hostile-CSS tests use.
@@ -389,6 +392,111 @@ describe("hostile page CSS (plan C7 検証 2)", () => {
     expect(host.style.getPropertyPriority("display")).toBe("important");
     expect(host.style.getPropertyValue("display")).toBe("block");
     expect(css).toMatch(/:host\s*\{[^}]*display:\s*block !important/);
+  });
+});
+
+// ---- [C7c] the waveform ------------------------------------------------------------------
+
+describe("[C7c] the waveform appears while recording", () => {
+  it("is a canvas inside the shadow root, hidden until recording and hidden again at idle", () => {
+    const { s, root } = focusField();
+    const canvas = pick<HTMLCanvasElement>(root, ".panel .waveform");
+    expect(canvas.localName).toBe("canvas");
+    expect(canvas.hidden).toBe(true);
+    expect(s.anchor.ui?.waveform.running).toBe(false);
+
+    s.anchor.ui?.setState("recording");
+    expect(canvas.hidden).toBe(false);
+    expect(s.anchor.ui?.waveform.running).toBe(true);
+    expect(s.anchor.ui?.waveform.target).toBe(START_TARGET);
+
+    s.anchor.ui?.setState("processing"); // still waiting for the last result: bars stay
+    expect(canvas.hidden).toBe(false);
+
+    s.anchor.ui?.setState("idle");
+    expect(canvas.hidden).toBe(true);
+    expect(s.anchor.ui?.waveform.running).toBe(false);
+  });
+
+  it("keeps the same intensity model as many-ai-cli for each activity kind", () => {
+    const { s } = focusField();
+    const ui = s.anchor.ui;
+    if (ui === null) throw new Error("no ui");
+    ui.setState("recording");
+    const targets: Record<string, number> = {};
+    for (const kind of ["soundstart", "speechstart", "speechend", "audioend"] as const) {
+      ui.setActivity(kind);
+      targets[kind] = ui.waveform.target;
+    }
+    expect(targets).toEqual({ soundstart: 0.55, speechstart: 0.9, speechend: 0.25, audioend: 0.03 });
+    // the order relations the plan asks for
+    expect(targets.audioend).toBeLessThan(targets.speechend as number);
+    expect(targets.speechend).toBeLessThan(targets.soundstart as number);
+    expect(targets.soundstart).toBeLessThan(targets.speechstart as number);
+  });
+
+  it("ignores the kinds many-ai-cli does not use", () => {
+    const { s } = focusField();
+    const ui = s.anchor.ui;
+    if (ui === null) throw new Error("no ui");
+    ui.setState("recording");
+    ui.setActivity("speechstart");
+    const before = ui.waveform.target;
+    for (const kind of ["audiostart", "soundend", "nomatch"] as const) ui.setActivity(kind);
+    expect(ui.waveform.target).toBe(before);
+  });
+
+  it("a transcript that grew lifts the target and a final resets the measure", () => {
+    const { s } = focusField();
+    const ui = s.anchor.ui;
+    if (ui === null) throw new Error("no ui");
+    ui.setState("recording");
+    expect(ui.waveform.target).toBe(START_TARGET);
+    ui.waveform.noteTranscript("hello", false);
+    expect(ui.waveform.target).toBeGreaterThanOrEqual(TRANSCRIPT_TARGET);
+    ui.setActivity("speechend");
+    ui.waveform.noteTranscript("hi", false); // shorter than the last interim: no lift
+    expect(ui.waveform.target).toBe(0.25);
+  });
+
+  it("the drawn intensity follows the target, it does not jump", () => {
+    const wave = createWaveform({ doc: document, now: () => 0, reducedMotion: () => true });
+    wave.start();
+    wave.setActivity("speechstart"); // target 0.9
+    const seen: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      wave.step();
+      seen.push(Number(wave.intensity.toFixed(4)));
+    }
+    expect(seen[0]).toBeCloseTo(0.9 * SMOOTHING, 4);
+    expect(seen[0]).toBeLessThan(seen[1] as number);
+    expect(seen[1]).toBeLessThan(seen[2] as number);
+    expect(seen[2]).toBeLessThan(0.9);
+  });
+
+  it("nothing is animated when the viewer asked for reduced motion", () => {
+    const raf = vi.spyOn(globalThis, "requestAnimationFrame");
+    const still = createWaveform({ doc: document, reducedMotion: () => true });
+    still.start();
+    expect(still.running).toBe(true);
+    expect(raf).not.toHaveBeenCalled();
+
+    raf.mockClear();
+    const moving = createWaveform({ doc: document, reducedMotion: () => false });
+    moving.start();
+    expect(raf).toHaveBeenCalledTimes(1);
+    moving.stop();
+  });
+
+  it("the bars are never driven by the microphone: no audio API is used", () => {
+    // Comments explain why those APIs are avoided, so only the code lines are checked.
+    const code = waveformSource
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("//"))
+      .join("\n");
+    expect(code).not.toMatch(/getUserMedia|AudioContext|AnalyserNode|createAnalyser|mediaDevices/);
+    expect(code).toContain("Math.sin"); // the shape comes from sine waves plus noise
   });
 });
 
