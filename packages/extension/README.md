@@ -224,6 +224,28 @@ can be dragged aside, and where it was put is remembered for that site.
     about half a second — unless its panel is open or it is recording.
 39. Switch back to "On every text field on screen": the mics are all back.
 
+## The diagnostic log
+
+Off by default. The settings page has "Keep a diagnostic log"; with it on, the background writes
+one line per session event into `chrome.storage.local` (at most 300, oldest dropped first) and the
+settings page shows, copies and empties it.
+
+```
+18:33:05.120            id=1 started
+18:33:06.620   + 1500ms id=1 activity speechstart
+18:33:08.030   + 1410ms id=1 result final=true current=true len=6
+18:33:12.240   + 4210ms ended reason=silence
+```
+
+`id` is the recognition attempt: Chrome ends recognition after each utterance, so a rising `id`
+is a restart, and the gaps say how long each step took. That is what a question like "it stopped
+in the middle of a breath" needs.
+
+**A line never holds what was said.** `describeSessionEvent` (src/shared/diagnostics.ts) is the
+only place that reads a result, and it takes `.length`. The privacy policy and the store
+submission both promise that transcripts are not stored, and `tests/diagnostics.test.ts` speaks a
+sentence through the fake recogniser and asserts none of it reaches the log.
+
 ## Hostile-CSS testbed (plan C7)
 
 `testbed/hostile.html` is a synthetic page whose CSS tries to break injected UI: the three

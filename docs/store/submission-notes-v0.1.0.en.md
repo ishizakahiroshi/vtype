@@ -20,6 +20,10 @@ In this version:
 - English and Japanese (`_locales/en` and `_locales/ja`, with `en` as `default_locale`). The
   manifest's `name`, `description` and `action.default_title` are `__MSG_*`, so what you see
   follows your own browser language
+- A diagnostic log, **off by default**. Switched on from the settings page, it records the time,
+  how often recognition restarted, the kind of event, **how many characters** a result had and
+  why a recording ended, in `chrome.storage.local`, at most 300 entries. **The recognised text is
+  not recorded.** The settings page shows, copies and empties it; nothing is sent anywhere
 
 ## Single purpose
 
@@ -55,9 +59,13 @@ Entering text into web page text fields by voice. That is the only thing it does
   Web Speech API. In Chrome, the browser performs the recognition by sending the audio to
   Google's speech recognition service. That is the browser's behaviour, not a connection vtype
   makes, and vtype adds no destination to it. The privacy policy states the same
-- Stored settings: `trigger`, `micDisplay`, `micOffsets` (per origin, at most 50) and
-  `excludedSites` (at most 100), kept in the browser (`chrome.storage.sync`, plus
-  `chrome.storage.local` for the excluded list)
+- Stored settings: `trigger`, `micDisplay`, `micOffsets` (per origin, at most 50),
+  `excludedSites` (at most 100) and `diagnostics` (the log's on/off, off by default), kept in the
+  browser (`chrome.storage.sync`, plus `chrome.storage.local` for the excluded list)
+- Diagnostic log: off by default. When on, at most 300 entries in `chrome.storage.local`, holding
+  the time, the recognition attempt number, the kind of event, a result's **character count** and
+  why the recording ended. **It contains no recognised text**, the user can empty it at any time,
+  and it is never sent to the developer
 - Transcripts: not stored. Once the text is in the field, nothing is kept
 - Password fields: excluded. The input types it works on are an allowlist that does not include
   password, and fields marked `autocomplete="current-password"` / `"new-password"` are excluded too
@@ -73,6 +81,8 @@ Entering text into web page text fields by voice. That is the only thing it does
    (chrome://extensions, Details, Extension options) lists it
 6. Switching the settings page to "only the field I am using" takes effect on an already open
    page, without a reload
+7. "Keep a diagnostic log" on the settings page is off by default. With it on, a recording fills
+   the log on that same page, and no line of it contains anything that was said (only counts)
 
 ## Privacy policy URL
 

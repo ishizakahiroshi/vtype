@@ -14,6 +14,7 @@ import { createSpeechRecognizer } from "vtype-core";
 import { createBackground, type Background, type BackgroundChrome } from "../src/background/index";
 import { createOffscreen, type Offscreen } from "../src/offscreen/offscreen";
 import type { ContentRuntime } from "../src/content/controller";
+import type { StorageView } from "../src/shared/settings";
 
 type Listener = (message: unknown, sender: { tab?: { id?: number }; frameId?: number }) => void;
 
@@ -115,9 +116,10 @@ export class FakeChromeHub {
     });
   }
 
-  backgroundChrome(): BackgroundChrome {
+  backgroundChrome(storage?: StorageView): BackgroundChrome {
     const hub = this;
     const chrome: BackgroundChrome = {
+      ...(storage === undefined ? {} : { storage }),
       runtime: {
         getURL: (path) => `chrome-extension://synthetic-id/${path}`,
         sendMessage: (message) => {
@@ -169,8 +171,8 @@ export class FakeChromeHub {
     this.releaseCreate = null;
   }
 
-  startBackground(): Background {
-    this.background = createBackground(this.backgroundChrome());
+  startBackground(storage?: StorageView): Background {
+    this.background = createBackground(this.backgroundChrome(storage));
     return this.background;
   }
 

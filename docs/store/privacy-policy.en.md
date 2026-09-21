@@ -45,6 +45,7 @@ browsers you are signed in to.
 - `micDisplay`: which fields carry a mic (every visible field, or only the one you are using)
 - `micOffsets`: where you dragged the mic to, one entry per site origin, at most 50
 - `excludedSites`: the sites vtype stays off on, at most 100
+- `diagnostics`: whether the diagnostic log is kept (off by default)
 
 `excludedSites` is also written to `chrome.storage.local`. Some enterprise policies refuse sync
 outright, and "the mic came back on the site I switched it off on" is not an acceptable outcome
@@ -53,10 +54,27 @@ of that.
 `micOffsets` and `excludedSites` contain origins of sites you chose yourself (in the form
 `https://example.com`). They stay in your browser and are never sent to the developer.
 
+## The diagnostic log
+
+**It is off unless you switch it on** on the settings page. It exists for one question — why did
+a recording stop where it did — and it records:
+
+- the time
+- the number of the recognition attempt (Chrome restarts recognition between utterances)
+- the kind of event (started / speech detected / a result arrived / ended)
+- **how many characters** a result contained
+- why the recording ended (you stopped it / silence / an error and its code)
+
+**Neither what you said nor the recognised text is recorded** — only how many characters there
+were. The log lives in `chrome.storage.local` (inside this browser), holds at most 300 entries
+with the oldest dropped first, and the settings page shows, copies and empties it at any time.
+**It is never sent to the developer.**
+
 ## Transcripts
 
 Nothing is kept. Recognised text goes into the field you are typing in and that is the end of
-it: there is no history, no search and no export.
+it: there is no history, no search and no export. While the diagnostic log is on, what it keeps
+is the number of characters, never the characters.
 
 ## Password fields
 

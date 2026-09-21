@@ -23,6 +23,11 @@
   #site-list button { padding: 4px 10px; font-size: 13px; background: transparent; color: #dc2626; border: 1px solid #cbd5e1; }
   #site-list button:hover { background: #fee2e2; }
   #site-empty { color: #475569; }
+  #diag-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 0; }
+  #diag-actions button { background: transparent; color: inherit; border: 1px solid #cbd5e1; }
+  #diag-actions button:hover { background: #f1f5f9; }
+  #diag-log { margin: 12px 0 0; padding: 12px; max-height: 320px; overflow: auto; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.5; white-space: pre; }
+  #diag-empty { color: #475569; }
   #status { margin-top: 16px; font-weight: 600; min-height: 1.6em; }
   #status.ok { color: #16a34a; }
   #status.err { color: #dc2626; }
@@ -34,6 +39,10 @@
     #site-list li { border-top-color: #334155; }
     #site-list button { border-color: #334155; color: #f87171; }
     #site-list button:hover { background: #3f1d1d; }
+    #diag-actions button { border-color: #334155; }
+    #diag-actions button:hover { background: #1e293b; }
+    #diag-log { background: #16181d; border-color: #334155; }
+    #diag-empty { color: #94a3b8; }
     #site-empty { color: #94a3b8; }
   }
 </style>
@@ -71,6 +80,19 @@
 </form>
 <p id="site-empty"></p>
 <ul id="site-list"></ul>
+
+<h2 id="diag-title"></h2>
+<p id="diag-lead"></p>
+<div class="choice">
+  <label for="diag"><input type="checkbox" id="diag"> <span id="diag-label"></span></label>
+  <p class="hint" id="diag-hint"></p>
+</div>
+<div id="diag-actions">
+  <button id="diag-copy" type="button"></button>
+  <button id="diag-clear" type="button"></button>
+</div>
+<p id="diag-empty"></p>
+<pre id="diag-log" hidden></pre>
 
 <h2 id="positions-title"></h2>
 <p id="positions-lead"></p>

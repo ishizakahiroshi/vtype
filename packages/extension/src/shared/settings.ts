@@ -27,6 +27,12 @@ export type MicDisplay =
 export const DEFAULT_MIC_DISPLAY: MicDisplay = "all";
 
 /**
+ * Whether vtype keeps a diagnostic log (shared/diagnostics.ts). Off by default: it exists to
+ * answer "why did it stop there", and nobody needs it until something looks wrong.
+ */
+export const DEFAULT_DIAGNOSTICS = false;
+
+/**
  * How far the thin mic was dragged from where vtype puts it, in CSS pixels (C7f). Kept as a
  * distance from the field, never as an absolute position: the field moves with the page.
  */
@@ -52,6 +58,7 @@ export const TRIGGER_KEY = "trigger";
 export const OFFSETS_KEY = "micOffsets";
 export const MIC_DISPLAY_KEY = "micDisplay";
 export const EXCLUDED_KEY = "excludedSites";
+export const DIAGNOSTICS_KEY = "diagnostics";
 /** The area the setting lives in (it follows the user's Chrome profile). */
 export const SETTINGS_AREA = "sync";
 
@@ -182,6 +189,30 @@ export async function writeMicDisplay(storage: StorageView | null, display: MicD
   }
 }
 
+/** Whether the diagnostic log is on. Off unless it is stored as exactly `true`. */
+export async function readDiagnostics(storage: StorageView | null): Promise<boolean> {
+  const area = storage?.sync;
+  if (area === undefined) return DEFAULT_DIAGNOSTICS;
+  try {
+    const stored = await area.get([DIAGNOSTICS_KEY]);
+    return stored?.[DIAGNOSTICS_KEY] === true;
+  } catch {
+    return DEFAULT_DIAGNOSTICS;
+  }
+}
+
+/** Turn the diagnostic log on or off. False when it could not be stored. */
+export async function writeDiagnostics(storage: StorageView | null, on: boolean): Promise<boolean> {
+  const area = storage?.sync;
+  if (area === undefined) return false;
+  try {
+    await area.set({ [DIAGNOSTICS_KEY]: on });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** The stored offsets, or none at all when they cannot be read. */
 export async function readOffsets(storage: StorageView | null): Promise<MicOffsets> {
   const area = storage?.sync;
@@ -235,6 +266,11 @@ export function watchMicDisplay(storage: StorageView | null, onChange: (display:
   return watchKey(storage, MIC_DISPLAY_KEY, (value) =>
     onChange(isMicDisplay(value) ? value : DEFAULT_MIC_DISPLAY),
   );
+}
+
+/** The same for the diagnostic log, so the background starts and stops recording at once. */
+export function watchDiagnostics(storage: StorageView | null, onChange: (on: boolean) => void): () => void {
+  return watchKey(storage, DIAGNOSTICS_KEY, (value) => onChange(value === true));
 }
 
 /** The same for the dragged positions: a reset in the options page arrives here. */

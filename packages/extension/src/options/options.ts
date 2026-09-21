@@ -14,6 +14,7 @@
 // The text itself lives in `_locales/` (one file per language) and is read through shared/i18n.
 
 import { translator } from "../shared/i18n";
+import { clearDiagLog, formatDiagLog, readDiagLog, watchDiagLog, type DiagEntry } from "../shared/diagnostics";
 import {
   DEFAULT_MIC_DISPLAY,
   DEFAULT_TRIGGER,
@@ -22,12 +23,14 @@ import {
   isMicDisplay,
   isTriggerMode,
   normalizeExclusion,
+  readDiagnostics,
   readExcludedSites,
   readMicDisplay,
   readTrigger,
   watchExcludedSites,
   withExcluded,
   withoutExclusionEntry,
+  writeDiagnostics,
   writeExcludedSites,
   writeMicDisplay,
   writeTrigger,
@@ -71,6 +74,12 @@ export function initOptionsPage(options: OptionsPageOptions = {}): void {
   setText(doc, "sites-title", t("optionsSitesTitle"));
   setText(doc, "sites-lead", t("optionsSitesLead"));
   setText(doc, "site-add", t("optionsSitesAdd"));
+  setText(doc, "diag-title", t("optionsDiagTitle"));
+  setText(doc, "diag-lead", t("optionsDiagLead"));
+  setText(doc, "diag-label", t("optionsDiagLabel"));
+  setText(doc, "diag-hint", t("optionsDiagHint"));
+  setText(doc, "diag-copy", t("optionsDiagCopy"));
+  setText(doc, "diag-clear", t("optionsDiagClear"));
   setText(doc, "positions-title", t("optionsPositionsTitle"));
   setText(doc, "positions-lead", t("optionsPositionsLead"));
   setText(doc, "reset", t("optionsReset"));
@@ -181,6 +190,70 @@ export function initOptionsPage(options: OptionsPageOptions = {}): void {
     }
     siteInput.value = "";
     void save(withExcluded(sites, pattern), t("optionsSitesAdded", { site: pattern }));
+  });
+
+  // ---- the diagnostic log (off by default; shared/diagnostics.ts) --------------------------
+  //
+  // The log is written by the background and read here. It holds no transcript, so showing it
+  // in full is safe; "copy" exists because the point of the log is to be handed to someone.
+
+  const diagToggle = doc.getElementById("diag");
+  const diagLog = doc.getElementById("diag-log");
+  const diagEmpty = doc.getElementById("diag-empty");
+  let diagText = "";
+
+  function renderDiag(entries: readonly DiagEntry[]): void {
+    diagText = formatDiagLog(entries);
+    if (diagEmpty !== null) {
+      diagEmpty.textContent = t("optionsDiagEmpty");
+      diagEmpty.hidden = entries.length > 0;
+    }
+    if (diagLog === null) return;
+    diagLog.textContent = diagText;
+    diagLog.hidden = entries.length === 0;
+  }
+
+  renderDiag([]);
+  void readDiagLog(storage).then(renderDiag);
+  // A recording happens on another tab, so the page has to follow the log rather than read it once.
+  watchDiagLog(storage, renderDiag);
+
+  if (diagToggle instanceof HTMLInputElement) {
+    void readDiagnostics(storage).then((on) => {
+      diagToggle.checked = on;
+    });
+    diagToggle.addEventListener("change", () => {
+      const wanted = diagToggle.checked;
+      void writeDiagnostics(storage, wanted).then((ok) => {
+        if (ok) {
+          setText(doc, "status", t("optionsSaved"), "ok");
+          return;
+        }
+        // Nothing was stored, so the page must not claim a setting the extension has not got.
+        setText(doc, "status", t("optionsFailed"), "err");
+        diagToggle.checked = !wanted;
+      });
+    });
+  }
+
+  doc.getElementById("diag-copy")?.addEventListener("click", () => {
+    const clipboard = (doc.defaultView?.navigator as { clipboard?: { writeText(t: string): Promise<void> } } | undefined)
+      ?.clipboard;
+    if (clipboard === undefined) {
+      setText(doc, "status", t("optionsDiagCopyFailed"), "err");
+      return;
+    }
+    void clipboard
+      .writeText(diagText)
+      .then(() => setText(doc, "status", t("optionsDiagCopied"), "ok"))
+      .catch(() => setText(doc, "status", t("optionsDiagCopyFailed"), "err"));
+  });
+
+  doc.getElementById("diag-clear")?.addEventListener("click", () => {
+    void clearDiagLog(storage).then(() => {
+      renderDiag([]);
+      setText(doc, "status", t("optionsDiagCleared"), "ok");
+    });
   });
 
   // C7f: forget every dragged mic position. Open pages hear about it through

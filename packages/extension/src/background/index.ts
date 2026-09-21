@@ -12,8 +12,13 @@
 //
 // Session state (which session is current, who owns it) lives in the offscreen document, which
 // keeps running while Chrome stops and restarts this worker. Nothing here needs to survive a
-// restart, so no storage permission is needed.
+// restart of its own.
+//
+// It does touch `chrome.storage`, for one thing only: the diagnostic log (off by default), which
+// is written here because this is the single context every session event passes through.
 
+import { appendDiag, describeSessionEvent } from "../shared/diagnostics";
+import { readDiagnostics, watchDiagnostics, type StorageView } from "../shared/settings";
 import {
   OFFSCREEN_PATH,
   PERMISSION_PATH,
@@ -60,6 +65,8 @@ export interface BackgroundChrome {
     createDocument(params: { url: string; reasons: string[]; justification: string }): Promise<void>;
     hasDocument?: () => Promise<boolean>;
   };
+  /** Absent in a browser without it and in the older tests; the diagnostic log is then off. */
+  storage?: StorageView;
 }
 
 export interface Background {
@@ -121,6 +128,24 @@ export function createBackground(chrome: BackgroundChrome): Background {
     }
   }
 
+  // The diagnostic log (off by default, shared/diagnostics.ts). The background is where every
+  // session event passes, and it is one context, so it is the only place that has to serialise
+  // the writes. The flag is read once and then followed, so switching it off stops the log on
+  // the next event rather than at the next recording.
+  const storage = chrome.storage ?? null;
+  let diagnostics = false;
+  void readDiagnostics(storage).then((on) => {
+    diagnostics = on;
+  });
+  watchDiagnostics(storage, (on) => {
+    diagnostics = on;
+  });
+
+  function diag(line: string): void {
+    if (!diagnostics) return;
+    void appendDiag(storage, line);
+  }
+
   function toOffscreen(message: BackgroundToOffscreen): Promise<unknown> {
     return chrome.runtime.sendMessage(message);
   }
@@ -135,6 +160,7 @@ export function createBackground(chrome: BackgroundChrome): Background {
   }
 
   async function start(sessionId: string, owner: Owner): Promise<void> {
+    diag(`start requested tab=${owner.tabId} frame=${owner.frameId}`);
     try {
       await ensureOffscreen();
       await toOffscreen({ target: "offscreen", type: "start", sessionId, owner });
@@ -146,6 +172,7 @@ export function createBackground(chrome: BackgroundChrome): Background {
   }
 
   async function stop(sessionId: string, owner: Owner): Promise<void> {
+    diag("stop requested");
     try {
       await toOffscreen({ target: "offscreen", type: "stop", sessionId });
     } catch {
@@ -170,6 +197,7 @@ export function createBackground(chrome: BackgroundChrome): Background {
     }
     if (isOffscreenToBackground(message)) {
       const { sessionId, owner, event } = message;
+      diag(describeSessionEvent(event));
       toContent(owner, sessionId, event).catch(() => {
         // The tab navigated away or its frame is gone: nobody will ever stop this session.
         if (event.kind !== "ended") void toOffscreen({ target: "offscreen", type: "abort", sessionId }).catch(() => undefined);

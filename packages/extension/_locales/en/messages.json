@@ -11,7 +11,6 @@
     "message": "vtype: switch this site on or off",
     "description": "Tooltip on the toolbar icon"
   },
-
   "micTriggerLabel": {
     "message": "vtype voice input",
     "description": "Accessible name of the small mic next to a text field"
@@ -20,86 +19,161 @@
     "message": "Press to dictate. Drag to move it out of the way.",
     "description": "Tooltip on the small mic, which is both a button and draggable"
   },
-  "micClear": { "message": "Clear the field" },
-  "micSend": { "message": "Send" },
-  "micStart": { "message": "Start voice input" },
-  "micStop": { "message": "Stop voice input" },
-  "micSiteOff": { "message": "Don't use vtype on this site" },
-
-  "panelNoField": { "message": "Click a text field first." },
-  "panelUnavailable": { "message": "vtype is not available on this page. Reload the page and try again." },
-  "panelDidNotStart": { "message": "Voice input did not start. Try again." },
-  "panelNotAllowed": { "message": "The microphone is not allowed for vtype." },
+  "micClear": {
+    "message": "Clear the field"
+  },
+  "micSend": {
+    "message": "Send"
+  },
+  "micStart": {
+    "message": "Start voice input"
+  },
+  "micStop": {
+    "message": "Stop voice input"
+  },
+  "micSiteOff": {
+    "message": "Don't use vtype on this site"
+  },
+  "panelNoField": {
+    "message": "Click a text field first."
+  },
+  "panelUnavailable": {
+    "message": "vtype is not available on this page. Reload the page and try again."
+  },
+  "panelDidNotStart": {
+    "message": "Voice input did not start. Try again."
+  },
+  "panelNotAllowed": {
+    "message": "The microphone is not allowed for vtype."
+  },
   "panelOpenPermission": {
     "message": "Allow it",
     "description": "Button on the message that opens the microphone permission page"
   },
-  "panelNoSpeech": { "message": "Nothing was heard." },
-  "panelNetwork": { "message": "Could not reach the speech recognition service." },
-  "panelAudioCapture": { "message": "No usable microphone was found." },
-  "panelSuperseded": { "message": "Stopped: voice input started somewhere else." },
-  "panelAborted": { "message": "Voice input was stopped." },
-  "panelUnsupported": { "message": "This browser cannot do speech recognition." },
+  "panelNoSpeech": {
+    "message": "Nothing was heard."
+  },
+  "panelNetwork": {
+    "message": "Could not reach the speech recognition service."
+  },
+  "panelAudioCapture": {
+    "message": "No usable microphone was found."
+  },
+  "panelSuperseded": {
+    "message": "Stopped: voice input started somewhere else."
+  },
+  "panelAborted": {
+    "message": "Voice input was stopped."
+  },
+  "panelUnsupported": {
+    "message": "This browser cannot do speech recognition."
+  },
   "panelOtherError": {
     "message": "Speech recognition failed ({code}).",
     "description": "{code} is the error code the recognition engine reported"
   },
-  "panelKeptFieldGone": { "message": "The text field is gone, so the text was kept here." },
-  "panelKeptNotTarget": { "message": "That field cannot take the text, so it was kept here." },
-  "panelKeptComposing": { "message": "Text entry was busy (IME), so the text was kept here." },
-  "panelKeptSilence": { "message": "Stopped after silence. Press the mic to continue; the text is kept." },
-  "panelStoppedSilence": { "message": "Stopped after a silence. Press the mic to go on." },
+  "panelKeptFieldGone": {
+    "message": "The text field is gone, so the text was kept here."
+  },
+  "panelKeptNotTarget": {
+    "message": "That field cannot take the text, so it was kept here."
+  },
+  "panelKeptComposing": {
+    "message": "Text entry was busy (IME), so the text was kept here."
+  },
+  "panelKeptSilence": {
+    "message": "Stopped after silence. Press the mic to continue; the text is kept."
+  },
+  "panelStoppedSilence": {
+    "message": "Stopped after a silence. Press the mic to go on."
+  },
   "panelNotSubmitted": {
     "message": "The text is in the field. vtype could not tell how this page is sent, so it sent nothing."
   },
-
-  "permissionTitle": { "message": "vtype needs the microphone" },
+  "permissionTitle": {
+    "message": "vtype needs the microphone"
+  },
   "permissionLead": {
     "message": "vtype turns your speech into text in web text fields. Allow the microphone once here; after that no site will ask again."
   },
-  "permissionButton": { "message": "Allow the microphone" },
-  "permissionRequesting": { "message": "Waiting for your answer in the browser dialog..." },
-  "permissionGranted": { "message": "Allowed. You can close this tab." },
+  "permissionButton": {
+    "message": "Allow the microphone"
+  },
+  "permissionRequesting": {
+    "message": "Waiting for your answer in the browser dialog..."
+  },
+  "permissionGranted": {
+    "message": "Allowed. You can close this tab."
+  },
   "permissionDenied": {
     "message": "Not allowed. Allow the microphone for this extension in the address bar's site settings, then press the button again."
   },
   "permissionAfter": {
     "message": "To use vtype: focus a text field, rest the mouse on the small mic next to it, and press the mic in the panel."
   },
-  "permissionAlready": { "message": "The microphone is already allowed. You can close this tab." },
-
-  "optionsTitle": { "message": "vtype settings" },
+  "permissionAlready": {
+    "message": "The microphone is already allowed. You can close this tab."
+  },
+  "optionsTitle": {
+    "message": "vtype settings"
+  },
   "optionsLead": {
     "message": "vtype puts what you say into the text field you are working in. Choose how recording starts."
   },
-  "optionsLegend": { "message": "What starts recording" },
-  "optionsClickLabel": { "message": "Press the mic (recommended)" },
+  "optionsLegend": {
+    "message": "What starts recording"
+  },
+  "optionsClickLabel": {
+    "message": "Press the mic (recommended)"
+  },
   "optionsClickHint": {
     "message": "Press the small mic next to the field to start, and press it again to stop. Resting the mouse on it only opens the panel."
   },
-  "optionsHoverLabel": { "message": "Rest the mouse on the mic" },
+  "optionsHoverLabel": {
+    "message": "Rest the mouse on the mic"
+  },
   "optionsHoverHint": {
     "message": "Recording starts as soon as the panel opens by itself, so you can speak straight away. You can still press the mic to start and stop."
   },
-  "optionsDisplayLegend": { "message": "Where the mic is shown" },
-  "optionsDisplayAllLabel": { "message": "On every text field on screen (recommended)" },
+  "optionsDisplayLegend": {
+    "message": "Where the mic is shown"
+  },
+  "optionsDisplayAllLabel": {
+    "message": "On every text field on screen (recommended)"
+  },
   "optionsDisplayAllHint": {
     "message": "Each text field you can see gets a faint mic next to it, without you touching anything. On a page with very many fields, only the first ones get one; the rest appear as you move the mouse over them."
   },
-  "optionsDisplayHoverLabel": { "message": "Only on the field I am using" },
+  "optionsDisplayHoverLabel": {
+    "message": "Only on the field I am using"
+  },
   "optionsDisplayHoverHint": {
     "message": "A mic appears on the field the mouse is over, and on the field the caret is in. Moving away takes it back."
   },
-  "optionsSaved": { "message": "Saved." },
-  "optionsFailed": { "message": "Could not save the setting. vtype keeps starting when you press the mic." },
-  "optionsSitesTitle": { "message": "Sites vtype stays off on" },
+  "optionsSaved": {
+    "message": "Saved."
+  },
+  "optionsFailed": {
+    "message": "Could not save the setting. vtype keeps starting when you press the mic."
+  },
+  "optionsSitesTitle": {
+    "message": "Sites vtype stays off on"
+  },
   "optionsSitesLead": {
     "message": "vtype is on everywhere by default. A site on this list gets no mic at all. You can also switch the site you are on off from the panel itself, and on again with the vtype button in the toolbar."
   },
-  "optionsSitesPlaceholder": { "message": "example.com or *.example.com" },
-  "optionsSitesAdd": { "message": "Add" },
-  "optionsSitesEmpty": { "message": "vtype is on everywhere: no site has been switched off." },
-  "optionsSitesRemove": { "message": "Switch back on" },
+  "optionsSitesPlaceholder": {
+    "message": "example.com or *.example.com"
+  },
+  "optionsSitesAdd": {
+    "message": "Add"
+  },
+  "optionsSitesEmpty": {
+    "message": "vtype is on everywhere: no site has been switched off."
+  },
+  "optionsSitesRemove": {
+    "message": "Switch back on"
+  },
   "optionsSitesAdded": {
     "message": "vtype stays off on {site}.",
     "description": "{site} is an origin such as https://example.com, or *.example.com"
@@ -111,12 +185,48 @@
   "optionsSitesBadInput": {
     "message": "That is not a site address. Write it like example.com, https://example.com or *.example.com."
   },
-  "optionsSitesFailed": { "message": "Could not save the list." },
-  "optionsPositionsTitle": { "message": "Where the mic sits" },
+  "optionsSitesFailed": {
+    "message": "Could not save the list."
+  },
+  "optionsPositionsTitle": {
+    "message": "Where the mic sits"
+  },
   "optionsPositionsLead": {
     "message": "You can drag the small mic aside on a site where it covers one of the site's own buttons. vtype remembers that for the site. This puts every site back to where vtype normally puts it."
   },
-  "optionsReset": { "message": "Put the mic back on every site" },
+  "optionsDiagTitle": {
+    "message": "Diagnostic log"
+  },
+  "optionsDiagLead": {
+    "message": "Off unless you switch it on. It exists for one question: why did a recording stop where it did. It records timings, how many times recognition restarted, how many characters arrived and why a recording ended — never what you said."
+  },
+  "optionsDiagLabel": {
+    "message": "Keep a diagnostic log"
+  },
+  "optionsDiagHint": {
+    "message": "Kept in this browser only, at most 300 entries, oldest dropped first. Switching this off stops the recording; it does not empty what is already there."
+  },
+  "optionsDiagCopy": {
+    "message": "Copy"
+  },
+  "optionsDiagClear": {
+    "message": "Empty the log"
+  },
+  "optionsDiagEmpty": {
+    "message": "The log is empty."
+  },
+  "optionsDiagCopied": {
+    "message": "Copied."
+  },
+  "optionsDiagCopyFailed": {
+    "message": "Could not copy. Select the text and copy it by hand."
+  },
+  "optionsDiagCleared": {
+    "message": "The log was emptied."
+  },
+  "optionsReset": {
+    "message": "Put the mic back on every site"
+  },
   "optionsResetDoneOne": {
     "message": "Done: 1 site put back.",
     "description": "Used when exactly one site was put back; see optionsResetDoneMany for the rest"
@@ -125,6 +235,10 @@
     "message": "Done: {count} sites put back.",
     "description": "{count} is 0 or 2 and above. A language with one plural form uses the same text in both keys"
   },
-  "optionsResetNone": { "message": "The mic has not been moved on any site." },
-  "optionsResetFailed": { "message": "Could not clear the saved positions." }
+  "optionsResetNone": {
+    "message": "The mic has not been moved on any site."
+  },
+  "optionsResetFailed": {
+    "message": "Could not clear the saved positions."
+  }
 }

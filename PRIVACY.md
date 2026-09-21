@@ -44,6 +44,7 @@ vtype 自身は、いかなるサーバーへも通信しません。パッケ�
 - `micDisplay`: マイクを出す範囲（画面上のすべての入力欄 / 使っている欄だけ）
 - `micOffsets`: マイクをドラッグして動かした位置。サイトのオリジンごとに 1 件、最大 50 件
 - `excludedSites`: vtype を動かさないサイトの一覧。最大 100 件
+- `diagnostics`: 診断ログを取るかどうか（既定は取らない）
 
 `excludedSites` だけは `chrome.storage.local` にも書きます。組織の設定で同期が拒否される環境があり、
 「切ったはずのサイトでマイクが戻る」ことを避けるためです。
@@ -51,9 +52,25 @@ vtype 自身は、いかなるサーバーへも通信しません。パッケ�
 `micOffsets` と `excludedSites` には、利用者が自分で選んだサイトのオリジン（`https://example.com`
 の形）が含まれます。これらはブラウザの中にとどまり、開発者へは送信されません。
 
+## 診断ログ
+
+**既定では取りません。** 設定ページで「診断ログを取る」を選んだときだけ記録します。「なぜそこで録音が
+止まったのか」を調べるためだけのもので、記録するのは次の情報です。
+
+- 時刻
+- 音声認識が何回やり直されたかの通し番号
+- イベントの種類（開始 / 発話の検出 / 結果の到着 / 終了）
+- 結果として届いた **文字数**（何文字だったか）
+- 録音が終わった理由（利用者が止めた / 無音 / エラーとそのコード）
+
+**話した内容も、認識された文字も記録しません。** 文字数だけで、文字そのものは残りません。ログは
+`chrome.storage.local`（このブラウザの中）に最大 300 件まで保存され、古いものから消えます。設定ページ
+からいつでも全文を表示・コピー・削除できます。**開発者へは送信されません。**
+
 ## 文字起こしの保存
 
 保存しません。認識した文字は入力欄へ入れたらそれで終わりで、履歴も、検索も、書き出しもありません。
+診断ログを取っている間も、残るのは文字数だけで、文字そのものは残りません。
 
 ## パスワード欄
 
@@ -81,4 +98,4 @@ https://github.com/ishizakahiroshi/vtype/issues
 
 English version: [docs/store/privacy-policy.en.md](docs/store/privacy-policy.en.md)
 
-This file is a copy of [docs/store/privacy-policy.ja.md](docs/store/privacy-policy.ja.md), which is the source. scripts/validate-extension.ps1 fails if the two drift apart.
+This file is a copy of [docs/store/privacy-policy.ja.md](docs/store/privacy-policy.ja.md), which is the source. `scripts/validate-extension.ps1` fails if the two drift apart.

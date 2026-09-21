@@ -40,6 +40,7 @@ has no offscreen documents, so it needs a recognition engine of its own.
 - Drag the mic aside where it collides with a button of the site's own; it stays where you put it
 - Switch vtype off per site from the toolbar icon, and manage that list on the settings page
 - No mic on password fields, nor on read-only or disabled ones
+- An opt-in diagnostic log for when a recording behaves oddly: timings and counts, never words
 - English and Japanese, following the browser's language. Another language is one file:
   see [adding a language](packages/extension/README.md#adding-a-language)
 

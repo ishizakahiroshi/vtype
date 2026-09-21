@@ -11,7 +11,6 @@
     "message": "vtype: このサイトで使う / 使わないを切り替える",
     "description": "Tooltip on the toolbar icon"
   },
-
   "micTriggerLabel": {
     "message": "vtype 音声入力",
     "description": "Accessible name of the small mic next to a text field"
@@ -20,86 +19,161 @@
     "message": "押すと音声入力。ドラッグでずらせます。",
     "description": "Tooltip on the small mic, which is both a button and draggable"
   },
-  "micClear": { "message": "入力欄を空にする" },
-  "micSend": { "message": "送信" },
-  "micStart": { "message": "音声入力を開始" },
-  "micStop": { "message": "音声入力を停止" },
-  "micSiteOff": { "message": "このサイトでは使わない" },
-
-  "panelNoField": { "message": "先に入力欄をクリックしてください。" },
-  "panelUnavailable": { "message": "このページでは vtype を使えません。ページを再読み込みしてください。" },
-  "panelDidNotStart": { "message": "音声入力を開始できませんでした。もう一度押してください。" },
-  "panelNotAllowed": { "message": "vtype にマイクが許可されていません。" },
+  "micClear": {
+    "message": "入力欄を空にする"
+  },
+  "micSend": {
+    "message": "送信"
+  },
+  "micStart": {
+    "message": "音声入力を開始"
+  },
+  "micStop": {
+    "message": "音声入力を停止"
+  },
+  "micSiteOff": {
+    "message": "このサイトでは使わない"
+  },
+  "panelNoField": {
+    "message": "先に入力欄をクリックしてください。"
+  },
+  "panelUnavailable": {
+    "message": "このページでは vtype を使えません。ページを再読み込みしてください。"
+  },
+  "panelDidNotStart": {
+    "message": "音声入力を開始できませんでした。もう一度押してください。"
+  },
+  "panelNotAllowed": {
+    "message": "vtype にマイクが許可されていません。"
+  },
   "panelOpenPermission": {
     "message": "許可する",
     "description": "Button on the message that opens the microphone permission page"
   },
-  "panelNoSpeech": { "message": "聞き取れませんでした。" },
-  "panelNetwork": { "message": "音声認識サービスに接続できませんでした。" },
-  "panelAudioCapture": { "message": "使えるマイクが見つかりません。" },
-  "panelSuperseded": { "message": "別の場所で音声入力が始まったため停止しました。" },
-  "panelAborted": { "message": "音声入力を停止しました。" },
-  "panelUnsupported": { "message": "このブラウザでは音声認識を使えません。" },
+  "panelNoSpeech": {
+    "message": "聞き取れませんでした。"
+  },
+  "panelNetwork": {
+    "message": "音声認識サービスに接続できませんでした。"
+  },
+  "panelAudioCapture": {
+    "message": "使えるマイクが見つかりません。"
+  },
+  "panelSuperseded": {
+    "message": "別の場所で音声入力が始まったため停止しました。"
+  },
+  "panelAborted": {
+    "message": "音声入力を停止しました。"
+  },
+  "panelUnsupported": {
+    "message": "このブラウザでは音声認識を使えません。"
+  },
   "panelOtherError": {
     "message": "音声認識でエラーが発生しました（{code}）。",
     "description": "{code} is the error code the recognition engine reported"
   },
-  "panelKeptFieldGone": { "message": "入力欄が見つからないため、文字をここに残しました。" },
-  "panelKeptNotTarget": { "message": "この欄には入れられないため、文字をここに残しました。" },
-  "panelKeptComposing": { "message": "変換中のため入れられませんでした。文字をここに残しました。" },
-  "panelKeptSilence": { "message": "無音が続いたため停止しました。マイクを押すと続けられます（文字は残っています）。" },
-  "panelStoppedSilence": { "message": "無音が続いたため停止しました。マイクを押すと続けられます。" },
+  "panelKeptFieldGone": {
+    "message": "入力欄が見つからないため、文字をここに残しました。"
+  },
+  "panelKeptNotTarget": {
+    "message": "この欄には入れられないため、文字をここに残しました。"
+  },
+  "panelKeptComposing": {
+    "message": "変換中のため入れられませんでした。文字をここに残しました。"
+  },
+  "panelKeptSilence": {
+    "message": "無音が続いたため停止しました。マイクを押すと続けられます（文字は残っています）。"
+  },
+  "panelStoppedSilence": {
+    "message": "無音が続いたため停止しました。マイクを押すと続けられます。"
+  },
   "panelNotSubmitted": {
     "message": "文字は欄に入れました。このページの送信方法が分からないため、送信はしていません。"
   },
-
-  "permissionTitle": { "message": "vtype にマイクの使用を許可してください" },
+  "permissionTitle": {
+    "message": "vtype にマイクの使用を許可してください"
+  },
   "permissionLead": {
     "message": "vtype は話した言葉を Web の入力欄に文字で入れます。ここで一度だけマイクを許可すると、以降はどのサイトでも確認は出ません。"
   },
-  "permissionButton": { "message": "マイクを許可する" },
-  "permissionRequesting": { "message": "ブラウザの確認ダイアログで許可してください…" },
-  "permissionGranted": { "message": "許可されました。このタブは閉じてかまいません。" },
+  "permissionButton": {
+    "message": "マイクを許可する"
+  },
+  "permissionRequesting": {
+    "message": "ブラウザの確認ダイアログで許可してください…"
+  },
+  "permissionGranted": {
+    "message": "許可されました。このタブは閉じてかまいません。"
+  },
   "permissionDenied": {
     "message": "許可されませんでした。アドレスバーのサイト設定でこの拡張のマイクを許可してから、もう一度ボタンを押してください。"
   },
   "permissionAfter": {
     "message": "使い方: 入力欄をクリックし、横に出る小さなマイクにマウスを乗せて、パネルのマイクを押します。"
   },
-  "permissionAlready": { "message": "マイクはすでに許可されています。このタブは閉じてかまいません。" },
-
-  "optionsTitle": { "message": "vtype の設定" },
+  "permissionAlready": {
+    "message": "マイクはすでに許可されています。このタブは閉じてかまいません。"
+  },
+  "optionsTitle": {
+    "message": "vtype の設定"
+  },
   "optionsLead": {
     "message": "vtype は話した言葉を、今使っている入力欄に文字で入れます。録音の始め方を選べます。"
   },
-  "optionsLegend": { "message": "録音の始め方" },
-  "optionsClickLabel": { "message": "マイクを押して始める（おすすめ）" },
+  "optionsLegend": {
+    "message": "録音の始め方"
+  },
+  "optionsClickLabel": {
+    "message": "マイクを押して始める（おすすめ）"
+  },
   "optionsClickHint": {
     "message": "入力欄の横の小さなマイクを押すと始まり、もう一度押すと止まります。マウスを乗せるだけではパネルが開くだけです。"
   },
-  "optionsHoverLabel": { "message": "マイクにマウスを乗せて始める" },
+  "optionsHoverLabel": {
+    "message": "マイクにマウスを乗せて始める"
+  },
   "optionsHoverHint": {
     "message": "パネルが開いた時点で録音が始まるので、そのまま話せます。マイクを押して始める・止めることもできます。"
   },
-  "optionsDisplayLegend": { "message": "マイクを出す場所" },
-  "optionsDisplayAllLabel": { "message": "画面に見えている入力欄すべて（おすすめ）" },
+  "optionsDisplayLegend": {
+    "message": "マイクを出す場所"
+  },
+  "optionsDisplayAllLabel": {
+    "message": "画面に見えている入力欄すべて（おすすめ）"
+  },
   "optionsDisplayAllHint": {
     "message": "見えている入力欄の横に、薄いマイクが最初から出ます。操作は要りません。欄がとても多いページでは先頭のぶんだけ出て、残りはマウスを乗せたときに出ます。"
   },
-  "optionsDisplayHoverLabel": { "message": "今使っている欄だけ" },
+  "optionsDisplayHoverLabel": {
+    "message": "今使っている欄だけ"
+  },
   "optionsDisplayHoverHint": {
     "message": "マウスを乗せた欄と、カーソルがある欄にだけマイクが出ます。離れると消えます。"
   },
-  "optionsSaved": { "message": "保存しました。" },
-  "optionsFailed": { "message": "設定を保存できませんでした。マイクを押して始める動作のままになります。" },
-  "optionsSitesTitle": { "message": "vtype を使わないサイト" },
+  "optionsSaved": {
+    "message": "保存しました。"
+  },
+  "optionsFailed": {
+    "message": "設定を保存できませんでした。マイクを押して始める動作のままになります。"
+  },
+  "optionsSitesTitle": {
+    "message": "vtype を使わないサイト"
+  },
   "optionsSitesLead": {
     "message": "vtype は既定ですべてのサイトで動きます。ここに入れたサイトではマイクが一切出ません。今開いているサイトはパネルからも切れます。戻すときはツールバーの vtype のボタンを押してください。"
   },
-  "optionsSitesPlaceholder": { "message": "example.com または *.example.com" },
-  "optionsSitesAdd": { "message": "追加" },
-  "optionsSitesEmpty": { "message": "切ったサイトはありません。すべてのサイトで動きます。" },
-  "optionsSitesRemove": { "message": "また使う" },
+  "optionsSitesPlaceholder": {
+    "message": "example.com または *.example.com"
+  },
+  "optionsSitesAdd": {
+    "message": "追加"
+  },
+  "optionsSitesEmpty": {
+    "message": "切ったサイトはありません。すべてのサイトで動きます。"
+  },
+  "optionsSitesRemove": {
+    "message": "また使う"
+  },
   "optionsSitesAdded": {
     "message": "{site} では vtype を使いません。",
     "description": "{site} is an origin such as https://example.com, or *.example.com"
@@ -111,12 +185,48 @@
   "optionsSitesBadInput": {
     "message": "サイトのアドレスとして読めません。example.com / https://example.com / *.example.com の形で書いてください。"
   },
-  "optionsSitesFailed": { "message": "一覧を保存できませんでした。" },
-  "optionsPositionsTitle": { "message": "マイクの位置" },
+  "optionsSitesFailed": {
+    "message": "一覧を保存できませんでした。"
+  },
+  "optionsPositionsTitle": {
+    "message": "マイクの位置"
+  },
   "optionsPositionsLead": {
     "message": "サイト自身のボタンとマイクが重なる場合は、小さなマイクをドラッグしてずらせます。ずらした位置はそのサイトごとに覚えています。ここで全サイトぶんを元の位置に戻せます。"
   },
-  "optionsReset": { "message": "すべてのサイトでマイクの位置を元に戻す" },
+  "optionsDiagTitle": {
+    "message": "診断ログ"
+  },
+  "optionsDiagLead": {
+    "message": "既定では取りません。「なぜそこで録音が止まったのか」を調べるためだけのものです。時刻、認識が何回やり直されたか、何文字届いたか、どの理由で終わったかを記録します。話した内容そのものは記録しません。"
+  },
+  "optionsDiagLabel": {
+    "message": "診断ログを取る"
+  },
+  "optionsDiagHint": {
+    "message": "このブラウザの中だけに、最大 300 件まで（古いものから消えます）。チェックを外すと記録は止まりますが、すでにあるログは残ります。"
+  },
+  "optionsDiagCopy": {
+    "message": "コピー"
+  },
+  "optionsDiagClear": {
+    "message": "ログを消す"
+  },
+  "optionsDiagEmpty": {
+    "message": "ログはありません。"
+  },
+  "optionsDiagCopied": {
+    "message": "コピーしました。"
+  },
+  "optionsDiagCopyFailed": {
+    "message": "コピーできませんでした。文字を選んで手でコピーしてください。"
+  },
+  "optionsDiagCleared": {
+    "message": "ログを消しました。"
+  },
+  "optionsReset": {
+    "message": "すべてのサイトでマイクの位置を元に戻す"
+  },
   "optionsResetDoneOne": {
     "message": "1 件のサイトの位置を元に戻しました。",
     "description": "Used when exactly one site was put back; see optionsResetDoneMany for the rest"
@@ -125,6 +235,10 @@
     "message": "{count} 件のサイトの位置を元に戻しました。",
     "description": "{count} is 0 or 2 and above. A language with one plural form uses the same text in both keys"
   },
-  "optionsResetNone": { "message": "位置をずらしたサイトはありません。" },
-  "optionsResetFailed": { "message": "保存された位置を消せませんでした。" }
+  "optionsResetNone": {
+    "message": "位置をずらしたサイトはありません。"
+  },
+  "optionsResetFailed": {
+    "message": "保存された位置を消せませんでした。"
+  }
 }

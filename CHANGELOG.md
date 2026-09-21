@@ -53,6 +53,11 @@ fixed against a published version.
   (through the manifest's `__MSG_*` fields), the settings page, the microphone page and every
   message in the panel. Adding a language is adding one `_locales/<code>/messages.json`; the
   build, the tests and the packaging check refuse a locale whose keys do not match.
+- An opt-in diagnostic log, off by default, for the one question that cannot be answered
+  otherwise: why did a recording stop where it did. It records timings, how often recognition
+  restarted, how many characters each result carried and why a recording ended — never what was
+  said — in this browser only, at most 300 entries, shown, copied and emptied from the settings
+  page.
 - `vtype-core`, the recognition engine as a workspace package that renders nothing, so the same
   engine can be used outside the extension.
 
