@@ -43,11 +43,19 @@ Chrome 版とは配管が異なる。共有コア + ブラウザ別アダプタ�
 
 ## ディレクトリ構成
 
-<!-- TODO: 共有コア + ブラウザ別アダプタの実体が決まったら列挙する。 -->
+pnpm workspace。`packages/core`（`vtype-core`・認識エンジン。DOM を触らない）と
+`packages/extension`（Chrome MV3。**出荷物は `dist/`** で、`build.mjs` が 1 本ずつ classic bundle に焼く）。
+`scripts/` は検査・ストア用パッケージング・secrets-scan、`docs/store/` はストア掲載文。詳細は `README.md`。
 
 ## 主要コマンド
 
-<!-- TODO: ビルド構成が決まったら追記する。 -->
+```sh
+pnpm -r build        # core → extension の順（extension は core の dist/ を読む）
+pnpm -r typecheck
+pnpm -r test
+```
+
+ストア用 zip は `scripts/validate-extension.ps1` → `scripts/package-webstore.ps1`（build は各自で先に回す）。
 
 ## 設計原則の索引（本文は正本にある）
 
@@ -74,6 +82,9 @@ Chrome 版とは配管が異なる。共有コア + ブラウザ別アダプタ�
 - **入力欄への差し込みは `value` 直代入で済ませない。** React 等の制御コンポーネントは
   ネイティブ setter + `input` イベントでないと state が更新されない。contenteditable はまた別経路
 - **日本語 IME の変換中に差し込まない。** `compositionstart` / `compositionend` を見て待つ
+- **利用者が読む文字列をソースに直書きしない。** 正本は `packages/extension/_locales/<code>/messages.json`
+  の 1 か所で、コードは `shared/i18n` の `t("key")` で引く。言語を足すのはファイルを 1 本置くだけ
+  （手順は `packages/extension/README.md`・鍵の過不足は build / `tests/i18n.test.ts` / validate が落とす）
 
 ## Obsidian artifacts
 
@@ -97,5 +108,9 @@ path and do not silently fall back to `docs/local` when the entry is missing.
 |---|---|
 | ユーザー向け README | `README.md` |
 | Codex/他 AI 用入口 | `AGENTS.md` |
+| 変更履歴（版の正本は manifest.json） | `CHANGELOG.md` |
+| プライバシーポリシー（ストアの Privacy URL） | `PRIVACY.md`（正本は `docs/store/privacy-policy.ja.md`） |
+| ストア掲載文・提出文書（ja/en 両方） | `docs/store/` |
+| 利用者が読む文字列（言語ごとに 1 ファイル） | `packages/extension/_locales/` |
 | ローカル作業ノート（非公開） | `docs/local/`（存在する場合） |
 | Obsidian knowledge artifacts | `docs/obsidian/`（存在する場合。作業キューではない） |

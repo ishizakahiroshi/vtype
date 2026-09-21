@@ -248,7 +248,22 @@ function getStructuralPatterns() {
 
 // === File listing per mode ===
 
-function getFilesByMode(mode) {
+function getFilesByMode(mode, listPath) {
+  // Layer 4 (chrome-webstore-publish): the exact files that go into the store zip. The built
+  // extension is gitignored, so no git mode can see it; the packaging script writes the staged
+  // file paths to a temporary list and passes it here.
+  if (mode === 'files-from-list') {
+    if (!listPath) {
+      console.error('ERROR: --files-from-list requires a path to a file containing one path per line');
+      process.exit(2);
+    }
+    if (!existsSync(listPath)) {
+      console.error(`ERROR: file list not found: ${listPath}`);
+      process.exit(2);
+    }
+    return readFileSync(listPath, 'utf8').split('\n').map(l => l.trim()).filter(Boolean);
+  }
+
   try {
     switch (mode) {
       case 'staged':
@@ -431,12 +446,15 @@ function formatHitsText(hits, mode) {
 // === Argument parsing ===
 
 function parseArgs(argv) {
-  const args = { mode: null, block: false, dryRun: false, format: 'text', help: false };
-  for (const a of argv) {
+  const args = { mode: null, listPath: null, block: false, dryRun: false, format: 'text', help: false };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
     if (a === '--staged') args.mode = 'staged';
     else if (a === '--files-from-diff') args.mode = 'files-from-diff';
     else if (a === '--all-tracked') args.mode = 'all-tracked';
     else if (a === '--packaged') args.mode = 'packaged';
+    else if (a === '--files-from-list') { args.mode = 'files-from-list'; args.listPath = argv[++i] || null; }
+    else if (a.startsWith('--files-from-list=')) { args.mode = 'files-from-list'; args.listPath = a.slice('--files-from-list='.length) || null; }
     else if (a === '--block') args.block = true;
     else if (a === '--dry-run') args.dryRun = true;
     else if (a === '--format=json') args.format = 'json';
@@ -455,6 +473,8 @@ Modes (exactly one required):
   --staged              scan files staged for commit (layer 2 / pre-commit hook)
   --files-from-diff     scan files changed since HEAD (layer 3 / CI on PR)
   --all-tracked         scan all git-tracked files (sweep / audit)
+  --files-from-list P   scan the paths listed in file P, one per line (layer 4 / store package:
+                        the built extension is gitignored, so git cannot list it)
   --packaged            scan packaged tarball (layer 4 / release gate) [TODO]
 
 Options:
@@ -521,7 +541,7 @@ function main() {
 
   const structuralPatterns = getStructuralPatterns();
 
-  const allFiles = getFilesByMode(args.mode);
+  const allFiles = getFilesByMode(args.mode, args.listPath);
   const filesToScan = allFiles.filter(f => !isExempt(f) && !isBinary(f) && !isSkipFilename(f));
 
   const allHits = [];
