@@ -15,7 +15,7 @@
 
 import { build } from "esbuild";
 import { copyFile, mkdir, readFile, readdir, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { DEFAULT_LOCALE, esbuildLocales, readLocales } from "./locales.mjs";
@@ -30,12 +30,14 @@ await mkdir(dist, { recursive: true });
 const rawImports = {
   name: "raw-imports",
   setup(b) {
-    b.onResolve({ filter: /\?raw$/ }, (args) => ({
-      path: join(args.resolveDir, args.path.slice(0, -"?raw".length)),
-      namespace: "raw",
-    }));
+    // esbuild prints `// raw:<path>` above the module in the unminified bundle, so the path it is
+    // given must be relative: an absolute one ships the builder's directory to the store.
+    b.onResolve({ filter: /\?raw$/ }, (args) => {
+      const file = join(args.resolveDir, args.path.slice(0, -"?raw".length));
+      return { path: relative(here, file).split(sep).join("/"), namespace: "raw", pluginData: { file } };
+    });
     b.onLoad({ filter: /.*/, namespace: "raw" }, async (args) => ({
-      contents: await readFile(args.path, "utf8"),
+      contents: await readFile(args.pluginData.file, "utf8"),
       loader: "text",
     }));
   },
