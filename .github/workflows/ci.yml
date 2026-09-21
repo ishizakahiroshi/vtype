@@ -1,0 +1,64 @@
+name: CI
+
+# Build, typecheck and test the workspace on every pull request and every push to main.
+#
+# Order matters and is not the usual one: `packages/extension` resolves `vtype-core` through the
+# workspace package's published entry (`dist/index.js` / `dist/index.d.ts`), not through a path
+# alias. On a fresh clone that directory does not exist yet, so the build has to run before the
+# typecheck and before the tests. `pnpm -r` walks the workspace in dependency order, so one
+# `pnpm -r build` builds core first and then the extension.
+#
+# The extension's build (packages/extension/build.mjs) is itself a check: it fails if an output
+# still contains module syntax (a classic content script / service worker cannot run it) or if
+# the manifest or an HTML page points at a file the build did not produce.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: build / typecheck / test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Version comes from the root package.json "packageManager" field (pnpm@11.1.1).
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      # package.json engines allows Node >= 20; this pins the version the extension is
+      # developed and hand-verified on, so a green run means that exact combination is green.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm -r build
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Test
+        run: pnpm -r test
+
+      # The unpacked extension exactly as the build produced it, so a store package can be
+      # traced back to the commit it came from without rebuilding.
+      - name: Upload the built extension
+        uses: actions/upload-artifact@v4
+        with:
+          name: vtype-extension-dist-${{ github.sha }}
+          path: packages/extension/dist
+          if-no-files-found: error
+          retention-days: 14
