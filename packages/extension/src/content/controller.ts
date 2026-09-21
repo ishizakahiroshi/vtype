@@ -12,6 +12,7 @@
 // - The content script never touches the speech recognition or microphone APIs: recognition
 //   runs in the offscreen document, reached through the background (shared/messages.ts).
 
+import { translator } from "../shared/i18n";
 import type { Anchor } from "./anchor";
 import { deepActiveElement, resolveTarget } from "./detect";
 import { beginLiveInsert, insertAtCursor, type InsertResult, type LiveInsert, type LiveResult } from "./insert";
@@ -80,74 +81,6 @@ export interface Controller {
   dispose(): void;
 }
 
-interface Texts {
-  noField: string;
-  unavailable: string;
-  didNotStart: string;
-  notAllowed: string;
-  openPermission: string;
-  noSpeech: string;
-  network: string;
-  audioCapture: string;
-  superseded: string;
-  aborted: string;
-  unsupported: string;
-  otherError: (code: string) => string;
-  keptFieldGone: string;
-  keptNotTarget: string;
-  keptComposing: string;
-  keptSilence: string;
-  stoppedSilence: string;
-  notSubmitted: string;
-}
-
-const TEXTS: Record<"en" | "ja", Texts> = {
-  en: {
-    noField: "Click a text field first.",
-    unavailable: "vtype is not available on this page. Reload the page and try again.",
-    didNotStart: "Voice input did not start. Try again.",
-    notAllowed: "The microphone is not allowed for vtype.",
-    openPermission: "Allow it",
-    noSpeech: "Nothing was heard.",
-    network: "Could not reach the speech recognition service.",
-    audioCapture: "No usable microphone was found.",
-    superseded: "Stopped: voice input started somewhere else.",
-    aborted: "Voice input was stopped.",
-    unsupported: "This browser cannot do speech recognition.",
-    otherError: (code) => `Speech recognition failed (${code}).`,
-    keptFieldGone: "The text field is gone, so the text was kept here.",
-    keptNotTarget: "That field cannot take the text, so it was kept here.",
-    keptComposing: "Text entry was busy (IME), so the text was kept here.",
-    keptSilence: "Stopped after silence. Press the mic to continue; the text is kept.",
-    stoppedSilence: "Stopped after a silence. Press the mic to go on.",
-    notSubmitted: "The text is in the field. vtype could not tell how this page is sent, so it sent nothing.",
-  },
-  ja: {
-    noField: "先に入力欄をクリックしてください。",
-    unavailable: "このページでは vtype を使えません。ページを再読み込みしてください。",
-    didNotStart: "音声入力を開始できませんでした。もう一度押してください。",
-    notAllowed: "vtype にマイクが許可されていません。",
-    openPermission: "許可する",
-    noSpeech: "聞き取れませんでした。",
-    network: "音声認識サービスに接続できませんでした。",
-    audioCapture: "使えるマイクが見つかりません。",
-    superseded: "別の場所で音声入力が始まったため停止しました。",
-    aborted: "音声入力を停止しました。",
-    unsupported: "このブラウザでは音声認識を使えません。",
-    otherError: (code) => `音声認識でエラーが発生しました（${code}）。`,
-    keptFieldGone: "入力欄が見つからないため、文字をここに残しました。",
-    keptNotTarget: "この欄には入れられないため、文字をここに残しました。",
-    keptComposing: "変換中のため入れられませんでした。文字をここに残しました。",
-    keptSilence: "無音が続いたため停止しました。マイクを押すと続けられます（文字は残っています）。",
-    stoppedSilence: "無音が続いたため停止しました。マイクを押すと続けられます。",
-    notSubmitted: "文字は欄に入れました。このページの送信方法が分からないため、送信はしていません。",
-  },
-};
-
-export function textsFor(language: string | undefined): Texts {
-  return language?.toLowerCase().startsWith("ja") ? TEXTS.ja : TEXTS.en;
-}
-
 const PERMISSION_CODES: ReadonlySet<string> = new Set(["not-allowed", "service-not-allowed", "permission_denied"]);
 
 /**
@@ -213,7 +146,7 @@ function newSessionId(): string {
 
 export function createController(options: ControllerOptions): Controller {
   const { anchor, runtime } = options;
-  const t = textsFor(options.language ?? globalThis.navigator?.language);
+  const t = translator(options.language ?? globalThis.navigator?.language);
 
   let ui: Panel | null = null;
   let phase: ControllerPhase = "idle";
@@ -238,7 +171,7 @@ export function createController(options: ControllerOptions): Controller {
   function message(text: string | null, withPermissionAction = false): void {
     if (ui === null) return;
     if (withPermissionAction) {
-      ui.setMessage(text, { label: t.openPermission, run: openPermissionPage });
+      ui.setMessage(text, { label: t("panelOpenPermission"), run: openPermissionPage });
     } else {
       ui.setMessage(text);
     }
@@ -263,7 +196,7 @@ export function createController(options: ControllerOptions): Controller {
     if (msg.type === "open-permission" || sessionId !== msg.sessionId) return;
     // A failed start keeps whatever is in the panel; a failed stop still inserts what the
     // user dictated, as a stop would have.
-    if (msg.type === "start") failLocally(t.unavailable);
+    if (msg.type === "start") failLocally(t("panelUnavailable"));
     else void finish("user");
   }
 
@@ -298,11 +231,11 @@ export function createController(options: ControllerOptions): Controller {
   function start(): void {
     const target = anchor.target;
     if (target === null || resolveTarget(target) !== target) {
-      message(t.noField);
+      message(t("panelNoField"));
       return;
     }
     if (runtime === null) {
-      message(t.unavailable);
+      message(t("panelUnavailable"));
       return;
     }
     const id = newSessionId();
@@ -320,7 +253,7 @@ export function createController(options: ControllerOptions): Controller {
     send({ target: "background", type: "start", sessionId: id });
     if (sessionId !== id) return; // failed synchronously
     startTimer = setTimeout(() => {
-      if (sessionId === id && phase === "recording") failLocally(t.didNotStart);
+      if (sessionId === id && phase === "recording") failLocally(t("panelDidNotStart"));
     }, START_TIMEOUT_MS);
   }
 
@@ -338,10 +271,10 @@ export function createController(options: ControllerOptions): Controller {
 
   function keptMessage(result: InsertResult | LiveResult): string {
     if (result.ok) return "";
-    if (result.reason === "disconnected") return t.keptFieldGone;
-    if (result.reason === "composition-timeout") return t.keptComposing;
-    if (result.reason === "ended") return t.keptNotTarget;
-    return t.keptNotTarget;
+    if (result.reason === "disconnected") return t("panelKeptFieldGone");
+    if (result.reason === "composition-timeout") return t("panelKeptComposing");
+    if (result.reason === "ended") return t("panelKeptNotTarget");
+    return t("panelKeptNotTarget");
   }
 
   /**
@@ -355,18 +288,18 @@ export function createController(options: ControllerOptions): Controller {
   }
 
   function errorText(code: string | undefined): { text: string; permission: boolean } {
-    if (code !== undefined && PERMISSION_CODES.has(code)) return { text: t.notAllowed, permission: true };
-    if (code === "no-speech") return { text: t.noSpeech, permission: false };
-    if (code === "network") return { text: t.network, permission: false };
-    if (code === "audio-capture" || code === "audio_capture") return { text: t.audioCapture, permission: false };
-    if (code === "aborted") return { text: t.superseded, permission: false };
-    if (code === "unsupported") return { text: t.unsupported, permission: false };
-    return { text: t.otherError(code ?? "unknown"), permission: false };
+    if (code !== undefined && PERMISSION_CODES.has(code)) return { text: t("panelNotAllowed"), permission: true };
+    if (code === "no-speech") return { text: t("panelNoSpeech"), permission: false };
+    if (code === "network") return { text: t("panelNetwork"), permission: false };
+    if (code === "audio-capture" || code === "audio_capture") return { text: t("panelAudioCapture"), permission: false };
+    if (code === "aborted") return { text: t("panelSuperseded"), permission: false };
+    if (code === "unsupported") return { text: t("panelUnsupported"), permission: false };
+    return { text: t("panelOtherError", { code: code ?? "unknown" }), permission: false };
   }
 
   function doSubmit(target: Element): void {
     const result = submitFrom(target);
-    message(result.submitted ? null : t.notSubmitted);
+    message(result.submitted ? null : t("panelNotSubmitted"));
   }
 
   /**
@@ -389,7 +322,7 @@ export function createController(options: ControllerOptions): Controller {
     }
     const target = anchor.target;
     if (target === null || resolveTarget(target) !== target) {
-      message(t.noField);
+      message(t("panelNoField"));
       return;
     }
     if (confirmed !== "") {
@@ -426,7 +359,7 @@ export function createController(options: ControllerOptions): Controller {
         // Nothing to insert: send still submits what is already in the field.
         const fallback = target ?? anchor.target;
         if (wantSubmit && fallback !== null) doSubmit(fallback);
-        else if (wantSubmit) message(t.noField);
+        else if (wantSubmit) message(t("panelNoField"));
         return;
       }
       // The text stays visible while insertAtCursor may wait for an IME composition to end.
@@ -444,12 +377,12 @@ export function createController(options: ControllerOptions): Controller {
       return;
     }
     if (reason === "silence") {
-      if (text !== "") message(t.keptSilence);
-      else message(wroteAnything ? t.stoppedSilence : t.noSpeech);
+      if (text !== "") message(t("panelKeptSilence"));
+      else message(wroteAnything ? t("panelStoppedSilence") : t("panelNoSpeech"));
     } else if (reason === "superseded") {
-      message(t.superseded);
+      message(t("panelSuperseded"));
     } else if (reason === "aborted") {
-      message(t.aborted);
+      message(t("panelAborted"));
     } else {
       const e = errorText(code);
       // C7e: a refused microphone would fail again on the next hover, so stop trying by

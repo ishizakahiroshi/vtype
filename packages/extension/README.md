@@ -37,9 +37,40 @@ pnpm -F vtype-extension test
 `offscreen.html` + `offscreen.js` (runs recognition), `permission.html` + `permission.js`
 (the one-time microphone page) and `options.html` + `options.js` (the settings page, registered
 as `options_ui`), plus `icons/` (the extension's icons, copied from `assets/icons/` at the
-repository root, where they are baked from the single source `assets/icon.svg`). Every script is
+repository root, where they are baked from the single source `assets/icon.svg`) and
+`_locales/` (the message files Chrome reads for the manifest's `__MSG_*` fields). Every script is
 one self-contained classic bundle; the build fails if module syntax is left in an output or a
 referenced file is missing.
+
+## Adding a language
+
+Every user-facing string lives in `_locales/<code>/messages.json`, which is Chrome's own format.
+Chrome reads those files itself for the manifest's `__MSG_*` fields (the name and the description
+the store shows in the reader's language), and the bundles read the same files through the
+virtual module `vtype:locales` (see `locales.mjs`), so each string exists exactly once.
+
+Adding a language is adding one file:
+
+```sh
+cp _locales/en/messages.json _locales/fr/messages.json   # then translate the "message" values
+```
+
+Nothing else changes. No list of languages exists in the manifest, the build or the source: the
+build discovers the folders, copies them into `dist/_locales/`, and inlines them into the
+bundles. Use Chrome's folder spelling (`ja`, `en`, `pt_BR` with an underscore).
+
+Three things are enforced, because a missing translation is invisible at runtime — the reader
+just gets one English sentence in an otherwise translated page:
+
+- the build fails if a locale's keys differ from `en`'s (the default locale, `locales.mjs`),
+- `tests/i18n.test.ts` fails on a key the code asks for and no dictionary has, on a message that
+  nothing uses, and on a placeholder (`{code}`, `{site}`) that one language dropped,
+- `scripts/validate-extension.ps1` repeats the parity check against the built package before the
+  store zip is made.
+
+`{name}` in a message is replaced from the call (`t("panelOtherError", { code })`), the same
+shape many-ai-cli's dictionaries use. The language comes from `navigator.language`; the pages and
+the content script take it as an argument, so the tests render either language without a browser.
 
 ## Load it in Chrome
 

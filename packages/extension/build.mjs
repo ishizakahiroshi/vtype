@@ -7,11 +7,18 @@
 //
 // vtype-core is consumed from its built dist/ (workspace package): run
 // `pnpm -F vtype-core build` first on a fresh clone.
+//
+// User-facing text comes from `_locales/<code>/messages.json` (Chrome's own format). The same
+// files are copied into dist/ for Chrome (the manifest's `__MSG_*` fields) and inlined into the
+// bundles through the virtual module `vtype:locales` (locales.mjs), so a string exists once and
+// adding a language is adding one file.
 
 import { build } from "esbuild";
 import { copyFile, mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { DEFAULT_LOCALE, esbuildLocales, readLocales } from "./locales.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = join(here, "dist");
@@ -34,6 +41,10 @@ const rawImports = {
   },
 };
 
+// Throws on a locale whose keys differ from the default one's: a missing key would show an
+// English sentence inside an otherwise translated page, which nobody reports as a bug.
+const locales = readLocales();
+
 const scripts = [
   ["src/content/index.ts", "content.js"],
   ["src/background/index.ts", "background.js"],
@@ -44,7 +55,7 @@ const scripts = [
 
 for (const [entry, out] of scripts) {
   await build({
-    plugins: [rawImports],
+    plugins: [rawImports, esbuildLocales()],
     entryPoints: [join(here, entry)],
     outfile: join(dist, out),
     bundle: true,
@@ -70,6 +81,12 @@ const icons = [
 await mkdir(join(dist, "icons"), { recursive: true });
 for (const [from, to] of icons) {
   await copyFile(join(here, "../../assets/icons", from), join(dist, "icons", to));
+}
+
+// Chrome reads these itself for the manifest's `__MSG_*` fields.
+for (const code of Object.keys(locales)) {
+  await mkdir(join(dist, "_locales", code), { recursive: true });
+  await copyFile(join(here, "_locales", code, "messages.json"), join(dist, "_locales", code, "messages.json"));
 }
 
 await copyFile(join(here, "manifest.json"), join(dist, "manifest.json"));
@@ -102,4 +119,27 @@ for (const file of referenced) {
 }
 if (manifest.background?.type === "module") throw new Error("background must be a classic service worker bundle");
 
+// The manifest is the single source of the version. package.json carries one too (pnpm wants it
+// on a workspace package), so the two are compared here rather than trusted to stay in step.
+const pkg = JSON.parse(await readFile(join(here, "package.json"), "utf8"));
+if (pkg.version !== manifest.version) {
+  throw new Error(`package.json is ${pkg.version} but manifest.json is ${manifest.version}; the manifest is the source`);
+}
+
+// Every `__MSG_key__` in the manifest has to exist, or Chrome refuses to load the extension.
+if (manifest.default_locale !== DEFAULT_LOCALE) {
+  throw new Error(`manifest.default_locale must be "${DEFAULT_LOCALE}" (locales.mjs compares every locale against it)`);
+}
+for (const [field, value] of Object.entries(manifest)) {
+  const name = typeof value === "string" ? value.match(/^__MSG_(\w+)__$/) : null;
+  if (name !== null && !(name[1] in locales[DEFAULT_LOCALE])) {
+    throw new Error(`manifest.${field} points at a message that does not exist: ${name[1]}`);
+  }
+}
+const actionTitle = manifest.action?.default_title?.match?.(/^__MSG_(\w+)__$/);
+if (actionTitle && !(actionTitle[1] in locales[DEFAULT_LOCALE])) {
+  throw new Error(`manifest.action.default_title points at a message that does not exist: ${actionTitle[1]}`);
+}
+
 console.log(`built ${dist}: ${(await readdir(dist)).sort().join(", ")}`);
+console.log(`locales: ${Object.keys(locales).join(", ")} (${Object.keys(locales[DEFAULT_LOCALE]).length} messages each)`);

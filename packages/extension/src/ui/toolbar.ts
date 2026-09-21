@@ -5,6 +5,10 @@
 // Icons are inline SVG built with createElementNS (no innerHTML: pages that enforce Trusted
 // Types would reject it, and emoji/glyph icons depend on the page's fonts).
 // All class names are only meaningful inside vtype's shadow root (styles.css).
+//
+// Text comes from `_locales/` through shared/i18n (one file per language; nothing here lists them).
+
+import { translator, type Translate } from "../shared/i18n";
 
 export type UiState = "idle" | "recording" | "processing";
 
@@ -12,46 +16,9 @@ export const UI_STATES: readonly UiState[] = ["idle", "recording", "processing"]
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-interface Labels {
-  trigger: string;
-  /** Tooltip on the thin mic: it is both a button and something you can drag aside (C7f). */
-  triggerHint: string;
-  clear: string;
-  send: string;
-  micStart: string;
-  micStop: string;
-  /** C9: switch vtype off on this site, from the panel itself. */
-  siteOff: string;
-}
-
-const LABELS: Record<"en" | "ja", Labels> = {
-  en: {
-    trigger: "vtype voice input",
-    triggerHint: "Press to dictate. Drag to move it out of the way.",
-    clear: "Clear the field",
-    send: "Send",
-    micStart: "Start voice input",
-    micStop: "Stop voice input",
-    siteOff: "Don't use vtype on this site",
-  },
-  ja: {
-    trigger: "vtype 音声入力",
-    triggerHint: "押すと音声入力。ドラッグでずらせます。",
-    clear: "入力欄を空にする",
-    send: "送信",
-    micStart: "音声入力を開始",
-    micStop: "音声入力を停止",
-    siteOff: "このサイトでは使わない",
-  },
-};
-
 /** Labels in the browser's language (not the page's): the UI belongs to the user. */
-export function labelsFor(language: string | undefined): Labels {
-  return language?.toLowerCase().startsWith("ja") ? LABELS.ja : LABELS.en;
-}
-
-function currentLabels(doc: Document): Labels {
-  return labelsFor(doc.defaultView?.navigator.language);
+function currentLabels(doc: Document): Translate {
+  return translator(doc.defaultView?.navigator.language);
 }
 
 type SvgChild = [tag: string, attrs: Record<string, string>];
@@ -119,13 +86,13 @@ export function applyStateClass(el: Element, state: UiState): void {
  * hotkey was dropped).
  */
 export function createTrigger(doc: Document): HTMLButtonElement {
-  const labels = currentLabels(doc);
+  const t = currentLabels(doc);
   const b = doc.createElement("button");
   b.type = "button";
   b.className = "mic";
   b.tabIndex = -1;
-  b.setAttribute("aria-label", labels.trigger);
-  b.title = labels.triggerHint;
+  b.setAttribute("aria-label", t("micTriggerLabel"));
+  b.title = t("micTriggerHint");
   b.setAttribute("aria-haspopup", "true");
   b.setAttribute("aria-expanded", "false");
   b.append(micIcon(doc));
@@ -139,12 +106,12 @@ export function createTrigger(doc: Document): HTMLButtonElement {
  * site. The way back is the toolbar icon of the extension (the panel is gone by then).
  */
 export function createSiteOffButton(doc: Document): HTMLButtonElement {
-  const labels = currentLabels(doc);
+  const t = currentLabels(doc);
   const b = doc.createElement("button");
   b.type = "button";
   b.className = "site-off";
-  b.textContent = labels.siteOff;
-  b.title = labels.siteOff;
+  b.textContent = t("micSiteOff");
+  b.title = t("micSiteOff");
   return b;
 }
 
@@ -159,12 +126,12 @@ export interface Toolbar {
 }
 
 export function createToolbar(doc: Document): Toolbar {
-  const labels = currentLabels(doc);
+  const t = currentLabels(doc);
   const element = doc.createElement("div");
   element.className = "toolbar";
-  const clearButton = button(doc, "clear", labels.clear, clearIcon(doc));
-  const sendButton = button(doc, "send", labels.send, sendIcon(doc));
-  const micButton = button(doc, "record", labels.micStart, micIcon(doc));
+  const clearButton = button(doc, "clear", t("micClear"), clearIcon(doc));
+  const sendButton = button(doc, "send", t("micSend"), sendIcon(doc));
+  const micButton = button(doc, "record", t("micStart"), micIcon(doc));
   micButton.setAttribute("aria-pressed", "false");
   element.append(clearButton, sendButton, micButton);
 
@@ -181,7 +148,7 @@ export function createToolbar(doc: Document): Toolbar {
     applyStateClass(micButton, state);
     const recording = state === "recording";
     micButton.setAttribute("aria-pressed", recording ? "true" : "false");
-    const label = recording ? labels.micStop : labels.micStart;
+    const label = t(recording ? "micStop" : "micStart");
     micButton.setAttribute("aria-label", label);
     micButton.title = label;
   }

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import css from "../src/ui/styles.css?raw";
 import { HOST_TAG, OPEN_DELAY_MS } from "../src/content/anchor";
 import { startContentScript, type ContentScript } from "../src/content/index";
-import { labelsFor } from "../src/ui/toolbar";
+import { translate } from "../src/shared/i18n";
 import { SMOOTHING, START_TARGET, TRANSCRIPT_TARGET, createWaveform } from "../src/ui/waveform";
 // The waveform's own source, to prove no microphone API is used (plan C7c 検証 4).
 import waveformSource from "../src/ui/waveform.ts?raw";
@@ -118,9 +118,9 @@ describe("panel and buttons render", () => {
   });
 
   it("labels follow the browser language", () => {
-    expect(labelsFor("ja-JP").send).toBe("送信");
-    expect(labelsFor("en-US").send).toBe("Send");
-    expect(labelsFor(undefined).send).toBe("Send");
+    expect(translate("micSend", "ja-JP")).toBe("送信");
+    expect(translate("micSend", "en-US")).toBe("Send");
+    expect(translate("micSend", undefined)).toBe("Send");
   });
 });
 
@@ -232,7 +232,7 @@ describe("hooks and state", () => {
     expect(record.classList.contains("recording")).toBe(true);
     expect(mic.classList.contains("recording")).toBe(true);
     expect(record.getAttribute("aria-pressed")).toBe("true");
-    expect(record.getAttribute("aria-label")).toBe(labelsFor(navigator.language).micStop);
+    expect(record.getAttribute("aria-label")).toBe(translate("micStop", navigator.language));
 
     ui.setState("processing");
     expect(record.classList.contains("recording")).toBe(false);
