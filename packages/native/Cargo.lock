@@ -2483,6 +2483,7 @@ dependencies = [
  "clap",
  "directories",
  "dispatch2",
+ "getrandom",
  "global-hotkey",
  "gtk",
  "interprocess",

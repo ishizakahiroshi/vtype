@@ -22,6 +22,9 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "std"] }
 # The speech page's WebSocket (standalone plan C3). Synchronous, no TLS: it serves 127.0.0.1 only.
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
+# The speech page's per-start token from the OS's secure random source (already in the tree
+# through tungstenite's rand).
+getrandom = "0.4.3"
 # The desktop UI every system shares (tray, shortcut, clipboard, notifications, opening URLs).
 arboard = "3.6.1"
 global-hotkey = "0.8.0"

@@ -14,15 +14,13 @@
 //! The port is one of a fixed few, not a random one: Chrome remembers the microphone grant per
 //! origin, and the origin includes the port.
 
-use std::collections::hash_map::RandomState;
 use std::collections::HashMap;
-use std::hash::{BuildHasher, Hasher};
 use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Sender, TryRecvError};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use serde_json::Value;
@@ -73,7 +71,7 @@ pub fn start(tx: Sender<Event>) -> Result<SpeechHost> {
 
 fn start_on(ports: &[u16], tx: Sender<Event>) -> Result<SpeechHost> {
     let (listener, port) = bind(ports)?;
-    let host = SpeechHost { port, token: new_token() };
+    let host = SpeechHost { port, token: new_token()? };
     let token = host.token.clone();
     let origin = host.origin();
     tracing::info!(port, "speech page server listening");
@@ -109,18 +107,12 @@ fn bind(ports: &[u16]) -> Result<(TcpListener, u16)> {
     Err(anyhow!("no free port for the speech page among {ports:?}: {last:?}"))
 }
 
-/// 32 hex digits (128 bits) from the standard library's per-process random hash keys, so no
-/// random number crate is needed.
-fn new_token() -> String {
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or_default();
-    (0..2u64)
-        .map(|i| {
-            let mut h = RandomState::new().build_hasher();
-            h.write_u64(i);
-            h.write_u128(nanos);
-            format!("{:016x}", h.finish())
-        })
-        .collect()
+/// 32 hex digits: 128 bits from the OS's secure random source. The token is what keeps other
+/// local programs and web pages away from the page, so it must not be guessable.
+fn new_token() -> Result<String> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).map_err(|e| anyhow!("no secure random source for the speech page token: {e}"))?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 struct Head {
@@ -321,7 +313,7 @@ mod tests {
 
     #[test]
     fn the_token_is_128_bits_of_hex_and_new_each_start() {
-        let (a, b) = (new_token(), new_token());
+        let (a, b) = (new_token().unwrap(), new_token().unwrap());
         assert_eq!(a.len(), 32);
         assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
         assert_ne!(a, b);
