@@ -91,9 +91,6 @@ mod tests {
 
     #[test]
     fn fills_placeholders() {
-        assert!(
-            t_with("native_notifyHotkeyFailed", &[("hotkey", "Ctrl+Alt+Space")])
-                .contains("Ctrl+Alt+Space")
-        );
+        assert!(t_with("native_notifyHotkeyFailed", &[("hotkey", "Ctrl+Alt+Space")]).contains("Ctrl+Alt+Space"));
     }
 }

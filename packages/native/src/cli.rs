@@ -7,11 +7,7 @@ use crate::ipc;
 use crate::protocol::{InputMode, Reply, Request};
 
 #[derive(Parser, Debug)]
-#[command(
-    name = "vtype",
-    version,
-    about = "vtype desktop: voice input into any app"
-)]
+#[command(name = "vtype", version, about = "vtype desktop: voice input into any app")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -59,14 +55,36 @@ pub enum Command {
     Uninstall,
     /// Print diagnostic information (no transcripts).
     Diag,
+    /// (Checks on a real desktop, Windows) type TEXT into whatever has the focus.
+    #[command(hide = true)]
+    DebugType {
+        text: String,
+        #[arg(long, default_value = "type")]
+        method: String,
+        #[arg(long, default_value_t = 0)]
+        delay_ms: u64,
+        /// Type only if the window in front has exactly this title (so a test never types elsewhere).
+        #[arg(long)]
+        expect_foreground: String,
+    },
+    /// (Checks on a real desktop, Windows) what UI Automation says about the focused field.
+    #[command(hide = true)]
+    DebugField {
+        #[arg(long, default_value_t = 0)]
+        delay_ms: u64,
+        /// Look at this window instead of the focused element.
+        #[arg(long)]
+        hwnd: Option<isize>,
+    },
+    /// (Checks on a real desktop, Windows) click the floating mic and report the foreground window.
+    #[command(hide = true)]
+    DebugClickIcon,
 }
 
 /// Chrome starts the host with `chrome-extension://<id>/` as the first argument (and, on
 /// Windows, `--parent-window=<n>` after it), not with a subcommand.
 pub fn host_origin(args: &[String]) -> Option<String> {
-    args.get(1)
-        .filter(|a| a.starts_with("chrome-extension://"))
-        .cloned()
+    args.get(1).filter(|a| a.starts_with("chrome-extension://")).cloned()
 }
 
 fn endpoint() -> String {
@@ -110,12 +128,7 @@ pub fn run_client(command: Command) -> Result<()> {
         },
         Command::Status => {
             match send(Request::Status, false) {
-                Ok(Reply::Status {
-                    connected,
-                    recording,
-                    mode,
-                    version,
-                }) => {
+                Ok(Reply::Status { connected, recording, mode, version }) => {
                     println!("running: true");
                     println!("connected: {connected}");
                     println!("recording: {recording}");
@@ -138,9 +151,44 @@ pub fn run_client(command: Command) -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&report)?);
             Ok(())
         }
+        Command::DebugType { text, method, delay_ms, expect_foreground } => {
+            let method = match method.as_str() {
+                "paste" => crate::config::InjectMethod::Paste,
+                "auto" => crate::config::InjectMethod::Auto,
+                _ => crate::config::InjectMethod::Type,
+            };
+            println!("{}", debug::debug_type(&text, method, delay_ms, &expect_foreground));
+            Ok(())
+        }
+        Command::DebugField { delay_ms, hwnd } => {
+            println!("{}", debug::debug_field(delay_ms, hwnd));
+            Ok(())
+        }
+        Command::DebugClickIcon => {
+            println!("{}", debug::debug_click_icon());
+            Ok(())
+        }
         Command::Daemon | Command::Host { .. } | Command::Install { .. } | Command::Uninstall => {
             unreachable!("handled in main")
         }
+    }
+}
+
+#[cfg(windows)]
+use crate::platform::windows::debug;
+
+/// The desktop checks exist on Windows only (the development machine).
+#[cfg(not(windows))]
+mod debug {
+    const ONLY: &str = "this check exists on Windows only";
+    pub fn debug_type(_: &str, _: crate::config::InjectMethod, _: u64, _: &str) -> String {
+        ONLY.into()
+    }
+    pub fn debug_field(_: u64, _: Option<isize>) -> String {
+        ONLY.into()
+    }
+    pub fn debug_click_icon() -> String {
+        ONLY.into()
     }
 }
 
@@ -173,12 +221,7 @@ mod tests {
     #[test]
     fn chrome_style_arguments_mean_host() {
         assert_eq!(
-            host_origin(&args(&[
-                "vtype.exe",
-                "chrome-extension://abc/",
-                "--parent-window=123"
-            ]))
-            .as_deref(),
+            host_origin(&args(&["vtype.exe", "chrome-extension://abc/", "--parent-window=123"])).as_deref(),
             Some("chrome-extension://abc/")
         );
         assert_eq!(host_origin(&args(&["vtype", "status"])), None);
@@ -188,35 +231,15 @@ mod tests {
     #[test]
     fn parses_the_subcommands() {
         let parse = |list: &[&str]| Cli::try_parse_from(list).map(|c| c.command);
-        assert_eq!(
-            parse(&["vtype", "toggle"]).unwrap(),
-            Command::Toggle { mode: None }
-        );
+        assert_eq!(parse(&["vtype", "toggle"]).unwrap(), Command::Toggle { mode: None });
         assert_eq!(
             parse(&["vtype", "start", "--mode", "kana"]).unwrap(),
-            Command::Start {
-                mode: Some(InputMode::Kana)
-            }
+            Command::Start { mode: Some(InputMode::Kana) }
         );
+        assert_eq!(parse(&["vtype", "mode", "en"]).unwrap(), Command::Mode { mode: InputMode::En });
         assert_eq!(
-            parse(&["vtype", "mode", "en"]).unwrap(),
-            Command::Mode {
-                mode: InputMode::En
-            }
-        );
-        assert_eq!(
-            parse(&[
-                "vtype",
-                "install",
-                "--extension-id",
-                "a",
-                "--extension-id",
-                "b"
-            ])
-            .unwrap(),
-            Command::Install {
-                extension_ids: vec!["a".into(), "b".into()]
-            }
+            parse(&["vtype", "install", "--extension-id", "a", "--extension-id", "b"]).unwrap(),
+            Command::Install { extension_ids: vec!["a".into(), "b".into()] }
         );
         assert!(parse(&["vtype", "mode", "katakana"]).is_err());
     }

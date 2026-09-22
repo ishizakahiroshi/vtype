@@ -17,7 +17,7 @@ mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(windows)]
-mod windows;
+pub mod windows;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum PlatformError {
@@ -109,8 +109,7 @@ pub trait Platform: Send + Sync {
     fn quit(&self);
     fn set_tray(&self, state: &TrayState);
     fn register_hotkey(&self, spec: &str) -> Result<(), PlatformError>;
-    fn inject_text(&self, text: &str, method: InjectMethod)
-        -> Result<InjectOutcome, PlatformError>;
+    fn inject_text(&self, text: &str, method: InjectMethod) -> Result<InjectOutcome, PlatformError>;
     fn focused_field(&self) -> FieldInfo;
     fn show_icon(&self, state: IconState, position: Option<(i32, i32)>);
     fn hide_icon(&self);

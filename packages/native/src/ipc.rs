@@ -24,10 +24,7 @@ pub fn listen_at(endpoint: &str) -> io::Result<Listener> {
         }
         // The caller has already made sure no daemon answers on this socket, so a file that is
         // still there is a leftover from a crash and may be replaced.
-        ListenerOptions::new()
-            .name(name)
-            .try_overwrite(true)
-            .create_sync()
+        ListenerOptions::new().name(name).try_overwrite(true).create_sync()
     }
     #[cfg(not(unix))]
     {
@@ -59,9 +56,7 @@ pub fn read_line<R: BufRead, T: DeserializeOwned>(r: &mut R) -> io::Result<Optio
             break;
         }
     }
-    serde_json::from_str(line.trim_end())
-        .map(Some)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    serde_json::from_str(line.trim_end()).map(Some).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 /// Sends one request and waits for its reply.
@@ -69,16 +64,12 @@ pub fn request_at(endpoint: &str, req: &Request) -> io::Result<Reply> {
     let stream = connect_at(endpoint)?;
     let mut reader = BufReader::new(stream);
     write_line(reader.get_mut(), req)?;
-    read_line(&mut reader)?
-        .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "daemon closed the connection"))
+    read_line(&mut reader)?.ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "daemon closed the connection"))
 }
 
 /// True if a daemon answers `status` on the endpoint.
 pub fn daemon_answers(endpoint: &str) -> bool {
-    matches!(
-        request_at(endpoint, &Request::Status),
-        Ok(Reply::Status { .. })
-    )
+    matches!(request_at(endpoint, &Request::Status), Ok(Reply::Status { .. }))
 }
 
 /// Starts `vtype daemon` detached from this process, unless one already answers, and waits up to
@@ -95,20 +86,14 @@ pub fn ensure_daemon(endpoint: &str) -> Result<()> {
         }
         thread::sleep(Duration::from_millis(100));
     }
-    anyhow::bail!(
-        "the vtype daemon did not answer within {} seconds",
-        DAEMON_START_WAIT.as_secs()
-    )
+    anyhow::bail!("the vtype daemon did not answer within {} seconds", DAEMON_START_WAIT.as_secs())
 }
 
 pub fn spawn_daemon() -> io::Result<()> {
     keep_std_handles_to_ourselves();
     let exe = std::env::current_exe()?;
     let mut cmd = Command::new(exe);
-    cmd.arg("daemon")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+    cmd.arg("daemon").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     detach(&mut cmd);
     match cmd.spawn() {
         Ok(_) => Ok(()),
@@ -145,12 +130,8 @@ const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
 /// are made non-inheritable first; the daemon gets its own (null) ones from `Stdio::null`.
 #[cfg(windows)]
 fn keep_std_handles_to_ourselves() {
-    use windows_sys::Win32::Foundation::{
-        SetHandleInformation, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE,
-    };
-    use windows_sys::Win32::System::Console::{
-        GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
-    };
+    use windows_sys::Win32::Foundation::{SetHandleInformation, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
     for which in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
         unsafe {
             let handle = GetStdHandle(which);
@@ -168,9 +149,7 @@ fn keep_std_handles_to_ourselves() {}
 #[cfg(windows)]
 fn detach(cmd: &mut Command) {
     use std::os::windows::process::CommandExt;
-    cmd.creation_flags(
-        DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB,
-    );
+    cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB);
 }
 
 #[cfg(unix)]
@@ -190,10 +169,7 @@ mod tests {
         if cfg!(windows) {
             format!(r"\\.\pipe\{unique}")
         } else {
-            std::env::temp_dir()
-                .join(format!("{unique}.sock"))
-                .to_string_lossy()
-                .into_owned()
+            std::env::temp_dir().join(format!("{unique}.sock")).to_string_lossy().into_owned()
         }
     }
 
@@ -208,12 +184,7 @@ mod tests {
             assert_eq!(req, Request::Status);
             write_line(
                 reader.get_mut(),
-                &Reply::Status {
-                    connected: false,
-                    recording: false,
-                    mode: InputMode::Normal,
-                    version: "0.1.0".into(),
-                },
+                &Reply::Status { connected: false, recording: false, mode: InputMode::Normal, version: "0.1.0".into() },
             )
             .unwrap();
         });
@@ -221,12 +192,7 @@ mod tests {
         server.join().unwrap();
         assert_eq!(
             reply,
-            Reply::Status {
-                connected: false,
-                recording: false,
-                mode: InputMode::Normal,
-                version: "0.1.0".into()
-            }
+            Reply::Status { connected: false, recording: false, mode: InputMode::Normal, version: "0.1.0".into() }
         );
     }
 
@@ -240,10 +206,7 @@ mod tests {
     #[test]
     fn blank_lines_are_skipped() {
         let mut r = io::Cursor::new(b"\n\n{\"type\":\"stop\"}\n".to_vec());
-        assert_eq!(
-            read_line::<_, Request>(&mut r).unwrap(),
-            Some(Request::Stop)
-        );
+        assert_eq!(read_line::<_, Request>(&mut r).unwrap(), Some(Request::Stop));
         assert_eq!(read_line::<_, Request>(&mut r).unwrap(), None);
     }
 }

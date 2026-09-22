@@ -10,16 +10,12 @@ fn project_dirs() -> Option<ProjectDirs> {
 
 /// Directory of `config.json`. Falls back to the current directory when the OS gives no home.
 pub fn config_dir() -> PathBuf {
-    project_dirs()
-        .map(|d| d.config_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("."))
+    project_dirs().map(|d| d.config_dir().to_path_buf()).unwrap_or_else(|| PathBuf::from("."))
 }
 
 /// Directory of `vtype.log` (and, on macOS, the socket).
 pub fn data_dir() -> PathBuf {
-    project_dirs()
-        .map(|d| d.data_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("."))
+    project_dirs().map(|d| d.data_dir().to_path_buf()).unwrap_or_else(|| PathBuf::from("."))
 }
 
 pub fn config_file() -> PathBuf {
@@ -54,18 +50,11 @@ impl Os {
 ///
 /// Windows: `\\.\pipe\vtype-<user>` (named pipes are machine-wide, so the user name keeps two
 /// sessions apart). Linux: `$XDG_RUNTIME_DIR/vtype.sock`, else the data dir. macOS: the data dir.
-pub fn ipc_endpoint_for(
-    os: Os,
-    user: &str,
-    xdg_runtime_dir: Option<&Path>,
-    data_dir: &Path,
-) -> String {
+pub fn ipc_endpoint_for(os: Os, user: &str, xdg_runtime_dir: Option<&Path>, data_dir: &Path) -> String {
     match os {
         Os::Windows => format!(r"\\.\pipe\vtype-{}", sanitize_user(user)),
         Os::Linux => match xdg_runtime_dir {
-            Some(dir) if !dir.as_os_str().is_empty() => {
-                dir.join("vtype.sock").to_string_lossy().into_owned()
-            }
+            Some(dir) if !dir.as_os_str().is_empty() => dir.join("vtype.sock").to_string_lossy().into_owned(),
             _ => data_dir.join("vtype.sock").to_string_lossy().into_owned(),
         },
         Os::Mac => data_dir.join("vtype.sock").to_string_lossy().into_owned(),
@@ -73,16 +62,8 @@ pub fn ipc_endpoint_for(
 }
 
 fn sanitize_user(user: &str) -> String {
-    let cleaned: String = user
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
+    let cleaned: String =
+        user.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
     if cleaned.is_empty() {
         "user".to_string()
     } else {
@@ -91,9 +72,7 @@ fn sanitize_user(user: &str) -> String {
 }
 
 pub fn ipc_endpoint() -> String {
-    let user = std::env::var("USERNAME")
-        .or_else(|_| std::env::var("USER"))
-        .unwrap_or_default();
+    let user = std::env::var("USERNAME").or_else(|_| std::env::var("USER")).unwrap_or_default();
     let xdg = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from);
     ipc_endpoint_for(Os::current(), &user, xdg.as_deref(), &data_dir())
 }
@@ -105,24 +84,13 @@ mod tests {
     #[test]
     fn endpoint_per_os() {
         let data = Path::new("/var/lib/vtype-test");
-        assert_eq!(
-            ipc_endpoint_for(Os::Windows, "Taro Y", None, data),
-            r"\\.\pipe\vtype-Taro_Y"
-        );
-        assert_eq!(
-            ipc_endpoint_for(Os::Windows, "", None, data),
-            r"\\.\pipe\vtype-user"
-        );
+        assert_eq!(ipc_endpoint_for(Os::Windows, "Taro Y", None, data), r"\\.\pipe\vtype-Taro_Y");
+        assert_eq!(ipc_endpoint_for(Os::Windows, "", None, data), r"\\.\pipe\vtype-user");
         assert_eq!(
             ipc_endpoint_for(Os::Linux, "a", Some(Path::new("/run/user/1000")), data),
-            Path::new("/run/user/1000")
-                .join("vtype.sock")
-                .to_string_lossy()
+            Path::new("/run/user/1000").join("vtype.sock").to_string_lossy()
         );
-        assert_eq!(
-            ipc_endpoint_for(Os::Linux, "a", None, data),
-            data.join("vtype.sock").to_string_lossy()
-        );
+        assert_eq!(ipc_endpoint_for(Os::Linux, "a", None, data), data.join("vtype.sock").to_string_lossy());
         assert_eq!(
             ipc_endpoint_for(Os::Mac, "a", Some(Path::new("/tmp")), data),
             data.join("vtype.sock").to_string_lossy()

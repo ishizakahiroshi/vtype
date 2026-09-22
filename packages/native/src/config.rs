@@ -46,12 +46,7 @@ pub struct IconConfig {
 
 impl Default for IconConfig {
     fn default() -> Self {
-        IconConfig {
-            visible: true,
-            x: None,
-            y: None,
-            hide_on_fullscreen: true,
-        }
+        IconConfig { visible: true, x: None, y: None, hide_on_fullscreen: true }
     }
 }
 
@@ -115,9 +110,7 @@ pub enum LoadOutcome {
 pub fn load(path: &Path) -> (NativeConfig, LoadOutcome) {
     let text = match fs::read_to_string(path) {
         Ok(t) => t,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            return (NativeConfig::default(), LoadOutcome::Missing)
-        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return (NativeConfig::default(), LoadOutcome::Missing),
         Err(_) => return (NativeConfig::default(), LoadOutcome::Unreadable),
     };
     match serde_json::from_str::<NativeConfig>(&text) {
@@ -134,10 +127,7 @@ pub fn load(path: &Path) -> (NativeConfig, LoadOutcome) {
 }
 
 fn backup_path(path: &Path) -> PathBuf {
-    let mut name = path
-        .file_name()
-        .map(|n| n.to_os_string())
-        .unwrap_or_default();
+    let mut name = path.file_name().map(|n| n.to_os_string()).unwrap_or_default();
     name.push(".bak");
     path.with_file_name(name)
 }
@@ -182,10 +172,7 @@ mod tests {
     fn round_trips_through_the_file() {
         let dir = temp_dir("roundtrip");
         let path = dir.join("config.json");
-        let mut cfg = NativeConfig {
-            hotkey: Some("Ctrl+Shift+F9".into()),
-            ..NativeConfig::default()
-        };
+        let mut cfg = NativeConfig { hotkey: Some("Ctrl+Shift+F9".into()), ..NativeConfig::default() };
         cfg.icon.x = Some(100);
         cfg.icon.y = Some(-20);
         cfg.inject = InjectMethod::Paste;
@@ -210,10 +197,7 @@ mod tests {
     #[test]
     fn missing_file_gives_defaults() {
         let dir = temp_dir("missing");
-        assert_eq!(
-            load(&dir.join("config.json")),
-            (NativeConfig::default(), LoadOutcome::Missing)
-        );
+        assert_eq!(load(&dir.join("config.json")), (NativeConfig::default(), LoadOutcome::Missing));
         let _ = fs::remove_dir_all(&dir);
     }
 

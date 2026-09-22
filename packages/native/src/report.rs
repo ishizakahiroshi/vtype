@@ -44,11 +44,8 @@ pub fn bug_report_url(info: &ReportInfo<'_>) -> String {
 pub fn encode_uri_component(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
-        let keep = b.is_ascii_alphanumeric()
-            || matches!(
-                b,
-                b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')'
-            );
+        let keep =
+            b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')');
         if keep {
             out.push(b as char);
         } else {
@@ -65,8 +62,7 @@ mod tests {
     /// Shared with packages/extension/tests/report.test.ts.
     #[test]
     fn builds_the_same_url_as_the_extension() {
-        let cases: serde_json::Value =
-            serde_json::from_str(include_str!("../tests/fixtures/report-url.json")).unwrap();
+        let cases: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/report-url.json")).unwrap();
         let cases = cases.as_array().unwrap();
         assert!(!cases.is_empty());
         for case in cases {

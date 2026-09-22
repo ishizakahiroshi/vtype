@@ -24,20 +24,11 @@ impl RotatingFile {
         }
         let file = OpenOptions::new().create(true).append(true).open(path)?;
         let size = file.metadata().map(|m| m.len()).unwrap_or(0);
-        Ok(RotatingFile {
-            path: path.to_path_buf(),
-            max,
-            file: Some(file),
-            size,
-        })
+        Ok(RotatingFile { path: path.to_path_buf(), max, file: Some(file), size })
     }
 
     fn rotated_path(&self) -> PathBuf {
-        let mut name = self
-            .path
-            .file_name()
-            .map(|n| n.to_os_string())
-            .unwrap_or_default();
+        let mut name = self.path.file_name().map(|n| n.to_os_string()).unwrap_or_default();
         name.push(".1");
         self.path.with_file_name(name)
     }
@@ -47,12 +38,7 @@ impl RotatingFile {
         let old = self.rotated_path();
         let _ = fs::remove_file(&old);
         fs::rename(&self.path, &old)?;
-        self.file = Some(
-            OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&self.path)?,
-        );
+        self.file = Some(OpenOptions::new().create(true).append(true).open(&self.path)?);
         self.size = 0;
         Ok(())
     }
@@ -63,10 +49,7 @@ impl Write for RotatingFile {
         if self.size > 0 && self.size + buf.len() as u64 > self.max {
             self.rotate()?;
         }
-        let file = self
-            .file
-            .as_mut()
-            .ok_or_else(|| io::Error::other("log file closed"))?;
+        let file = self.file.as_mut().ok_or_else(|| io::Error::other("log file closed"))?;
         let n = file.write(buf)?;
         self.size += n as u64;
         Ok(n)
@@ -97,10 +80,7 @@ pub fn init_file(role: &str) {
     match RotatingFile::open(&path, MAX_LOG_BYTES) {
         Ok(file) => {
             let shared: &'static Mutex<RotatingFile> = Box::leak(Box::new(Mutex::new(file)));
-            let _ = tracing_subscriber::fmt()
-                .with_ansi(false)
-                .with_writer(move || SharedWriter(shared))
-                .try_init();
+            let _ = tracing_subscriber::fmt().with_ansi(false).with_writer(move || SharedWriter(shared)).try_init();
         }
         Err(_) => init_stderr(),
     }
@@ -108,10 +88,7 @@ pub fn init_file(role: &str) {
 }
 
 pub fn init_stderr() {
-    let _ = tracing_subscriber::fmt()
-        .with_writer(io::stderr)
-        .with_max_level(tracing::Level::WARN)
-        .try_init();
+    let _ = tracing_subscriber::fmt().with_writer(io::stderr).with_max_level(tracing::Level::WARN).try_init();
 }
 
 #[cfg(test)]
@@ -129,10 +106,7 @@ mod tests {
         f.write_all(b"XYZ").unwrap();
         f.flush().unwrap();
         drop(f);
-        assert_eq!(
-            fs::read_to_string(dir.join("vtype.log.1")).unwrap(),
-            "12345678"
-        );
+        assert_eq!(fs::read_to_string(dir.join("vtype.log.1")).unwrap(), "12345678");
         assert_eq!(fs::read_to_string(&path).unwrap(), "abcdefXYZ");
         let _ = fs::remove_dir_all(&dir);
     }

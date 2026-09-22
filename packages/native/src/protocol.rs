@@ -83,10 +83,7 @@ pub enum Reply {
 
 impl Reply {
     pub fn error(code: &str, message: impl Into<String>) -> Reply {
-        Reply::Error {
-            code: code.to_string(),
-            message: message.into(),
-        }
+        Reply::Error { code: code.to_string(), message: message.into() }
     }
 }
 
@@ -98,11 +95,7 @@ impl Reply {
 
 /// Desktop app to extension.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(
-    tag = "type",
-    rename_all = "kebab-case",
-    rename_all_fields = "camelCase"
-)]
+#[serde(tag = "type", rename_all = "kebab-case", rename_all_fields = "camelCase")]
 pub enum ToExtension {
     Hello {
         native_version: String,
@@ -126,11 +119,7 @@ pub enum ToExtension {
 
 /// Extension to desktop app.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(
-    tag = "type",
-    rename_all = "kebab-case",
-    rename_all_fields = "camelCase"
-)]
+#[serde(tag = "type", rename_all = "kebab-case", rename_all_fields = "camelCase")]
 pub enum FromExtension {
     Hello {
         extension_version: String,
@@ -186,32 +175,18 @@ mod tests {
     #[test]
     fn requests_round_trip() {
         round_trip_request(Request::Toggle { mode: None }, json!({"type":"toggle"}));
-        round_trip_request(
-            Request::Start {
-                mode: Some(InputMode::Kana),
-            },
-            json!({"type":"start","mode":"kana"}),
-        );
+        round_trip_request(Request::Start { mode: Some(InputMode::Kana) }, json!({"type":"start","mode":"kana"}));
         round_trip_request(Request::Stop, json!({"type":"stop"}));
-        round_trip_request(
-            Request::SetMode {
-                mode: InputMode::En,
-            },
-            json!({"type":"set-mode","mode":"en"}),
-        );
+        round_trip_request(Request::SetMode { mode: InputMode::En }, json!({"type":"set-mode","mode":"en"}));
         round_trip_request(Request::Status, json!({"type":"status"}));
         round_trip_request(Request::OpenSettings, json!({"type":"open-settings"}));
         round_trip_request(Request::Quit, json!({"type":"quit"}));
         round_trip_request(
-            Request::HostHello {
-                origin: "chrome-extension://abc/".into(),
-            },
+            Request::HostHello { origin: "chrome-extension://abc/".into() },
             json!({"type":"host-hello","origin":"chrome-extension://abc/"}),
         );
         round_trip_request(
-            Request::FromExtension {
-                message: json!({"type":"hello"}),
-            },
+            Request::FromExtension { message: json!({"type":"hello"}) },
             json!({"type":"from-extension","message":{"type":"hello"}}),
         );
     }
@@ -221,22 +196,12 @@ mod tests {
         let cases = [
             (Reply::Ok, json!({"type":"ok"})),
             (
-                Reply::Status {
-                    connected: false,
-                    recording: false,
-                    mode: InputMode::Normal,
-                    version: "0.1.0".into(),
-                },
+                Reply::Status { connected: false, recording: false, mode: InputMode::Normal, version: "0.1.0".into() },
                 json!({"type":"status","connected":false,"recording":false,"mode":"normal","version":"0.1.0"}),
             ),
+            (Reply::error("not_connected", "x"), json!({"type":"error","code":"not_connected","message":"x"})),
             (
-                Reply::error("not_connected", "x"),
-                json!({"type":"error","code":"not_connected","message":"x"}),
-            ),
-            (
-                Reply::ToExtension {
-                    message: json!({"type":"stop"}),
-                },
+                Reply::ToExtension { message: json!({"type":"stop"}) },
                 json!({"type":"to-extension","message":{"type":"stop"}}),
             ),
         ];
@@ -250,29 +215,20 @@ mod tests {
     /// Shared with packages/extension/tests/native-messages.test.ts.
     #[test]
     fn the_shared_fixture_round_trips() {
-        let fixture: Value =
-            serde_json::from_str(include_str!("../tests/fixtures/nm-messages.json")).unwrap();
+        let fixture: Value = serde_json::from_str(include_str!("../tests/fixtures/nm-messages.json")).unwrap();
         for m in fixture["toExtension"].as_array().unwrap() {
-            let parsed: ToExtension =
-                serde_json::from_value(m.clone()).unwrap_or_else(|e| panic!("{m}: {e}"));
+            let parsed: ToExtension = serde_json::from_value(m.clone()).unwrap_or_else(|e| panic!("{m}: {e}"));
             assert_eq!(&serde_json::to_value(&parsed).unwrap(), m);
         }
         for m in fixture["fromExtension"].as_array().unwrap() {
-            let parsed: FromExtension =
-                serde_json::from_value(m.clone()).unwrap_or_else(|e| panic!("{m}: {e}"));
+            let parsed: FromExtension = serde_json::from_value(m.clone()).unwrap_or_else(|e| panic!("{m}: {e}"));
             assert_eq!(&serde_json::to_value(&parsed).unwrap(), m);
         }
         for m in fixture["invalidToExtension"].as_array().unwrap() {
-            assert!(
-                serde_json::from_value::<ToExtension>(m.clone()).is_err(),
-                "{m}"
-            );
+            assert!(serde_json::from_value::<ToExtension>(m.clone()).is_err(), "{m}");
         }
         for m in fixture["invalidFromExtension"].as_array().unwrap() {
-            assert!(
-                serde_json::from_value::<FromExtension>(m.clone()).is_err(),
-                "{m}"
-            );
+            assert!(serde_json::from_value::<FromExtension>(m.clone()).is_err(), "{m}");
         }
     }
 

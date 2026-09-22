@@ -6,9 +6,9 @@ use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
 use windows_sys::Win32::System::Registry::{
-    RegCloseKey, RegCreateKeyExW, RegDeleteKeyValueW, RegDeleteKeyW, RegDeleteTreeW, RegGetValueW,
-    RegOpenKeyExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ,
-    KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ, RRF_RT_REG_SZ,
+    RegCloseKey, RegCreateKeyExW, RegDeleteKeyValueW, RegDeleteKeyW, RegDeleteTreeW, RegGetValueW, RegOpenKeyExW,
+    RegSetValueExW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE,
+    REG_SZ, RRF_RT_REG_SZ,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,15 +76,8 @@ pub fn get_string(hive: Hive, subkey: &str, name: Option<&str>) -> io::Result<Op
     let name_ptr = name_w.as_ref().map_or(null(), |n| n.as_ptr());
     let mut size: u32 = 0;
     unsafe {
-        let first = RegGetValueW(
-            hive.key(),
-            subkey_w.as_ptr(),
-            name_ptr,
-            RRF_RT_REG_SZ,
-            null_mut(),
-            null_mut(),
-            &mut size,
-        );
+        let first =
+            RegGetValueW(hive.key(), subkey_w.as_ptr(), name_ptr, RRF_RT_REG_SZ, null_mut(), null_mut(), &mut size);
         if first == ERROR_FILE_NOT_FOUND {
             return Ok(None);
         }

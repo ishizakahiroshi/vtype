@@ -7,20 +7,9 @@ use crate::protocol::InputMode;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MenuItem {
-    Check {
-        action: MenuAction,
-        label: String,
-        checked: bool,
-    },
-    Radio {
-        action: MenuAction,
-        label: String,
-        checked: bool,
-    },
-    Action {
-        action: MenuAction,
-        label: String,
-    },
+    Check { action: MenuAction, label: String, checked: bool },
+    Radio { action: MenuAction, label: String, checked: bool },
+    Action { action: MenuAction, label: String },
     Separator,
 }
 
@@ -50,23 +39,11 @@ pub fn tray_menu(state: &TrayState) -> Vec<MenuItem> {
         mode(InputMode::En, t("native_trayModeEn")),
         mode(InputMode::Kana, t("native_trayModeKana")),
         MenuItem::Separator,
-        MenuItem::Action {
-            action: MenuAction::OpenSettings,
-            label: t("native_trayOpenSettings"),
-        },
-        MenuItem::Action {
-            action: MenuAction::ReportBug,
-            label: t("native_trayReportBug"),
-        },
-        MenuItem::Action {
-            action: MenuAction::CopyDiagnostics,
-            label: t("native_trayCopyDiagnostics"),
-        },
+        MenuItem::Action { action: MenuAction::OpenSettings, label: t("native_trayOpenSettings") },
+        MenuItem::Action { action: MenuAction::ReportBug, label: t("native_trayReportBug") },
+        MenuItem::Action { action: MenuAction::CopyDiagnostics, label: t("native_trayCopyDiagnostics") },
         MenuItem::Separator,
-        MenuItem::Action {
-            action: MenuAction::Quit,
-            label: t("native_trayQuit"),
-        },
+        MenuItem::Action { action: MenuAction::Quit, label: t("native_trayQuit") },
     ]
 }
 
@@ -76,42 +53,19 @@ mod tests {
 
     #[test]
     fn checks_the_current_mode_and_toggles() {
-        let state = TrayState {
-            mode: InputMode::Kana,
-            icon_visible: true,
-            hide_on_fullscreen: false,
-            ..TrayState::default()
-        };
+        let state =
+            TrayState { mode: InputMode::Kana, icon_visible: true, hide_on_fullscreen: false, ..TrayState::default() };
         let menu = tray_menu(&state);
         let checked: Vec<MenuAction> = menu
             .iter()
             .filter_map(|item| match item {
-                MenuItem::Check {
-                    action,
-                    checked: true,
-                    ..
+                MenuItem::Check { action, checked: true, .. } | MenuItem::Radio { action, checked: true, .. } => {
+                    Some(*action)
                 }
-                | MenuItem::Radio {
-                    action,
-                    checked: true,
-                    ..
-                } => Some(*action),
                 _ => None,
             })
             .collect();
-        assert_eq!(
-            checked,
-            vec![
-                MenuAction::ToggleIconVisible,
-                MenuAction::SetMode(InputMode::Kana)
-            ]
-        );
-        assert!(matches!(
-            menu.last(),
-            Some(MenuItem::Action {
-                action: MenuAction::Quit,
-                ..
-            })
-        ));
+        assert_eq!(checked, vec![MenuAction::ToggleIconVisible, MenuAction::SetMode(InputMode::Kana)]);
+        assert!(matches!(menu.last(), Some(MenuItem::Action { action: MenuAction::Quit, .. })));
     }
 }

@@ -2,10 +2,7 @@
 
 use std::sync::mpsc::Sender;
 
-use super::{
-    FieldInfo, IconState, IdleLoop, InjectOutcome, Platform, PlatformError, PlatformEvent,
-    TrayState,
-};
+use super::{FieldInfo, IconState, IdleLoop, InjectOutcome, Platform, PlatformError, PlatformEvent, TrayState};
 use crate::config::InjectMethod;
 
 pub struct MacPlatform {
@@ -14,9 +11,7 @@ pub struct MacPlatform {
 
 impl MacPlatform {
     pub fn new() -> Self {
-        MacPlatform {
-            idle: IdleLoop::default(),
-        }
+        MacPlatform { idle: IdleLoop::default() }
     }
 }
 
@@ -32,11 +27,7 @@ impl Platform for MacPlatform {
     fn register_hotkey(&self, _spec: &str) -> Result<(), PlatformError> {
         Err(PlatformError::Unsupported)
     }
-    fn inject_text(
-        &self,
-        _text: &str,
-        _method: InjectMethod,
-    ) -> Result<InjectOutcome, PlatformError> {
+    fn inject_text(&self, _text: &str, _method: InjectMethod) -> Result<InjectOutcome, PlatformError> {
         Err(PlatformError::Unsupported)
     }
     fn focused_field(&self) -> FieldInfo {

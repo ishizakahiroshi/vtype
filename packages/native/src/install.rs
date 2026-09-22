@@ -19,8 +19,7 @@ pub const HOST_NAME: &str = "com.ishizakahiroshi.vtype";
 const HOST_FILE: &str = "com.ishizakahiroshi.vtype.json";
 
 /// Chrome's own registry key for per-user hosts on Windows.
-pub const WINDOWS_REGISTRY_KEY: &str =
-    r"Software\Google\Chrome\NativeMessagingHosts\com.ishizakahiroshi.vtype";
+pub const WINDOWS_REGISTRY_KEY: &str = r"Software\Google\Chrome\NativeMessagingHosts\com.ishizakahiroshi.vtype";
 
 /// A Chrome extension ID: 32 letters from a to p.
 pub fn is_extension_id(id: &str) -> bool {
@@ -35,9 +34,7 @@ pub fn allowed_origins(extra_ids: &[String]) -> Vec<String> {
             ids.push(id.clone());
         }
     }
-    ids.into_iter()
-        .map(|id| format!("chrome-extension://{id}/"))
-        .collect()
+    ids.into_iter().map(|id| format!("chrome-extension://{id}/")).collect()
 }
 
 /// The host manifest Chrome reads.
@@ -63,9 +60,7 @@ pub struct HostLocations {
 pub fn host_locations(os: Os, home: &Path, local_app_data: Option<&Path>) -> HostLocations {
     match os {
         Os::Windows => {
-            let base = local_app_data
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| home.join("AppData").join("Local"));
+            let base = local_app_data.map(Path::to_path_buf).unwrap_or_else(|| home.join("AppData").join("Local"));
             HostLocations {
                 manifest_files: vec![base.join("vtype").join(HOST_FILE)],
                 registry_key: Some(WINDOWS_REGISTRY_KEY),
@@ -79,10 +74,8 @@ pub fn host_locations(os: Os, home: &Path, local_app_data: Option<&Path>) -> Hos
         },
         Os::Linux => HostLocations {
             manifest_files: vec![
-                home.join(".config/google-chrome/NativeMessagingHosts")
-                    .join(HOST_FILE),
-                home.join(".config/chromium/NativeMessagingHosts")
-                    .join(HOST_FILE),
+                home.join(".config/google-chrome/NativeMessagingHosts").join(HOST_FILE),
+                home.join(".config/chromium/NativeMessagingHosts").join(HOST_FILE),
             ],
             registry_key: None,
         },
@@ -90,31 +83,19 @@ pub fn host_locations(os: Os, home: &Path, local_app_data: Option<&Path>) -> Hos
 }
 
 fn home_dir() -> Result<PathBuf> {
-    directories::BaseDirs::new()
-        .map(|d| d.home_dir().to_path_buf())
-        .context("could not find the home directory")
+    directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf()).context("could not find the home directory")
 }
 
 fn current_locations() -> Result<HostLocations> {
     let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
-    Ok(host_locations(
-        Os::current(),
-        &home_dir()?,
-        local.as_deref(),
-    ))
+    Ok(host_locations(Os::current(), &home_dir()?, local.as_deref()))
 }
 
 /// The path Chrome should start. Inside an MSIX package the versioned install folder changes on
 /// every update, so the app execution alias is used instead (see `msix_alias_path`).
 pub fn host_exe_path() -> Result<PathBuf> {
     let exe = std::env::current_exe().context("could not find this program's path")?;
-    Ok(msix_alias_path(
-        &exe,
-        std::env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .as_deref(),
-    )
-    .unwrap_or(exe))
+    Ok(msix_alias_path(&exe, std::env::var_os("LOCALAPPDATA").map(PathBuf::from).as_deref()).unwrap_or(exe))
 }
 
 /// `…\WindowsApps\<package>\vtype.exe` (an MSIX install) → `%LOCALAPPDATA%\Microsoft\WindowsApps\vtype.exe`.
@@ -128,10 +109,7 @@ pub fn msix_alias_path(exe: &Path, local_app_data: Option<&Path>) -> Option<Path
 /// True for an executable inside the Windows Store's package folder.
 pub fn is_msix_install(exe: &Path) -> bool {
     // Split by hand rather than with Path::components, so the test runs the same on every OS.
-    let text = exe
-        .to_string_lossy()
-        .to_ascii_lowercase()
-        .replace('/', "\\");
+    let text = exe.to_string_lossy().to_ascii_lowercase().replace('/', "\\");
     text.split('\\').any(|part| part == "windowsapps") && !text.contains(r"\microsoft\windowsapps\")
 }
 
@@ -156,8 +134,7 @@ pub fn install(extra_ids: &[String]) -> Result<()> {
     let locations = current_locations()?;
     for file in &locations.manifest_files {
         if let Some(dir) = file.parent() {
-            fs::create_dir_all(dir)
-                .with_context(|| format!("could not create {}", dir.display()))?;
+            fs::create_dir_all(dir).with_context(|| format!("could not create {}", dir.display()))?;
         }
         fs::write(file, &text).with_context(|| format!("could not write {}", file.display()))?;
         println!("wrote {}", file.display());
@@ -171,10 +148,7 @@ pub fn install(extra_ids: &[String]) -> Result<()> {
         Err(e) => eprintln!("could not set up starting with the system: {e}"),
     }
     after_install_hooks();
-    println!(
-        "allowed: {}",
-        allowed_origins(&cfg.extra_extension_ids).join(", ")
-    );
+    println!("allowed: {}", allowed_origins(&cfg.extra_extension_ids).join(", "));
     Ok(())
 }
 
@@ -194,10 +168,7 @@ pub fn uninstall() -> Result<()> {
         Err(e) => eprintln!("could not stop starting with the system: {e}"),
     }
     before_uninstall_hooks();
-    let _ = crate::ipc::request_at(
-        &crate::paths::ipc_endpoint(),
-        &crate::protocol::Request::Quit,
-    );
+    let _ = crate::ipc::request_at(&crate::paths::ipc_endpoint(), &crate::protocol::Request::Quit);
     Ok(())
 }
 
@@ -221,8 +192,7 @@ fn register(_locations: &HostLocations) -> Result<()> {
 fn unregister(locations: &HostLocations) -> Result<()> {
     use crate::win_registry::{delete_tree, Hive};
     if let Some(key) = locations.registry_key {
-        delete_tree(Hive::CurrentUser, key)
-            .with_context(|| format!(r"could not remove HKCU\{key}"))?;
+        delete_tree(Hive::CurrentUser, key).with_context(|| format!(r"could not remove HKCU\{key}"))?;
         println!(r"removed HKCU\{key}");
     }
     Ok(())
@@ -269,17 +239,8 @@ mod tests {
 
     #[test]
     fn locations_on_windows() {
-        let l = host_locations(
-            Os::Windows,
-            Path::new(r"X:\profile"),
-            Some(Path::new(r"X:\profile\AppData\Local")),
-        );
-        assert_eq!(
-            l.manifest_files,
-            vec![Path::new(r"X:\profile\AppData\Local")
-                .join("vtype")
-                .join(HOST_FILE)]
-        );
+        let l = host_locations(Os::Windows, Path::new(r"X:\profile"), Some(Path::new(r"X:\profile\AppData\Local")));
+        assert_eq!(l.manifest_files, vec![Path::new(r"X:\profile\AppData\Local").join("vtype").join(HOST_FILE)]);
         assert_eq!(l.registry_key, Some(WINDOWS_REGISTRY_KEY));
         assert!(WINDOWS_REGISTRY_KEY.starts_with(r"Software\Google\Chrome\NativeMessagingHosts\"));
     }
@@ -290,19 +251,15 @@ mod tests {
         let mac = host_locations(Os::Mac, home, None);
         assert_eq!(
             mac.manifest_files,
-            vec![home
-                .join("Library/Application Support/Google/Chrome/NativeMessagingHosts")
-                .join(HOST_FILE)]
+            vec![home.join("Library/Application Support/Google/Chrome/NativeMessagingHosts").join(HOST_FILE)]
         );
         assert_eq!(mac.registry_key, None);
         let linux = host_locations(Os::Linux, home, None);
         assert_eq!(
             linux.manifest_files,
             vec![
-                home.join(".config/google-chrome/NativeMessagingHosts")
-                    .join(HOST_FILE),
-                home.join(".config/chromium/NativeMessagingHosts")
-                    .join(HOST_FILE),
+                home.join(".config/google-chrome/NativeMessagingHosts").join(HOST_FILE),
+                home.join(".config/chromium/NativeMessagingHosts").join(HOST_FILE),
             ]
         );
     }
@@ -310,28 +267,16 @@ mod tests {
     #[test]
     fn an_msix_install_points_chrome_at_the_alias() {
         let local = Path::new(r"X:\profile\AppData\Local");
-        let packaged = Path::new(
-            r"C:\Program Files\WindowsApps\ishizakahiroshi.vtype_0.1.0.0_x64__abc\vtype.exe",
-        );
+        let packaged = Path::new(r"C:\Program Files\WindowsApps\ishizakahiroshi.vtype_0.1.0.0_x64__abc\vtype.exe");
         assert!(is_msix_install(packaged));
         assert_eq!(
             msix_alias_path(packaged, Some(local)),
-            Some(
-                local
-                    .join("Microsoft")
-                    .join("WindowsApps")
-                    .join("vtype.exe")
-            )
+            Some(local.join("Microsoft").join("WindowsApps").join("vtype.exe"))
         );
         let plain = Path::new(r"X:\profile\bin\vtype.exe");
         assert!(!is_msix_install(plain));
         assert_eq!(msix_alias_path(plain, Some(local)), None);
         // The alias itself is not the package folder.
-        assert!(!is_msix_install(
-            &local
-                .join("Microsoft")
-                .join("WindowsApps")
-                .join("vtype.exe")
-        ));
+        assert!(!is_msix_install(&local.join("Microsoft").join("WindowsApps").join("vtype.exe")));
     }
 }

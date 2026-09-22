@@ -13,12 +13,7 @@ pub fn read_frame<R: Read>(r: &mut R) -> io::Result<Option<Vec<u8>>> {
     while got < 4 {
         match r.read(&mut len[got..]) {
             Ok(0) if got == 0 => return Ok(None),
-            Ok(0) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "truncated length",
-                ))
-            }
+            Ok(0) => return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "truncated length")),
             Ok(n) => got += n,
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
             Err(e) => return Err(e),
@@ -26,10 +21,7 @@ pub fn read_frame<R: Read>(r: &mut R) -> io::Result<Option<Vec<u8>>> {
     }
     let len = u32::from_ne_bytes(len) as usize;
     if len > MAX_FROM_CHROME {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "frame too large",
-        ));
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "frame too large"));
     }
     let mut body = vec![0u8; len];
     r.read_exact(&mut body)?;
@@ -39,10 +31,7 @@ pub fn read_frame<R: Read>(r: &mut R) -> io::Result<Option<Vec<u8>>> {
 /// Writes one frame and flushes. Refuses bodies Chrome would reject (over 1 MB).
 pub fn write_frame<W: Write>(w: &mut W, body: &[u8]) -> io::Result<()> {
     if body.len() > MAX_TO_CHROME {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "message over 1 MB",
-        ));
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "message over 1 MB"));
     }
     w.write_all(&(body.len() as u32).to_ne_bytes())?;
     w.write_all(body)?;
@@ -78,24 +67,15 @@ mod tests {
     #[test]
     fn reports_truncated_input() {
         let mut r = Cursor::new(vec![5u8, 0]);
-        assert_eq!(
-            read_frame(&mut r).unwrap_err().kind(),
-            io::ErrorKind::UnexpectedEof
-        );
+        assert_eq!(read_frame(&mut r).unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
         let mut body = 10u32.to_ne_bytes().to_vec();
         body.extend_from_slice(b"abc");
-        assert_eq!(
-            read_frame(&mut Cursor::new(body)).unwrap_err().kind(),
-            io::ErrorKind::UnexpectedEof
-        );
+        assert_eq!(read_frame(&mut Cursor::new(body)).unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
     }
 
     #[test]
     fn refuses_an_absurd_length() {
         let body = ((MAX_FROM_CHROME + 1) as u32).to_ne_bytes().to_vec();
-        assert_eq!(
-            read_frame(&mut Cursor::new(body)).unwrap_err().kind(),
-            io::ErrorKind::InvalidData
-        );
+        assert_eq!(read_frame(&mut Cursor::new(body)).unwrap_err().kind(), io::ErrorKind::InvalidData);
     }
 }

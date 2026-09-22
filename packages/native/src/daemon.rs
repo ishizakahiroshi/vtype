@@ -21,9 +21,7 @@ use crate::config::{self, NativeConfig};
 use crate::diag::{self, ErrorLog};
 use crate::i18n::{t, t_with};
 use crate::ipc;
-use crate::platform::{
-    IconState, InjectOutcome, MenuAction, Platform, PlatformError, PlatformEvent, TrayState,
-};
+use crate::platform::{IconState, InjectOutcome, MenuAction, Platform, PlatformError, PlatformEvent, TrayState};
 use crate::protocol::{FromExtension, InputMode, Reply, Request, SessionEvent, ToExtension};
 use crate::report::{self, ReportInfo, Surface};
 
@@ -36,14 +34,8 @@ pub const STORE_EXTENSION_ID: &str = "nngfilimeplngdjdmgkddlhbdjpmikgn";
 pub type ConnId = u64;
 
 pub enum Event {
-    Request {
-        conn: ConnId,
-        req: Request,
-        out: Sender<Reply>,
-    },
-    Closed {
-        conn: ConnId,
-    },
+    Request { conn: ConnId, req: Request, out: Sender<Reply> },
+    Closed { conn: ConnId },
     Platform(PlatformEvent),
 }
 
@@ -85,11 +77,7 @@ pub struct Core {
 }
 
 impl Core {
-    pub fn new(
-        platform: Arc<dyn Platform>,
-        config: NativeConfig,
-        config_path: Option<PathBuf>,
-    ) -> Core {
+    pub fn new(platform: Arc<dyn Platform>, config: NativeConfig, config_path: Option<PathBuf>) -> Core {
         Core {
             platform,
             config,
@@ -112,9 +100,7 @@ impl Core {
     }
 
     pub fn connected(&self) -> bool {
-        self.host
-            .as_ref()
-            .is_some_and(|h| h.extension_version.is_some())
+        self.host.as_ref().is_some_and(|h| h.extension_version.is_some())
     }
 
     pub fn config(&self) -> &NativeConfig {
@@ -125,8 +111,7 @@ impl Core {
     pub fn start(&mut self) {
         self.register_hotkey();
         if self.config.icon.visible {
-            self.platform
-                .show_icon(IconState::Idle, self.icon_position());
+            self.platform.show_icon(IconState::Idle, self.icon_position());
         }
         self.update_tray();
     }
@@ -146,10 +131,7 @@ impl Core {
             Err(PlatformError::Failed(e)) => {
                 tracing::warn!(hotkey = %spec, error = %e, "hotkey registration failed");
                 self.errors.push("hotkey_failed");
-                self.platform.notify(
-                    "vtype",
-                    &t_with("native_notifyHotkeyFailed", &[("hotkey", &spec)]),
-                );
+                self.platform.notify("vtype", &t_with("native_notifyHotkeyFailed", &[("hotkey", &spec)]));
             }
         }
     }
@@ -187,8 +169,7 @@ impl Core {
                 self.pending = None;
                 tracing::warn!("Chrome did not connect in time");
                 self.errors.push("chrome_not_connected");
-                self.platform
-                    .notify("vtype", &t("native_notifyChromeNotConnected"));
+                self.platform.notify("vtype", &t("native_notifyChromeNotConnected"));
             }
         }
     }
@@ -222,22 +203,14 @@ impl Core {
             Request::Stop => Some(self.stop_recording()),
             Request::SetMode { mode } => Some(self.set_mode(mode)),
             Request::OpenSettings => Some(self.open_settings()),
-            Request::Diagnostics => Some(Reply::Diagnostics {
-                report: self.diagnostics(),
-            }),
+            Request::Diagnostics => Some(Reply::Diagnostics { report: self.diagnostics() }),
             Request::Quit => {
                 let _ = out.send(Reply::Ok);
                 return Flow::Quit;
             }
             Request::HostHello { origin } => {
                 tracing::info!("host attached");
-                self.host = Some(HostLink {
-                    conn,
-                    out: out.clone(),
-                    origin,
-                    extension_version: None,
-                    browser: None,
-                });
+                self.host = Some(HostLink { conn, out: out.clone(), origin, extension_version: None, browser: None });
                 None
             }
             Request::FromExtension { message } => {
@@ -267,16 +240,10 @@ impl Core {
             return Reply::Ok;
         }
         let first = self.pending.is_none();
-        self.pending = Some(Pending {
-            start_mode: mode,
-            deadline: (self.now)() + CHROME_WAIT,
-        });
+        self.pending = Some(Pending { start_mode: mode, deadline: (self.now)() + CHROME_WAIT });
         if first {
             tracing::info!("not connected; starting Chrome");
-            if let Err(e) = self
-                .platform
-                .launch_chrome(&["--no-startup-window".to_string()])
-            {
+            if let Err(e) = self.platform.launch_chrome(&["--no-startup-window".to_string()]) {
                 tracing::warn!(error = %e, "could not start Chrome");
                 self.errors.push("chrome_launch_failed");
             }
@@ -352,10 +319,7 @@ impl Core {
             }
         };
         match msg {
-            FromExtension::Hello {
-                extension_version,
-                browser,
-            } => {
+            FromExtension::Hello { extension_version, browser } => {
                 tracing::info!(version = %extension_version, "extension connected");
                 if let Some(h) = self.host.as_mut() {
                     h.extension_version = Some(extension_version);
@@ -365,9 +329,7 @@ impl Core {
                     native_version: env!("CARGO_PKG_VERSION").to_string(),
                     os: self.platform.os_description(),
                 });
-                self.send(&ToExtension::NativeConfig {
-                    config: self.config.clone(),
-                });
+                self.send(&ToExtension::NativeConfig { config: self.config.clone() });
                 if let Some(mode) = self.pending_mode.take() {
                     self.send(&ToExtension::SetMode { mode });
                 }
@@ -392,14 +354,10 @@ impl Core {
             FromExtension::Session { event } => self.session_event(event),
             FromExtension::SetNativeConfig { config } => {
                 self.apply_config(config);
-                self.send(&ToExtension::NativeConfig {
-                    config: self.config.clone(),
-                });
+                self.send(&ToExtension::NativeConfig { config: self.config.clone() });
             }
             FromExtension::GetNativeConfig => {
-                self.send(&ToExtension::NativeConfig {
-                    config: self.config.clone(),
-                });
+                self.send(&ToExtension::NativeConfig { config: self.config.clone() });
             }
             FromExtension::Error { code } => {
                 tracing::warn!(code = %code, "extension error");
@@ -464,12 +422,8 @@ impl Core {
         let text = text.as_str();
         let field = self.platform.focused_field();
         if field.is_password == Some(true) {
-            tracing::info!(
-                len = text.chars().count(),
-                "password field in front; not inserting"
-            );
-            self.platform
-                .notify("vtype", &t("native_notifyPasswordField"));
+            tracing::info!(len = text.chars().count(), "password field in front; not inserting");
+            self.platform.notify("vtype", &t("native_notifyPasswordField"));
             return;
         }
         match self.platform.inject_text(text, self.config.inject) {
@@ -479,15 +433,13 @@ impl Core {
                 self.show_icon(IconState::Done);
             }
             Ok(InjectOutcome::CopiedOnly) => {
-                self.platform
-                    .notify("vtype", &t("native_notifyPasteManually"));
+                self.platform.notify("vtype", &t("native_notifyPasteManually"));
             }
             Err(e) => {
                 tracing::warn!(error = %e, "could not insert; copying instead");
                 self.errors.push("inject_failed");
                 if self.platform.copy_to_clipboard(text).is_ok() {
-                    self.platform
-                        .notify("vtype", &t("native_notifyPasteManually"));
+                    self.platform.notify("vtype", &t("native_notifyPasteManually"));
                 }
             }
         }
@@ -517,11 +469,7 @@ impl Core {
         }
         if icon_changed {
             if self.config.icon.visible {
-                self.show_icon(if self.recording {
-                    IconState::Recording
-                } else {
-                    IconState::Idle
-                });
+                self.show_icon(if self.recording { IconState::Recording } else { IconState::Idle });
             } else {
                 self.platform.hide_icon();
             }
@@ -544,17 +492,13 @@ impl Core {
                     let mut c = self.config.clone();
                     c.icon.visible = !c.icon.visible;
                     self.apply_config(c);
-                    self.send(&ToExtension::NativeConfig {
-                        config: self.config.clone(),
-                    });
+                    self.send(&ToExtension::NativeConfig { config: self.config.clone() });
                 }
                 MenuAction::ToggleHideOnFullscreen => {
                     let mut c = self.config.clone();
                     c.icon.hide_on_fullscreen = !c.icon.hide_on_fullscreen;
                     self.apply_config(c);
-                    self.send(&ToExtension::NativeConfig {
-                        config: self.config.clone(),
-                    });
+                    self.send(&ToExtension::NativeConfig { config: self.config.clone() });
                 }
                 MenuAction::SetMode(mode) => {
                     let _ = self.set_mode(mode);
@@ -564,11 +508,7 @@ impl Core {
                 }
                 MenuAction::ReportBug => {
                     let os = self.platform.os_description();
-                    let browser = self
-                        .host
-                        .as_ref()
-                        .and_then(|h| h.browser.clone())
-                        .unwrap_or_default();
+                    let browser = self.host.as_ref().and_then(|h| h.browser.clone()).unwrap_or_default();
                     let url = report::bug_report_url(&ReportInfo {
                         surface: Surface::Desktop,
                         version: env!("CARGO_PKG_VERSION"),
@@ -580,8 +520,7 @@ impl Core {
                     }
                 }
                 MenuAction::CopyDiagnostics => {
-                    let text =
-                        serde_json::to_string_pretty(&self.diagnostics()).unwrap_or_default();
+                    let text = serde_json::to_string_pretty(&self.diagnostics()).unwrap_or_default();
                     if let Err(e) = self.platform.copy_to_clipboard(&text) {
                         tracing::warn!(error = %e, "could not copy the diagnostic info");
                     }
@@ -621,9 +560,7 @@ impl Core {
 
 /// `chrome-extension://<id>/` to `<id>`.
 pub fn extension_id_from_origin(origin: &str) -> Option<String> {
-    let id = origin
-        .strip_prefix("chrome-extension://")?
-        .trim_end_matches('/');
+    let id = origin.strip_prefix("chrome-extension://")?.trim_end_matches('/');
     (!id.is_empty() && id.chars().all(|c| c.is_ascii_lowercase())).then(|| id.to_string())
 }
 
@@ -644,14 +581,7 @@ fn serve_connection(stream: Stream, tx: Sender<Event>) {
     loop {
         match ipc::read_line::<_, Request>(&mut reader) {
             Ok(Some(req)) => {
-                if tx
-                    .send(Event::Request {
-                        conn,
-                        req,
-                        out: out_tx.clone(),
-                    })
-                    .is_err()
-                {
+                if tx.send(Event::Request { conn, req, out: out_tx.clone() }).is_err() {
                     break;
                 }
             }
@@ -678,14 +608,17 @@ fn accept_loop(listener: Listener, tx: Sender<Event>) {
 }
 
 pub fn run() -> Result<()> {
+    #[cfg(windows)]
+    if crate::platform::windows::leave_own_console() {
+        return Ok(());
+    }
     crate::log::init_file("daemon");
     let endpoint = crate::paths::ipc_endpoint();
     if ipc::daemon_answers(&endpoint) {
         println!("vtype is already running");
         return Ok(());
     }
-    let listener =
-        ipc::listen_at(&endpoint).with_context(|| format!("could not listen on {endpoint}"))?;
+    let listener = ipc::listen_at(&endpoint).with_context(|| format!("could not listen on {endpoint}"))?;
 
     let platform: Arc<dyn Platform> = Arc::from(crate::platform::current());
     crate::i18n::init(&platform.ui_language());
@@ -718,9 +651,7 @@ pub fn run() -> Result<()> {
         core_platform.quit();
     });
 
-    platform
-        .run_event_loop(ptx)
-        .map_err(|e| anyhow::anyhow!("event loop: {e}"))?;
+    platform.run_event_loop(ptx).map_err(|e| anyhow::anyhow!("event loop: {e}"))?;
     Ok(())
 }
 
@@ -756,26 +687,15 @@ pub mod tests {
         }
         fn quit(&self) {}
         fn set_tray(&self, state: &TrayState) {
-            self.log(format!(
-                "tray connected={} recording={}",
-                state.connected, state.recording
-            ));
+            self.log(format!("tray connected={} recording={}", state.connected, state.recording));
         }
         fn register_hotkey(&self, spec: &str) -> Result<(), PlatformError> {
             self.log(format!("hotkey {spec}"));
             self.hotkey.lock().unwrap().clone().unwrap_or(Ok(()))
         }
-        fn inject_text(
-            &self,
-            text: &str,
-            method: InjectMethod,
-        ) -> Result<InjectOutcome, PlatformError> {
+        fn inject_text(&self, text: &str, method: InjectMethod) -> Result<InjectOutcome, PlatformError> {
             self.log(format!("inject {text} {method:?}"));
-            self.inject
-                .lock()
-                .unwrap()
-                .clone()
-                .unwrap_or(Ok(InjectOutcome::Typed))
+            self.inject.lock().unwrap().clone().unwrap_or(Ok(InjectOutcome::Typed))
         }
         fn focused_field(&self) -> FieldInfo {
             self.field.lock().unwrap().clone()
@@ -835,31 +755,19 @@ pub mod tests {
             let c = clock.clone();
             core.set_clock(Box::new(move || *c.lock().unwrap()));
             let (host_tx, host_rx) = mpsc::channel();
-            Harness {
-                core,
-                fake,
-                host_rx,
-                host_tx,
-                clock,
-            }
+            Harness { core, fake, host_rx, host_tx, clock }
         }
 
         pub fn cli(&mut self, req: Request) -> Reply {
             let (tx, rx) = mpsc::channel();
-            self.core.handle(Event::Request {
-                conn: 999,
-                req,
-                out: tx,
-            });
+            self.core.handle(Event::Request { conn: 999, req, out: tx });
             rx.try_recv().expect("a reply")
         }
 
         pub fn attach_host(&mut self) {
             self.core.handle(Event::Request {
                 conn: 1,
-                req: Request::HostHello {
-                    origin: "chrome-extension://abcdefghijklmnopabcdefghijklmnop/".into(),
-                },
+                req: Request::HostHello { origin: "chrome-extension://abcdefghijklmnopabcdefghijklmnop/".into() },
                 out: self.host_tx.clone(),
             });
         }
@@ -913,20 +821,10 @@ pub mod tests {
     #[test]
     fn toggle_while_disconnected_launches_chrome_and_starts_once_it_connects() {
         let mut h = Harness::new();
-        assert_eq!(
-            h.cli(Request::Toggle {
-                mode: Some(InputMode::En)
-            }),
-            Reply::Ok
-        );
-        assert!(h
-            .fake
-            .take()
-            .contains(&"chrome --no-startup-window".to_string()));
+        assert_eq!(h.cli(Request::Toggle { mode: Some(InputMode::En) }), Reply::Ok);
+        assert!(h.fake.take().contains(&"chrome --no-startup-window".to_string()));
         // A second press while waiting does not start Chrome again.
-        h.cli(Request::Toggle {
-            mode: Some(InputMode::En),
-        });
+        h.cli(Request::Toggle { mode: Some(InputMode::En) });
         assert!(!h.fake.take().iter().any(|c| c.starts_with("chrome")));
 
         h.attach_host();
@@ -994,12 +892,7 @@ pub mod tests {
         final_text(&mut h, "です");
         h.ext(json!({"type":"session","event":{"kind":"started"}}));
         final_text(&mut h, "again");
-        let injected: Vec<String> = h
-            .fake
-            .take()
-            .into_iter()
-            .filter(|c| c.starts_with("inject "))
-            .collect();
+        let injected: Vec<String> = h.fake.take().into_iter().filter(|c| c.starts_with("inject ")).collect();
         assert_eq!(
             injected,
             vec![
@@ -1016,11 +909,8 @@ pub mod tests {
     fn never_types_into_a_password_field() {
         let mut h = Harness::new();
         h.connect();
-        *h.fake.field.lock().unwrap() = FieldInfo {
-            is_password: Some(true),
-            caret_rect: Some(Rect::default()),
-            app_id: None,
-        };
+        *h.fake.field.lock().unwrap() =
+            FieldInfo { is_password: Some(true), caret_rect: Some(Rect::default()), app_id: None };
         h.ext(json!({"type":"session","event":{"kind":"final","text":"secret words"}}));
         let calls = h.fake.take();
         assert!(!calls.iter().any(|c| c.starts_with("inject")));
@@ -1041,9 +931,7 @@ pub mod tests {
     #[test]
     fn a_mode_chosen_offline_is_sent_on_connect() {
         let mut h = Harness::new();
-        h.cli(Request::SetMode {
-            mode: InputMode::Kana,
-        });
+        h.cli(Request::SetMode { mode: InputMode::Kana });
         h.attach_host();
         h.ext(json!({"type":"hello","extensionVersion":"0.1.0"}));
         assert!(h.sent().contains(&json!({"type":"set-mode","mode":"kana"})));
@@ -1053,10 +941,7 @@ pub mod tests {
     fn the_options_page_can_change_the_config() {
         let mut h = Harness::new();
         h.connect();
-        let mut cfg = NativeConfig {
-            hotkey: Some("Ctrl+Shift+F9".into()),
-            ..NativeConfig::default()
-        };
+        let mut cfg = NativeConfig { hotkey: Some("Ctrl+Shift+F9".into()), ..NativeConfig::default() };
         cfg.icon.visible = false;
         h.ext(json!({"type":"set-native-config","config": cfg}));
         assert_eq!(h.core.config().hotkey.as_deref(), Some("Ctrl+Shift+F9"));
@@ -1088,12 +973,7 @@ pub mod tests {
     fn open_settings_uses_the_connected_extension_or_starts_chrome() {
         let mut h = Harness::new();
         h.cli(Request::OpenSettings);
-        assert_eq!(
-            h.fake.take(),
-            vec![format!(
-                "chrome chrome-extension://{STORE_EXTENSION_ID}/options.html"
-            )]
-        );
+        assert_eq!(h.fake.take(), vec![format!("chrome chrome-extension://{STORE_EXTENSION_ID}/options.html")]);
         h.connect();
         h.cli(Request::OpenSettings);
         assert_eq!(h.sent(), vec![json!({"type":"open-options"})]);
@@ -1103,12 +983,11 @@ pub mod tests {
     fn report_bug_opens_the_issue_form() {
         let mut h = Harness::new();
         h.connect();
-        h.core
-            .handle(Event::Platform(PlatformEvent::Menu(MenuAction::ReportBug)));
+        h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::ReportBug)));
         let calls = h.fake.take();
-        assert!(calls[0].starts_with(
-            "open https://github.com/ishizakahiroshi/vtype/issues/new?template=bug_report.yml"
-        ));
+        assert!(
+            calls[0].starts_with("open https://github.com/ishizakahiroshi/vtype/issues/new?template=bug_report.yml")
+        );
         assert!(calls[0].contains("browser=Chrome%20140"));
     }
 
@@ -1116,9 +995,7 @@ pub mod tests {
     fn diagnostics_carry_no_transcript() {
         let mut h = Harness::new();
         h.connect();
-        h.ext(
-            json!({"type":"session","event":{"kind":"final","text":"do not keep this sentence"}}),
-        );
+        h.ext(json!({"type":"session","event":{"kind":"final","text":"do not keep this sentence"}}));
         let text = serde_json::to_string(&h.core.diagnostics()).unwrap();
         assert!(!text.contains("do not keep"));
     }
@@ -1126,8 +1003,7 @@ pub mod tests {
     #[test]
     fn origin_to_id() {
         assert_eq!(
-            extension_id_from_origin("chrome-extension://nngfilimeplngdjdmgkddlhbdjpmikgn/")
-                .as_deref(),
+            extension_id_from_origin("chrome-extension://nngfilimeplngdjdmgkddlhbdjpmikgn/").as_deref(),
             Some(STORE_EXTENSION_ID)
         );
         assert_eq!(extension_id_from_origin("https://example.com/"), None);

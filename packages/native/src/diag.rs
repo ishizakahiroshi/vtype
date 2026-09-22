@@ -31,10 +31,7 @@ impl ErrorLog {
         if self.entries.len() == MAX_ERRORS {
             self.entries.pop_front();
         }
-        self.entries.push_back(ErrorEntry {
-            at,
-            code: code.into(),
-        });
+        self.entries.push_back(ErrorEntry { at, code: code.into() });
     }
 
     pub fn entries(&self) -> impl Iterator<Item = &ErrorEntry> {
@@ -69,10 +66,7 @@ pub fn report(s: &Snapshot<'_>) -> Value {
 
 /// Current UTC time as `YYYY-MM-DDTHH:MM:SSZ`.
 pub fn utc_now() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
     format_utc(secs)
 }
 
@@ -90,12 +84,7 @@ pub fn format_utc(secs: i64) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
-    format!(
-        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
-        rem / 3600,
-        rem % 3600 / 60,
-        rem % 60
-    )
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3600, rem % 3600 / 60, rem % 60)
 }
 
 #[cfg(test)]
@@ -137,17 +126,7 @@ mod tests {
         let keys: Vec<_> = r.as_object().unwrap().keys().cloned().collect();
         assert_eq!(
             keys,
-            [
-                "app",
-                "browser",
-                "config",
-                "connected",
-                "extensionVersion",
-                "notes",
-                "os",
-                "recentErrors",
-                "version"
-            ]
+            ["app", "browser", "config", "connected", "extensionVersion", "notes", "os", "recentErrors", "version"]
         );
     }
 }

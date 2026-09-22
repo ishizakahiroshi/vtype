@@ -21,19 +21,16 @@ fn main() {
     for code in LOCALES {
         let path = locales_dir.join(code).join("messages.json");
         println!("cargo:rerun-if-changed={}", path.display());
-        let text = fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
-        let json: serde_json::Value = serde_json::from_str(&text)
-            .unwrap_or_else(|e| panic!("{} is not JSON: {e}", path.display()));
+        let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+        let json: serde_json::Value =
+            serde_json::from_str(&text).unwrap_or_else(|e| panic!("{} is not JSON: {e}", path.display()));
         let mut table = BTreeMap::new();
         for (key, entry) in json.as_object().expect("messages.json must be an object") {
             if !key.starts_with("native_") {
                 continue;
             }
-            let message = entry
-                .get("message")
-                .and_then(|m| m.as_str())
-                .unwrap_or_else(|| panic!("{code}/{key} has no message"));
+            let message =
+                entry.get("message").and_then(|m| m.as_str()).unwrap_or_else(|| panic!("{code}/{key} has no message"));
             table.insert(key.clone(), message.to_string());
         }
         tables.insert(code, table);
@@ -43,14 +40,8 @@ fn main() {
     for code in LOCALES {
         let keys: Vec<&String> = tables[code].keys().collect();
         if keys != en {
-            let missing: Vec<_> = en
-                .iter()
-                .filter(|k| !tables[code].contains_key(k.as_str()))
-                .collect();
-            let extra: Vec<_> = keys
-                .iter()
-                .filter(|k| !tables["en"].contains_key(k.as_str()))
-                .collect();
+            let missing: Vec<_> = en.iter().filter(|k| !tables[code].contains_key(k.as_str())).collect();
+            let extra: Vec<_> = keys.iter().filter(|k| !tables["en"].contains_key(k.as_str())).collect();
             panic!("_locales/{code} does not have the same native_ keys as en (missing {missing:?}, extra {extra:?})");
         }
     }
@@ -67,10 +58,7 @@ fn main() {
 
     let mut out = String::new();
     for code in LOCALES {
-        out.push_str(&format!(
-            "pub static {}: &[(&str, &str)] = &[\n",
-            code.to_uppercase()
-        ));
+        out.push_str(&format!("pub static {}: &[(&str, &str)] = &[\n", code.to_uppercase()));
         for (key, message) in &tables[code] {
             out.push_str(&format!("    ({key:?}, {message:?}),\n"));
         }
@@ -101,8 +89,8 @@ fn collect_used_keys(dir: &Path, used: &mut Vec<String>) {
                     let end = rest.find('"').unwrap_or(0);
                     let key = &rest[..end];
                     // Only real keys; a doc comment's `t("native_…")` is not one.
-                    let is_key = key.len() > "native_".len()
-                        && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+                    let is_key =
+                        key.len() > "native_".len() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
                     if key.starts_with("native_") && is_key && !used.iter().any(|k| k == key) {
                         used.push(key.to_string());
                     }
