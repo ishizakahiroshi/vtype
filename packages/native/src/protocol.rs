@@ -141,6 +141,13 @@ pub enum FromExtension {
     Error {
         code: String,
     },
+    /// The daemon's speech page (standalone plan C2): the user pressed "agree and start".
+    Consent,
+    /// Where the speech page's first-run setup stands.
+    PageState {
+        consented: bool,
+        mic_granted: bool,
+    },
 }
 
 /// A recognition session the desktop app started. `interim` is shown, only `final` is typed.

@@ -18,6 +18,7 @@ use interprocess::local_socket::{prelude::*, Listener, Stream};
 use serde_json::Value;
 
 use crate::beside_field;
+use crate::chrome_launch::{self, WindowPlacement};
 use crate::config::{self, NativeConfig};
 use crate::diag::{self, ErrorLog};
 use crate::i18n::{t, t_with};
@@ -59,8 +60,15 @@ struct HostLink {
 
 struct Pending {
     start_mode: Option<InputMode>,
-    deadline: Instant,
+    /// `None` while the user is on the first-run page: that takes as long as it takes.
+    deadline: Option<Instant>,
 }
+
+/// How long the setup window has to be gone before Chrome is started again off screen.
+pub const RELAUNCH_DELAY: Duration = Duration::from_millis(1500);
+
+/// How long the first-run request is held in the bubble.
+const SETUP_HOLD: Duration = Duration::from_secs(30);
 
 pub struct Core {
     platform: Arc<dyn Platform>,
@@ -79,8 +87,17 @@ pub struct Core {
     /// The mic beside the field is up (child plan C8).
     beside_shown: bool,
     /// The daemon's own speech page (speech_host.rs), when it could listen.
-    #[allow(dead_code)] // opened in the daemon's own Chrome from standalone plan C4 on
     speech_page: Option<String>,
+    /// The daemon's own Chrome profile (chrome_launch.rs).
+    profile_dir: PathBuf,
+    /// Where the last Chrome for the speech page was put.
+    launched: Option<WindowPlacement>,
+    /// The page said consent or the microphone is missing: the next launch shows the window.
+    needs_setup: bool,
+    /// The page finished its first-run setup (consent and microphone).
+    page_ready: bool,
+    /// Start Chrome again at this time, placed like this (after the setup window closed).
+    relaunch: Option<(Instant, WindowPlacement)>,
 }
 
 impl Core {
@@ -99,6 +116,11 @@ impl Core {
             last_char: None,
             beside_shown: false,
             speech_page: None,
+            profile_dir: chrome_launch::profile_dir(),
+            launched: None,
+            needs_setup: false,
+            page_ready: false,
+            relaunch: None,
         }
     }
 
@@ -115,6 +137,11 @@ impl Core {
 
     pub fn connected(&self) -> bool {
         self.host.as_ref().is_some_and(|h| h.extension_version.is_some())
+    }
+
+    /// Connected, and not to the first-run window (which only asks for consent and the microphone).
+    fn ready(&self) -> bool {
+        self.connected() && self.launched != Some(WindowPlacement::Visible)
     }
 
     #[cfg(test)]
@@ -177,18 +204,73 @@ impl Core {
 
     /// When the loop should wake up even if nothing arrives.
     pub fn next_deadline(&self) -> Option<Instant> {
-        self.pending.as_ref().map(|p| p.deadline)
+        let pending = self.pending.as_ref().and_then(|p| p.deadline);
+        let relaunch = self.relaunch.map(|(at, _)| at);
+        pending.into_iter().chain(relaunch).min()
     }
 
     pub fn tick(&mut self) {
-        if let Some(p) = &self.pending {
-            if (self.now)() >= p.deadline {
+        let now = (self.now)();
+        if let Some((at, placement)) = self.relaunch {
+            if now >= at {
+                self.relaunch = None;
+                if self.pending.is_some() {
+                    self.launch_speech_page(placement);
+                }
+            }
+        }
+        if let Some(Pending { deadline: Some(deadline), .. }) = &self.pending {
+            if now >= *deadline {
                 self.pending = None;
                 tracing::warn!("Chrome did not connect in time");
                 self.errors.push("chrome_not_connected");
-                self.platform.tell(&t("native_notifyChromeNotConnected"), MESSAGE_HOLD, true);
+                self.platform.tell(&t("native_notifySpeechPageNotConnected"), MESSAGE_HOLD, true);
             }
         }
+    }
+
+    /// Starts the daemon's own Chrome on the speech page. On screen it waits for the user (no
+    /// deadline); off screen it waits CHROME_WAIT for the page to connect.
+    fn launch_speech_page(&mut self, placement: WindowPlacement) {
+        let Some(base) = self.speech_page.clone() else {
+            self.fail_launch("speech_page_unavailable", &t("native_notifySpeechPageNotConnected"));
+            return;
+        };
+        let url = chrome_launch::page_url(&base, self.config.consented, placement);
+        let args = chrome_launch::speech_args(&self.profile_dir, &url, placement);
+        tracing::info!(?placement, "not connected; starting Chrome");
+        if let Err(e) = self.platform.launch_chrome(&args) {
+            tracing::warn!(error = %e, "could not start Chrome");
+            if e.to_string().contains("Chrome was not found") {
+                self.fail_launch("chrome_missing", &t("native_notifyChromeMissing"));
+            } else {
+                self.fail_launch("chrome_launch_failed", &t("native_notifySpeechPageNotConnected"));
+            }
+            return;
+        }
+        self.launched = Some(placement);
+        self.page_ready = false;
+        let deadline = match placement {
+            WindowPlacement::Visible => {
+                self.platform.tell(&t("native_bubbleConsent"), SETUP_HOLD, true);
+                None
+            }
+            WindowPlacement::Hidden => {
+                // Otherwise nothing shows for up to CHROME_WAIT. Held a little past it, so the bubble
+                // is still up when the outcome replaces it; no notification for a passing state.
+                self.platform.tell(&t("native_bubbleConnecting"), CHROME_WAIT + Duration::from_secs(2), false);
+                Some((self.now)() + CHROME_WAIT)
+            }
+        };
+        if let Some(p) = self.pending.as_mut() {
+            p.deadline = deadline;
+        }
+    }
+
+    fn fail_launch(&mut self, code: &str, message: &str) {
+        self.pending = None;
+        self.errors.push(code);
+        self.platform.tell(message, MESSAGE_HOLD, true);
     }
 
     pub fn handle(&mut self, event: Event) -> Flow {
@@ -199,6 +281,7 @@ impl Core {
                     tracing::info!("extension disconnected");
                     self.host = None;
                     self.end_recording_ui();
+                    self.page_closed();
                     self.update_tray();
                 }
                 Flow::Continue
@@ -252,27 +335,52 @@ impl Core {
     }
 
     fn start_recording(&mut self, mode: Option<InputMode>) -> Reply {
-        if self.connected() {
+        if self.ready() {
             self.send(&ToExtension::Start { mode });
             return Reply::Ok;
         }
-        let first = self.pending.is_none();
-        self.pending = Some(Pending { start_mode: mode, deadline: (self.now)() + CHROME_WAIT });
-        if first {
-            tracing::info!("not connected; starting Chrome");
-            // Otherwise nothing shows for up to CHROME_WAIT. Held a little past it, so the bubble
-            // is still up when the outcome replaces it; no notification for a passing state.
-            self.platform.tell(&t("native_bubbleConnecting"), CHROME_WAIT + Duration::from_secs(2), false);
-            if let Err(e) = self.platform.launch_chrome(&["--no-startup-window".to_string()]) {
-                tracing::warn!(error = %e, "could not start Chrome");
-                self.errors.push("chrome_launch_failed");
-            }
+        if let Some(p) = self.pending.as_mut() {
+            // Already starting (or the first-run window is open): only the mode changes.
+            p.start_mode = mode;
+            return Reply::Ok;
         }
+        self.pending = Some(Pending { start_mode: mode, deadline: None });
+        if self.connected() || self.relaunch.is_some() {
+            return Reply::Ok; // the first-run window is up, or Chrome is about to start again
+        }
+        let placement =
+            if self.config.consented && !self.needs_setup { WindowPlacement::Hidden } else { WindowPlacement::Visible };
+        self.launch_speech_page(placement);
         Reply::Ok
+    }
+
+    /// The page's connection is gone. After the first-run window closed itself, Chrome is started
+    /// again off screen; a hidden page that found the microphone missing is started on screen.
+    fn page_closed(&mut self) {
+        let next = match self.launched.take() {
+            Some(WindowPlacement::Visible) if self.page_ready => Some(WindowPlacement::Hidden),
+            Some(WindowPlacement::Hidden) if self.needs_setup => Some(WindowPlacement::Visible),
+            Some(WindowPlacement::Visible) => {
+                // Closed before the setup was done: nothing to wait for any more.
+                if self.pending.take().is_some() {
+                    self.platform.hide_bubble();
+                }
+                None
+            }
+            _ => None,
+        };
+        self.page_ready = false;
+        if let Some(placement) = next {
+            if self.pending.is_none() {
+                self.pending = Some(Pending { start_mode: None, deadline: None });
+            }
+            self.relaunch = Some(((self.now)() + RELAUNCH_DELAY, placement));
+        }
     }
 
     fn stop_recording(&mut self) -> Reply {
         if self.pending.take().is_some() {
+            self.relaunch = None;
             self.platform.hide_bubble(); // "connecting…"
         }
         if self.send(&ToExtension::Stop) {
@@ -351,11 +459,30 @@ impl Core {
                     self.send(&ToExtension::SetMode { mode });
                 }
                 self.send(&ToExtension::GetState);
-                if let Some(p) = self.pending.take() {
-                    self.platform.hide_bubble(); // "connecting…"
-                    self.send(&ToExtension::Start { mode: p.start_mode });
+                // The first-run window only asks; the recording starts once it is hidden.
+                if self.ready() {
+                    if let Some(p) = self.pending.take() {
+                        self.platform.hide_bubble(); // "connecting…"
+                        self.send(&ToExtension::Start { mode: p.start_mode });
+                    }
                 }
                 self.update_tray();
+            }
+            FromExtension::Consent => {
+                tracing::info!("the user agreed on the speech page");
+                if !self.config.consented {
+                    self.config.consented = true;
+                    self.save_config();
+                }
+            }
+            FromExtension::PageState { consented, mic_granted } => {
+                tracing::info!(consented, mic_granted, "speech page state");
+                self.page_ready = consented && mic_granted;
+                self.needs_setup = !self.page_ready;
+                if self.launched == Some(WindowPlacement::Hidden) && self.needs_setup {
+                    // The page closes itself; page_closed() starts it again on screen.
+                    self.platform.tell(&t("native_bubbleConsent"), SETUP_HOLD, true);
+                }
             }
             FromExtension::State { mode, recording } => {
                 self.mode = mode;
@@ -441,6 +568,13 @@ impl Core {
             _ => text.to_string(),
         };
         let text = text.as_str();
+        // End-to-end checks on the developer's machine (standalone plan C4): nothing is typed into
+        // whatever app happens to be in front. Not for users; not documented.
+        if std::env::var_os("VTYPE_TEST_NO_INJECT").is_some() {
+            tracing::info!("test: final len={}", text.chars().count());
+            self.last_char = text.chars().last();
+            return;
+        }
         let field = self.platform.focused_field();
         if field.is_password == Some(true) {
             tracing::info!(len = text.chars().count(), "password field in front; not inserting");
@@ -481,6 +615,8 @@ impl Core {
             new.icon.x = self.config.icon.x;
             new.icon.y = self.config.icon.y;
         }
+        // Consent is given on the speech page only; a settings page does not take it back.
+        new.consented = self.config.consented;
         let hotkey_changed = new.effective_hotkey() != self.config.effective_hotkey();
         let icon_changed = new.icon.visible != self.config.icon.visible;
         let beside_changed = new.beside_field != self.config.beside_field;
@@ -722,6 +858,7 @@ pub mod tests {
     use crate::config::InjectMethod;
     use crate::platform::{FieldInfo, Rect};
     use serde_json::json;
+    use std::path::Path;
     use std::sync::Mutex;
 
     /// Records every call; `inject` and `field` decide what the OS "does".
@@ -731,6 +868,7 @@ pub mod tests {
         pub field: Mutex<FieldInfo>,
         pub inject: Mutex<Option<Result<InjectOutcome, PlatformError>>>,
         pub hotkey: Mutex<Option<Result<(), PlatformError>>>,
+        pub chrome: Mutex<Option<Result<(), PlatformError>>>,
     }
 
     impl FakePlatform {
@@ -782,7 +920,7 @@ pub mod tests {
         }
         fn launch_chrome(&self, args: &[String]) -> Result<(), PlatformError> {
             self.log(format!("chrome {}", args.join(" ")));
-            Ok(())
+            self.chrome.lock().unwrap().clone().unwrap_or(Ok(()))
         }
         fn open_url(&self, url: &str) -> Result<(), PlatformError> {
             self.log(format!("open {url}"));
@@ -824,6 +962,8 @@ pub mod tests {
         pub fn new() -> Harness {
             let fake = Arc::new(FakePlatform::default());
             let mut core = Core::new(fake.clone(), NativeConfig::default(), None);
+            core.set_speech_page(PAGE.into());
+            core.profile_dir = PathBuf::from("/p");
             let clock = Arc::new(Mutex::new(Instant::now()));
             let c = clock.clone();
             core.set_clock(Box::new(move || *c.lock().unwrap()));
@@ -835,6 +975,16 @@ pub mod tests {
             let (tx, rx) = mpsc::channel();
             self.core.handle(Event::Request { conn: 999, req, out: tx });
             rx.try_recv().expect("a reply")
+        }
+
+        /// The daemon's own speech page connects (speech_host.rs) and says hello.
+        pub fn page_hello(&mut self) {
+            self.core.handle(Event::Request {
+                conn: 1,
+                req: Request::HostHello { origin: "http://127.0.0.1:47213".into() },
+                out: self.host_tx.clone(),
+            });
+            self.ext(json!({"type":"hello","extensionVersion":"desktop-page"}));
         }
 
         pub fn attach_host(&mut self) {
@@ -891,44 +1041,112 @@ pub mod tests {
         );
     }
 
+    const PAGE: &str = "http://127.0.0.1:47213/t/0123456789abcdef0123456789abcdef/speech";
+
+    fn chrome_call(url: &str, placement: WindowPlacement) -> String {
+        format!("chrome {}", chrome_launch::speech_args(Path::new("/p"), url, placement).join(" "))
+    }
+
     #[test]
-    fn toggle_while_disconnected_launches_chrome_and_starts_once_it_connects() {
+    fn the_first_press_opens_the_setup_window_and_records_once_it_is_hidden() {
         let mut h = Harness::new();
         assert_eq!(h.cli(Request::Toggle { mode: Some(InputMode::En) }), Reply::Ok);
         let calls = h.fake.take();
-        assert!(calls.contains(&"chrome --no-startup-window".to_string()));
-        // The wait is said in the bubble (held past CHROME_WAIT), never as a notification.
-        let connecting = format!("tell {} 12s notify=false", t("native_bubbleConnecting"));
-        assert!(calls.contains(&connecting), "{calls:?}");
-        // A second press while waiting does not start Chrome again.
-        h.cli(Request::Toggle { mode: Some(InputMode::En) });
-        let calls = h.fake.take();
-        assert!(!calls.iter().any(|c| c.starts_with("chrome") || c.starts_with("tell ")));
+        assert!(calls.contains(&chrome_call(&format!("{PAGE}?setup=1"), WindowPlacement::Visible)), "{calls:?}");
+        assert!(calls.contains(&format!("tell {} 30s notify=true", t("native_bubbleConsent"))), "{calls:?}");
+        // The user takes as long as they take: no 10-second wait.
+        assert!(h.core.next_deadline().is_none());
 
-        h.attach_host();
-        h.ext(json!({"type":"hello","extensionVersion":"0.1.0"}));
-        assert!(h.fake.take().contains(&"hide bubble".to_string()));
-        let sent = h.sent();
-        assert_eq!(sent[0]["type"], "hello");
-        assert_eq!(sent.last().unwrap(), &json!({"type":"start","mode":"en"}));
+        // The first-run page connects: it is not asked to record.
+        h.page_hello();
+        assert!(!h.sent().iter().any(|m| m["type"] == "start"));
+        h.ext(json!({"type":"consent"}));
+        assert!(h.core.config().consented);
+        h.ext(json!({"type":"page-state","consented":true,"micGranted":true}));
+        // The page closes itself; Chrome comes back off screen a moment later.
+        h.core.handle(Event::Closed { conn: 1 });
+        h.fake.take();
+        assert!(h.core.next_deadline().is_some());
+        h.advance(RELAUNCH_DELAY);
+        h.core.tick();
+        let calls = h.fake.take();
+        assert!(calls.contains(&chrome_call(&format!("{PAGE}?consent=1"), WindowPlacement::Hidden)), "{calls:?}");
+        h.page_hello();
+        assert_eq!(h.sent().last().unwrap(), &json!({"type":"start","mode":"en"}));
         assert!(h.core.next_deadline().is_none());
     }
 
     #[test]
-    fn gives_up_after_ten_seconds_and_says_so() {
+    fn once_agreed_chrome_starts_off_screen_and_gives_up_after_ten_seconds() {
         let mut h = Harness::new();
+        h.core.config.consented = true;
         h.cli(Request::Start { mode: None });
-        h.fake.take();
+        let calls = h.fake.take();
+        assert!(calls.contains(&chrome_call(&format!("{PAGE}?consent=1"), WindowPlacement::Hidden)), "{calls:?}");
+        // The wait is said in the bubble (held past CHROME_WAIT), never as a notification.
+        assert!(calls.contains(&format!("tell {} 12s notify=false", t("native_bubbleConnecting"))), "{calls:?}");
+        // A second press while waiting does not start Chrome again.
+        h.cli(Request::Start { mode: None });
+        assert!(!h.fake.take().iter().any(|c| c.starts_with("chrome") || c.starts_with("tell ")));
         h.advance(Duration::from_secs(9));
         h.core.tick();
         assert!(h.fake.take().is_empty());
         h.advance(Duration::from_secs(2));
         h.core.tick();
-        let calls = h.fake.take();
-        assert_eq!(calls, vec![format!("tell {} 6s notify=true", t("native_notifyChromeNotConnected"))]);
+        assert_eq!(h.fake.take(), vec![format!("tell {} 6s notify=true", t("native_notifySpeechPageNotConnected"))]);
         assert!(h.core.next_deadline().is_none());
     }
 
+    #[test]
+    fn a_missing_chrome_is_said_at_once() {
+        let mut h = Harness::new();
+        *h.fake.chrome.lock().unwrap() = Some(Err(PlatformError::Failed("Chrome was not found".into())));
+        h.cli(Request::Start { mode: None });
+        let calls = h.fake.take();
+        assert!(calls.contains(&format!("tell {} 6s notify=true", t("native_notifyChromeMissing"))), "{calls:?}");
+        assert!(h.core.next_deadline().is_none());
+    }
+
+    #[test]
+    fn a_hidden_page_without_the_microphone_comes_back_on_screen() {
+        let mut h = Harness::new();
+        h.core.config.consented = true;
+        h.cli(Request::Start { mode: None });
+        h.page_hello();
+        h.ext(json!({"type":"page-state","consented":true,"micGranted":false}));
+        assert!(h.fake.take().contains(&format!("tell {} 30s notify=true", t("native_bubbleConsent"))));
+        h.core.handle(Event::Closed { conn: 1 });
+        h.advance(RELAUNCH_DELAY);
+        h.core.tick();
+        let calls = h.fake.take();
+        assert!(
+            calls.contains(&chrome_call(&format!("{PAGE}?consent=1&setup=1"), WindowPlacement::Visible)),
+            "{calls:?}"
+        );
+    }
+
+    #[test]
+    fn closing_the_setup_window_before_agreeing_stops_waiting() {
+        let mut h = Harness::new();
+        h.cli(Request::Start { mode: None });
+        h.page_hello();
+        h.fake.take();
+        h.core.handle(Event::Closed { conn: 1 });
+        assert!(h.fake.take().contains(&"hide bubble".to_string()));
+        assert!(h.core.next_deadline().is_none());
+        // The next press opens the setup window again.
+        h.cli(Request::Start { mode: None });
+        assert!(h.fake.take().contains(&chrome_call(&format!("{PAGE}?setup=1"), WindowPlacement::Visible)));
+    }
+
+    #[test]
+    fn a_settings_page_does_not_take_the_consent_back() {
+        let mut h = Harness::new();
+        h.core.config.consented = true;
+        h.connect();
+        h.ext(json!({"type":"set-native-config","config": NativeConfig::default()}));
+        assert!(h.core.config().consented);
+    }
     #[test]
     fn stopping_while_waiting_takes_the_connecting_bubble_away() {
         let mut h = Harness::new();

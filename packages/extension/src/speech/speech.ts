@@ -7,7 +7,7 @@
 // extension's Native Messaging bridge (shared/native-messages.ts), so the Rust side keeps its
 // vocabulary.
 //
-//   page URL   http://127.0.0.1:<port>/t/<token>/speech[?consent=1]
+//   page URL   http://127.0.0.1:<port>/t/<token>/speech[?consent=1][&setup=1]
 //   WebSocket  ws://127.0.0.1:<port>/t/<token>/ws      (the page's own directory + "ws")
 //   dictionary /t/<token>/dict/                        (relative, so reading.ts works as is)
 //
@@ -15,6 +15,12 @@
 // through Chrome's speech recognition (Microsoft Store policy 10.5.2). The desktop app keeps the
 // answer in its config.json and says so with `?consent=1` in the URL. Then the microphone is
 // asked for once; the grant stays with the desktop app's Chrome profile.
+//
+// The window: the desktop app opens it on screen for the first run (`setup=1`) and off screen
+// otherwise. A page cannot move its own window off screen (Chrome pulls `window.moveTo` back
+// onto it), so once the setup is done the page closes itself and the desktop app starts it again
+// off screen. An off-screen page that finds consent or the microphone missing closes itself too,
+// and comes back on screen.
 //
 // A lost WebSocket is retried from 1 s, doubling up to 30 s. A recording that loses the desktop
 // app is stopped: nobody is left to type what it hears.
@@ -40,6 +46,8 @@ export const RETRY_FIRST_MS = 1000;
 export const RETRY_MAX_MS = 30_000;
 /** What the page calls itself in its `hello` (the desktop app has no extension version to show). */
 export const PAGE_VERSION = "desktop-page";
+/** How long the first-run window stays up after the setup is done, so the user sees it worked. */
+export const SETUP_CLOSE_MS = 1500;
 
 /** The part of a WebSocket the page uses. */
 export interface SocketLike {
@@ -72,6 +80,8 @@ export interface SpeechPageOptions {
   createRecognizer?: (lang: () => string) => SpeechRecognizer;
   baseLang?: () => string;
   reading?: ReadingProvider;
+  /** Closes this window. Default: `window.close()` (it works for the `--app` window). */
+  closeWindow?: () => void;
 }
 
 export interface SpeechPage {
@@ -105,7 +115,13 @@ export function createSpeechPage(options: SpeechPageOptions = {}): SpeechPage {
     options.queryMicrophone ??
     (async () => (await nav!.permissions.query({ name: "microphone" as PermissionName })).state);
 
-  let consented = new URL(href).searchParams.get("consent") === "1";
+  const params = new URL(href).searchParams;
+  let consented = params.get("consent") === "1";
+  const setup = params.get("setup") === "1";
+  const closeWindow = options.closeWindow ?? (() => globalThis.close?.());
+  /** The microphone's state was read once; until then the page state is not reported. */
+  let micKnown = false;
+  let closing = false;
   let micGranted = false;
   let mode: InputMode = DEFAULT_INPUT_MODE;
   let sessionId: string | null = null;
@@ -163,7 +179,23 @@ export function createSpeechPage(options: SpeechPageOptions = {}): SpeechPage {
   }
 
   function postPageState(): void {
-    post({ type: "page-state", consented, micGranted });
+    if (micKnown) post({ type: "page-state", consented, micGranted });
+  }
+
+  /**
+   * The window is in the wrong place for what is needed now: the first-run window is done, or an
+   * off-screen page needs the user. It closes; the desktop app starts it again in the right place.
+   */
+  function placeWindow(): void {
+    if (closing || !micKnown || socket === null || !connected) return;
+    const ready = step() === "ready";
+    if (setup && ready) {
+      closing = true;
+      setTimeout(closeWindow, SETUP_CLOSE_MS);
+    } else if (!setup && !ready) {
+      closing = true;
+      setTimeout(closeWindow, 200);
+    }
   }
 
   function startSession(requested: InputMode | undefined): void {
@@ -199,6 +231,7 @@ export function createSpeechPage(options: SpeechPageOptions = {}): SpeechPage {
         render();
         postState();
         postPageState();
+        placeWindow();
         break;
       case "start":
         startSession(message.mode);
@@ -305,6 +338,7 @@ export function createSpeechPage(options: SpeechPageOptions = {}): SpeechPage {
     }
     render();
     postPageState();
+    placeWindow();
   }
 
   async function consent(): Promise<void> {
@@ -316,6 +350,7 @@ export function createSpeechPage(options: SpeechPageOptions = {}): SpeechPage {
     postPageState();
     // The click is the user's gesture: ask for the microphone right away.
     if (!micGranted) await requestMicrophone();
+    else placeWindow();
   }
 
   setText("title", t("speech_title"));
@@ -328,8 +363,10 @@ export function createSpeechPage(options: SpeechPageOptions = {}): SpeechPage {
   doc?.getElementById("microphone-button")?.addEventListener("click", () => void requestMicrophone());
   render();
   void refreshMicrophone().then(() => {
+    micKnown = true;
     render();
     postPageState();
+    placeWindow();
   });
   open();
 

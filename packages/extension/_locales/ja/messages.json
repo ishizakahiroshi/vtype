@@ -319,11 +319,18 @@
     "message": "ショートカット {hotkey} はほかのアプリが使っています。設定で別のキーを選んでください。",
     "description": "Desktop app: notification when the global shortcut could not be registered. {hotkey} is the shortcut"
   },
-  "native_notifyChromeNotConnected": {
-    "message": "Chrome の vtype とつながりませんでした。Chrome を開き、vtype の設定でデスクトップ連携をオンにしてください。",
-    "description": "Desktop app: notification when the vtype extension in Chrome could not be reached"
+  "native_notifySpeechPageNotConnected": {
+    "message": "音声認識の準備ができませんでした。もう一度押しても直らないときは、Google Chrome が入っているか確かめてください。",
+    "description": "Desktop app: notification when the Chrome that vtype starts for speech recognition did not connect in time"
   },
-  "native_bubbleConnecting": {
+  "native_notifyChromeMissing": {
+    "message": "Google Chrome が見つかりません。vtype は Google Chrome の音声認識を使います。Google Chrome を入れてから、もう一度押してください。",
+    "description": "Desktop app: notification when Google Chrome is not installed"
+  },
+  "native_bubbleConsent": {
+    "message": "最初の 1 回だけ、開いた Chrome の窓で同意とマイクの許可をお願いします。",
+    "description": "Desktop app: bubble while the first-run window (consent and microphone) is open"
+  },  "native_bubbleConnecting": {
     "message": "Chrome の vtype とつないでいます…",
     "description": "Desktop app: shown above the mic icon while it waits (up to 10 seconds) for the extension in Chrome"
   },

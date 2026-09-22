@@ -20,6 +20,15 @@ pub struct NativeConfig {
     pub beside_field: BesideFieldConfig,
     /// Extension IDs allowed besides the store build (development builds).
     pub extra_extension_ids: Vec<String>,
+    /// The user agreed, on the speech page, that their voice goes to Google through Chrome's
+    /// speech recognition (standalone plan S7). Written only once true, so the extension's view
+    /// of this object (and the shared message fixture) is unchanged until then.
+    #[serde(skip_serializing_if = "is_false")]
+    pub consented: bool,
+}
+
+fn is_false(v: &bool) -> bool {
+    !v
 }
 
 impl Default for NativeConfig {
@@ -30,6 +39,7 @@ impl Default for NativeConfig {
             inject: InjectMethod::Auto,
             beside_field: BesideFieldConfig::default(),
             extra_extension_ids: Vec::new(),
+            consented: false,
         }
     }
 }
@@ -165,6 +175,7 @@ mod tests {
         assert!(!cfg.beside_field.enabled);
         assert_eq!(cfg.beside_field.trigger, BesideFieldTrigger::Focus);
         assert!(cfg.extra_extension_ids.is_empty());
+        assert!(!cfg.consented);
         assert_eq!(cfg.effective_hotkey(), default_hotkey());
     }
 
@@ -192,6 +203,15 @@ mod tests {
         let partial: NativeConfig = serde_json::from_str(r#"{"inject":"type"}"#).unwrap();
         assert_eq!(partial.inject, InjectMethod::Type);
         assert!(partial.icon.visible);
+    }
+
+    #[test]
+    fn consent_is_written_only_once_given_and_old_files_read_as_not_given() {
+        let old: NativeConfig = serde_json::from_str(r#"{"inject":"auto","icon":{"visible":true}}"#).unwrap();
+        assert!(!old.consented);
+        assert!(serde_json::to_value(NativeConfig::default()).unwrap().get("consented").is_none());
+        let given = NativeConfig { consented: true, ..NativeConfig::default() };
+        assert_eq!(serde_json::to_value(&given).unwrap()["consented"], true);
     }
 
     #[test]

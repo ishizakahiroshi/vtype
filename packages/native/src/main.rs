@@ -2,6 +2,7 @@
 //! Native Messaging and types it into whatever app is in front.
 
 mod beside_field;
+mod chrome_launch;
 mod cli;
 mod config;
 mod daemon;

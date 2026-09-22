@@ -39,7 +39,9 @@
       }
     },
     { "type": "get-native-config" },
-    { "type": "error", "code": "offscreen-unavailable" }
+    { "type": "error", "code": "offscreen-unavailable" },
+    { "type": "consent" },
+    { "type": "page-state", "consented": true, "micGranted": false }
   ],
   "invalidToExtension": [
     { "type": "set-mode", "mode": "katakana" },
@@ -49,6 +51,7 @@
   "invalidFromExtension": [
     { "type": "state", "mode": "en" },
     { "type": "session", "event": { "kind": "final" } },
-    { "type": "set-native-config" }
+    { "type": "set-native-config" },
+    { "type": "page-state", "consented": true }
   ]
 }

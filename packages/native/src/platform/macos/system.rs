@@ -32,10 +32,15 @@ pub fn set_autostart(enabled: bool) -> Result<(), PlatformError> {
 }
 
 /// `open` hands URLs to a running Chrome; the flags only count when `open` starts it, and `-g`
-/// keeps a start without windows from taking the focus.
+/// keeps a start without windows from taking the focus. A launch with its own `--user-data-dir`
+/// (the speech page's Chrome) needs `-n`: without it `open` hands the arguments to the user's
+/// running Chrome, which ignores them.
 pub fn open_args(args: &[String]) -> Vec<String> {
     let (flags, urls): (Vec<&String>, Vec<&String>) = args.iter().partition(|a| a.starts_with("--"));
     let mut out: Vec<String> = Vec::new();
+    if flags.iter().any(|f| f.starts_with("--user-data-dir=")) {
+        out.push("-n".into());
+    }
     if urls.is_empty() {
         out.push("-g".into());
     }
@@ -131,6 +136,23 @@ mod tests {
     fn hands_urls_to_chrome() {
         let url = "chrome-extension://nngfilimeplngdjdmgkddlhbdjpmikgn/options.html";
         assert_eq!(open_args(&strings(&[url])), strings(&["-a", "Google Chrome", url]));
+    }
+
+    #[test]
+    fn a_profile_of_its_own_starts_a_new_instance() {
+        let args = strings(&["--user-data-dir=/tmp/p", "--app=http://127.0.0.1:47213/t/x/speech"]);
+        assert_eq!(
+            open_args(&args),
+            strings(&[
+                "-n",
+                "-g",
+                "-a",
+                "Google Chrome",
+                "--args",
+                "--user-data-dir=/tmp/p",
+                "--app=http://127.0.0.1:47213/t/x/speech"
+            ])
+        );
     }
 
     #[test]

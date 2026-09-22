@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSpeechRecognizer } from "vtype-core";
-import { RETRY_FIRST_MS, createSpeechPage, socketUrl, type SocketLike, type SpeechPage } from "../src/speech/speech";
+import { RETRY_FIRST_MS, SETUP_CLOSE_MS, createSpeechPage, socketUrl, type SocketLike, type SpeechPage } from "../src/speech/speech";
 import { FakeSpeechRecognition, flush } from "./fake-chrome";
 
 // The desktop app's speech page with the real offscreen session logic and vtype-core recognizer
@@ -48,6 +48,7 @@ class FakeSocket implements SocketLike {
 const PAGE = "http://127.0.0.1:47200/t/synthetic-token/speech";
 
 let page: SpeechPage;
+let closed = 0;
 
 function socket(): FakeSocket {
   const s = FakeSocket.all.at(-1);
@@ -66,6 +67,9 @@ function makePage(href = `${PAGE}?consent=1`, mic = "granted", doc: Document | n
     createRecognizer: (lang) =>
       createSpeechRecognizer({ lang, SpeechRecognition: FakeSpeechRecognition as never, isChromium: true }),
     baseLang: () => "ja-JP",
+    closeWindow: () => {
+      closed += 1;
+    },
   });
 }
 
@@ -90,6 +94,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   FakeSpeechRecognition.reset();
   FakeSocket.all = [];
+  closed = 0;
 });
 
 afterEach(() => {
@@ -216,5 +221,58 @@ describe("first run", () => {
     expect(page.step).toBe("ready");
     expect(s.ofType("page-state").at(-1)).toEqual({ type: "page-state", consented: true, micGranted: true });
     expect(s.ofType("consent")).toHaveLength(0);
+  });
+});
+
+describe("the window", () => {
+  it("the first-run window closes itself once consent and the microphone are done", async () => {
+    page = makePage(`${PAGE}?setup=1`, "prompt");
+    await connected();
+    await page.consent();
+    await flush(vi);
+    expect(page.step).toBe("ready");
+    expect(closed).toBe(0);
+    await flush(vi, SETUP_CLOSE_MS);
+    expect(closed).toBe(1);
+  });
+
+  it("the first-run window stays while the user has not agreed", async () => {
+    page = makePage(`${PAGE}?setup=1`, "prompt");
+    await connected();
+    await flush(vi, SETUP_CLOSE_MS * 2);
+    expect(closed).toBe(0);
+  });
+
+  it("an off-screen page that lost the microphone closes itself so it can come back on screen", async () => {
+    page = makePage(`${PAGE}?consent=1`, "prompt");
+    const s = await connected();
+    expect(s.ofType("page-state").at(-1)).toEqual({ type: "page-state", consented: true, micGranted: false });
+    await flush(vi, 500);
+    expect(closed).toBe(1);
+  });
+
+  it("an off-screen page that is ready stays", async () => {
+    page = makePage();
+    await connected();
+    await flush(vi, SETUP_CLOSE_MS * 2);
+    expect(closed).toBe(0);
+  });
+
+  it("reports the page state only once the microphone was read", async () => {
+    let answer: (state: string) => void = () => undefined;
+    page = createSpeechPage({
+      href: `${PAGE}?consent=1`,
+      doc: null,
+      connect: (url) => new FakeSocket(url),
+      queryMicrophone: () => new Promise((resolve) => (answer = resolve)),
+      closeWindow: () => undefined,
+      createRecognizer: (lang) =>
+        createSpeechRecognizer({ lang, SpeechRecognition: FakeSpeechRecognition as never, isChromium: true }),
+    });
+    const s = await connected();
+    expect(s.ofType("page-state")).toEqual([]);
+    answer("granted");
+    await flush(vi);
+    expect(s.ofType("page-state")).toEqual([{ type: "page-state", consented: true, micGranted: true }]);
   });
 });

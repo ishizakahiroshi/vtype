@@ -319,11 +319,18 @@
     "message": "The shortcut {hotkey} is taken by another app. Choose another one in the settings.",
     "description": "Desktop app: notification when the global shortcut could not be registered. {hotkey} is the shortcut"
   },
-  "native_notifyChromeNotConnected": {
-    "message": "Could not reach vtype in Chrome. Open Chrome and turn on the desktop link in the vtype settings.",
-    "description": "Desktop app: notification when the vtype extension in Chrome could not be reached"
+  "native_notifySpeechPageNotConnected": {
+    "message": "Speech recognition could not get ready. If pressing again does not help, check that Google Chrome is installed.",
+    "description": "Desktop app: notification when the Chrome that vtype starts for speech recognition did not connect in time"
   },
-  "native_bubbleConnecting": {
+  "native_notifyChromeMissing": {
+    "message": "Google Chrome was not found. vtype uses Google Chrome's speech recognition. Install Google Chrome, then press again.",
+    "description": "Desktop app: notification when Google Chrome is not installed"
+  },
+  "native_bubbleConsent": {
+    "message": "Just this once: please agree and allow the microphone in the Chrome window that opened.",
+    "description": "Desktop app: bubble while the first-run window (consent and microphone) is open"
+  },  "native_bubbleConnecting": {
     "message": "Connecting to vtype in Chrome…",
     "description": "Desktop app: shown above the mic icon while it waits (up to 10 seconds) for the extension in Chrome"
   },
