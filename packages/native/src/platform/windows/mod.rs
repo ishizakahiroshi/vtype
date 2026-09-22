@@ -2,6 +2,7 @@
 //! focused field, and the floating mic. The UI parts live on one thread (`ui`); the rest is
 //! called directly from the daemon's worker thread.
 
+mod beside;
 mod inject;
 mod overlay;
 mod system;
@@ -11,23 +12,33 @@ mod uia;
 pub mod debug;
 
 use std::sync::mpsc::Sender;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use windows_sys::Win32::Foundation::CloseHandle;
 use windows_sys::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
+use super::desktop::BesideControl;
 use super::{FieldInfo, IconState, InjectOutcome, Platform, PlatformError, PlatformEvent, TrayState};
-use crate::config::InjectMethod;
+use crate::config::{BesideFieldConfig, InjectMethod};
 
 pub struct WindowsPlatform {
     shared: Arc<ui::Shared>,
+    beside: Mutex<BesideControl<beside::Watcher>>,
 }
 
 impl WindowsPlatform {
     pub fn new() -> Self {
-        WindowsPlatform { shared: Arc::new(ui::Shared::default()) }
+        WindowsPlatform {
+            shared: Arc::new(ui::Shared::default()),
+            beside: Mutex::new(BesideControl::new(beside::Watcher::start)),
+        }
+    }
+
+    fn beside(&self) -> std::sync::MutexGuard<'_, BesideControl<beside::Watcher>> {
+        self.beside.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 
@@ -52,7 +63,10 @@ pub(crate) fn system_process_name(pid: u32) -> Option<String> {
 
 impl Platform for WindowsPlatform {
     fn run_event_loop(&self, events: Sender<PlatformEvent>) -> Result<(), PlatformError> {
-        ui::run(self.shared.clone(), events)
+        self.beside().set_events(events.clone());
+        let result = ui::run(self.shared.clone(), events);
+        self.beside().stop();
+        result
     }
 
     fn quit(&self) {
@@ -122,6 +136,26 @@ impl Platform for WindowsPlatform {
 
     fn ui_language(&self) -> String {
         system::ui_language()
+    }
+
+    fn platform_notes(&self) -> Vec<(String, String)> {
+        self.shared.beside_timing().map(|t| vec![("beside_field_timing".to_string(), t)]).unwrap_or_default()
+    }
+
+    fn watch_fields(&self, config: &BesideFieldConfig) {
+        self.beside().set_config(config);
+    }
+
+    fn show_beside(&self, pos: (i32, i32), look: IconState, reported_at: Instant) {
+        self.shared.run(move |ui| ui.show_beside(pos, look, reported_at));
+    }
+
+    fn hide_beside(&self) {
+        self.shared.run(|ui| ui.hide_beside());
+    }
+
+    fn set_beside_look(&self, look: IconState) {
+        self.shared.run(move |ui| ui.set_beside_look(look));
     }
 }
 

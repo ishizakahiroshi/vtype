@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use dispatch2::DispatchQueue;
 use global_hotkey::hotkey::HotKey;
@@ -18,10 +18,10 @@ use objc2_foundation::{MainThreadMarker, NSPoint};
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
-use super::overlay::{screen_frames, Overlay};
+use super::overlay::{screen_frames, BesideMic, Overlay};
 use crate::hotkey::HotkeySpec;
 use crate::menu::tooltip;
-use crate::platform::desktop::{build_menu, to_global_hotkey, tray_icons, update_checks};
+use crate::platform::desktop::{build_menu, to_global_hotkey, tray_icons, update_checks, Timing};
 use crate::platform::{IconState, MenuAction, PlatformError, PlatformEvent, TrayState};
 
 /// How long the green check stays after text went in.
@@ -43,6 +43,8 @@ pub struct Shared {
     /// Bumped by each check mark / bubble text, so an older timer knows it is stale.
     done_generation: AtomicU64,
     bubble_generation: AtomicU64,
+    /// How fast the beside mic appears after the OS reports a field (child plan C8).
+    beside_timing: Mutex<Timing>,
 }
 
 impl Shared {
@@ -62,6 +64,10 @@ impl Shared {
             let _ = tx.send(job(ui));
         });
         rx.recv_timeout(Duration::from_secs(10)).ok()
+    }
+
+    pub fn beside_timing(&self) -> Option<String> {
+        self.beside_timing.lock().unwrap_or_else(|e| e.into_inner()).describe()
     }
 
     /// Runs `job` on the main thread after `delay`.
@@ -85,6 +91,7 @@ pub struct Ui {
     hotkeys: Option<GlobalHotKeyManager>,
     current_hotkey: Option<HotKey>,
     overlay: Overlay,
+    beside: BesideMic,
     icon_wanted: bool,
     icon_position: Option<(i32, i32)>,
     hide_on_fullscreen: bool,
@@ -200,6 +207,21 @@ impl Ui {
         self.overlay.hide_bubble();
     }
 
+    pub fn show_beside(&mut self, pos: (i32, i32), look: IconState, reported_at: Instant) {
+        self.beside.show(pos, look);
+        let ms = reported_at.elapsed().as_millis();
+        tracing::info!(ms, "beside mic shown");
+        self.shared.beside_timing.lock().unwrap_or_else(|e| e.into_inner()).record(ms);
+    }
+
+    pub fn hide_beside(&mut self) {
+        self.beside.hide();
+    }
+
+    pub fn set_beside_look(&mut self, look: IconState) {
+        self.beside.set_look(look);
+    }
+
     /// Hides the mic while the front app covers a whole screen. `fullScreenAuxiliary` lets the
     /// panel float over it; this is for the users who asked not to see it there.
     fn check_fullscreen(&mut self) {
@@ -275,6 +297,7 @@ pub fn run(shared: Arc<Shared>, events: Sender<PlatformEvent>) -> Result<(), Pla
         }));
     }
 
+    let beside = BesideMic::new(events.clone(), mtm);
     let overlay = Overlay::new(events, mtm, menu.clone());
     UI.with(|slot| {
         *slot.borrow_mut() = Some(Ui {
@@ -288,6 +311,7 @@ pub fn run(shared: Arc<Shared>, events: Sender<PlatformEvent>) -> Result<(), Pla
             hotkeys: None,
             current_hotkey: None,
             overlay,
+            beside,
             icon_wanted: false,
             icon_position: None,
             hide_on_fullscreen: true,

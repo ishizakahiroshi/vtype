@@ -8,7 +8,7 @@ use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use global_hotkey::hotkey::HotKey;
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
@@ -26,10 +26,10 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     RegisterClassExW, SetTimer, TranslateMessage, HWND_MESSAGE, MSG, WM_APP, WM_TIMER, WNDCLASSEXW,
 };
 
-use super::overlay::{wide, Overlay};
+use super::overlay::{wide, BesideMic, Overlay};
 use crate::hotkey::HotkeySpec;
 use crate::menu::tooltip;
-use crate::platform::desktop::{build_menu, to_global_hotkey, tray_icons, update_checks};
+use crate::platform::desktop::{build_menu, to_global_hotkey, tray_icons, update_checks, Timing};
 use crate::platform::{IconState, MenuAction, PlatformError, PlatformEvent, TrayState};
 
 pub const WM_APP_RUN: u32 = WM_APP + 1;
@@ -51,6 +51,8 @@ pub struct Shared {
     msg_hwnd: AtomicIsize,
     menu_actions: Mutex<HashMap<String, MenuAction>>,
     hotkey_id: AtomicU32,
+    /// How fast the beside mic appears after the OS reports a field (child plan C8).
+    beside_timing: Mutex<Timing>,
 }
 
 impl Shared {
@@ -71,6 +73,10 @@ impl Shared {
         });
         rx.recv_timeout(Duration::from_secs(10)).ok()
     }
+
+    pub fn beside_timing(&self) -> Option<String> {
+        self.beside_timing.lock().unwrap_or_else(|e| e.into_inner()).describe()
+    }
 }
 
 pub struct Ui {
@@ -84,6 +90,7 @@ pub struct Ui {
     hotkeys: Option<GlobalHotKeyManager>,
     current_hotkey: Option<HotKey>,
     overlay: Overlay,
+    beside: BesideMic,
     icon_wanted: bool,
     icon_position: Option<(i32, i32)>,
     hide_on_fullscreen: bool,
@@ -240,6 +247,21 @@ impl Ui {
         self.overlay.hide_bubble();
     }
 
+    pub fn show_beside(&mut self, pos: (i32, i32), look: IconState, reported_at: Instant) {
+        self.beside.show(pos, look);
+        let ms = reported_at.elapsed().as_millis();
+        tracing::info!(ms, "beside mic shown");
+        self.shared.beside_timing.lock().unwrap_or_else(|e| e.into_inner()).record(ms);
+    }
+
+    pub fn hide_beside(&mut self) {
+        self.beside.hide();
+    }
+
+    pub fn set_beside_look(&mut self, look: IconState) {
+        self.beside.set_look(look);
+    }
+
     /// Hides the mic while a full-screen app (a game, a video, a presentation) is in front.
     fn check_fullscreen(&mut self) {
         if !self.hide_on_fullscreen || !self.icon_wanted {
@@ -334,6 +356,7 @@ pub fn run(shared: Arc<Shared>, events: Sender<PlatformEvent>) -> Result<(), Pla
         }));
     }
 
+    let beside = BesideMic::new(events.clone());
     let overlay = Overlay::new(events, msg_hwnd);
     UI.with(|slot| {
         *slot.borrow_mut() = Some(Ui {
@@ -347,6 +370,7 @@ pub fn run(shared: Arc<Shared>, events: Sender<PlatformEvent>) -> Result<(), Pla
             hotkeys: None,
             current_hotkey: None,
             overlay,
+            beside,
             icon_wanted: false,
             icon_position: None,
             hide_on_fullscreen: true,

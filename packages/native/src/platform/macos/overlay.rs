@@ -24,6 +24,7 @@ use objc2_foundation::{MainThreadMarker, NSData, NSPoint, NSRect, NSSize, NSStri
 use tiny_skia::Pixmap;
 use tray_icon::menu::{ContextMenu, Menu};
 
+use crate::beside_field::{keep_on_screen, BESIDE_SIZE};
 use crate::icon_draw::{draw_icon, draw_rounded_panel};
 use crate::overlay_logic::{resolve_position, tail, Gesture, Press, ICON_SIZE};
 use crate::platform::{IconState, PlatformEvent, Rect};
@@ -32,14 +33,24 @@ const BUBBLE_WIDTH: f64 = 320.0;
 const BUBBLE_PADDING: f64 = 10.0;
 const BUBBLE_FONT_SIZE: f64 = 13.0;
 
+/// What a view is for: the pointer means something different on each.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    /// The floating mic: click, drag, right-click menu, hover.
+    FloatingMic,
+    /// The mic beside a field: click only.
+    BesideMic,
+    /// The bubble's background: nothing.
+    Picture,
+}
+
 pub struct ViewIvars {
     image: RefCell<Option<Retained<NSImage>>>,
-    /// The mic answers the pointer; the bubble's view does not.
-    mic: bool,
+    role: Role,
 }
 
 define_class!(
-    /// A view that draws one image, and for the mic, reports what the pointer does.
+    /// A view that draws one image, and for the mics, reports what the pointer does.
     #[unsafe(super(NSView))]
     #[name = "VtypeImageView"]
     #[ivars = ViewIvars]
@@ -61,28 +72,34 @@ define_class!(
 
         #[unsafe(method(mouseDown:))]
         fn mouse_down(&self, _event: &NSEvent) {
-            if self.ivars().mic {
+            if self.ivars().role == Role::FloatingMic {
                 with_icon(|s| s.press());
             }
         }
 
         #[unsafe(method(mouseDragged:))]
         fn mouse_dragged(&self, _event: &NSEvent) {
-            if self.ivars().mic {
+            if self.ivars().role == Role::FloatingMic {
                 with_icon(|s| s.drag());
             }
         }
 
         #[unsafe(method(mouseUp:))]
         fn mouse_up(&self, _event: &NSEvent) {
-            if self.ivars().mic {
-                with_icon(|s| s.release());
+            match self.ivars().role {
+                Role::FloatingMic => with_icon(|s| s.release()),
+                Role::BesideMic => BESIDE_EVENTS.with(|slot| {
+                    if let Some(events) = slot.borrow().as_ref() {
+                        let _ = events.send(PlatformEvent::ToggleRequested);
+                    }
+                }),
+                Role::Picture => {}
             }
         }
 
         #[unsafe(method(rightMouseDown:))]
         fn right_mouse_down(&self, _event: &NSEvent) {
-            if self.ivars().mic {
+            if self.ivars().role == Role::FloatingMic {
                 // Clone the menu out first: it runs a modal loop.
                 let menu = icon_shared().and_then(|s| s.menu.borrow().clone());
                 if let Some(menu) = menu {
@@ -94,21 +111,21 @@ define_class!(
 
         #[unsafe(method(mouseEntered:))]
         fn mouse_entered(&self, _event: &NSEvent) {
-            if self.ivars().mic {
+            if self.ivars().role == Role::FloatingMic {
                 with_icon(|s| s.set_hover(true));
             }
         }
 
         #[unsafe(method(mouseExited:))]
         fn mouse_exited(&self, _event: &NSEvent) {
-            if self.ivars().mic {
+            if self.ivars().role == Role::FloatingMic {
                 with_icon(|s| s.set_hover(false));
             }
         }
 
         #[unsafe(method(resetCursorRects))]
         fn reset_cursor_rects(&self) {
-            if self.ivars().mic {
+            if self.ivars().role != Role::Picture {
                 self.addCursorRect_cursor(self.bounds(), &NSCursor::pointingHandCursor());
             }
         }
@@ -116,11 +133,11 @@ define_class!(
 );
 
 impl ImageView {
-    fn new(mtm: MainThreadMarker, size: NSSize, mic: bool) -> Retained<ImageView> {
+    fn new(mtm: MainThreadMarker, size: NSSize, role: Role) -> Retained<ImageView> {
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), size);
-        let this = mtm.alloc::<ImageView>().set_ivars(ViewIvars { image: RefCell::new(None), mic });
+        let this = mtm.alloc::<ImageView>().set_ivars(ViewIvars { image: RefCell::new(None), role });
         let view: Retained<ImageView> = unsafe { msg_send![super(this), initWithFrame: frame] };
-        if mic {
+        if role == Role::FloatingMic {
             let options = NSTrackingAreaOptions::MouseEnteredAndExited
                 | NSTrackingAreaOptions::ActiveAlways
                 | NSTrackingAreaOptions::InVisibleRect;
@@ -137,7 +154,6 @@ impl ImageView {
         }
         view
     }
-
     fn set_image(&self, image: Option<Retained<NSImage>>) {
         *self.ivars().image.borrow_mut() = image;
         self.setNeedsDisplay(true);
@@ -314,7 +330,7 @@ pub struct Overlay {
 impl Overlay {
     pub fn new(events: Sender<PlatformEvent>, mtm: MainThreadMarker, menu: Menu) -> Overlay {
         let icon_size = NSSize::new(ICON_SIZE as f64, ICON_SIZE as f64);
-        let view = ImageView::new(mtm, icon_size, true);
+        let view = ImageView::new(mtm, icon_size, Role::FloatingMic);
         let panel = new_panel(mtm, icon_size, &view, false);
         let icon = Rc::new(IconShared {
             mtm,
@@ -331,7 +347,7 @@ impl Overlay {
         ICON.with(|slot| *slot.borrow_mut() = Some(icon.clone()));
 
         let bubble_size = NSSize::new(BUBBLE_WIDTH, 40.0);
-        let bubble_view = ImageView::new(mtm, bubble_size, false);
+        let bubble_view = ImageView::new(mtm, bubble_size, Role::Picture);
         let label = NSTextField::wrappingLabelWithString(&NSString::from_str(""), mtm);
         label.setFont(Some(&NSFont::systemFontOfSize(BUBBLE_FONT_SIZE)));
         label.setTextColor(Some(&NSColor::colorWithSRGBRed_green_blue_alpha(
@@ -443,6 +459,66 @@ impl Overlay {
         if self.bubble.shown {
             self.bubble.panel.orderOut(None);
             self.bubble.shown = false;
+        }
+    }
+}
+
+// --- the mic beside the text field (child plan C8) ---------------------------------------------
+
+thread_local! {
+    static BESIDE_EVENTS: RefCell<Option<Sender<PlatformEvent>>> = const { RefCell::new(None) };
+}
+
+/// The small mic next to the focused field: a panel like the floating mic's, 26 pt, always opaque
+/// (it only shows while a field has the focus), click only.
+pub struct BesideMic {
+    mtm: MainThreadMarker,
+    panel: Retained<NSPanel>,
+    view: Retained<ImageView>,
+    shown: bool,
+    look: IconState,
+}
+
+impl BesideMic {
+    pub fn new(events: Sender<PlatformEvent>, mtm: MainThreadMarker) -> BesideMic {
+        BESIDE_EVENTS.with(|slot| *slot.borrow_mut() = Some(events));
+        let size = NSSize::new(BESIDE_SIZE as f64, BESIDE_SIZE as f64);
+        let view = ImageView::new(mtm, size, Role::BesideMic);
+        let panel = new_panel(mtm, size, &view, false);
+        BesideMic { mtm, panel, view, shown: false, look: IconState::Idle }
+    }
+
+    fn render(&self) {
+        let scale = self.panel.backingScaleFactor();
+        let px = (BESIDE_SIZE as f64 * scale).round().max(1.0) as u32;
+        let size = NSSize::new(BESIDE_SIZE as f64, BESIDE_SIZE as f64);
+        self.view.set_image(image_from(&draw_icon(px, self.look, true), size));
+    }
+
+    /// Puts the mic at `pos` (points from the top-left of the main screen), kept on that screen.
+    pub fn show(&mut self, pos: (i32, i32), look: IconState) {
+        let (areas, primary) = work_areas(self.mtm);
+        let pos = keep_on_screen(pos, BESIDE_SIZE, &areas, primary);
+        place(&self.panel, self.mtm, pos, BESIDE_SIZE as f64);
+        self.look = look;
+        self.render();
+        if !self.shown {
+            self.panel.orderFrontRegardless();
+            self.shown = true;
+        }
+    }
+
+    pub fn set_look(&mut self, look: IconState) {
+        self.look = look;
+        if self.shown {
+            self.render();
+        }
+    }
+
+    pub fn hide(&mut self) {
+        if self.shown {
+            self.panel.orderOut(None);
+            self.shown = false;
         }
     }
 }

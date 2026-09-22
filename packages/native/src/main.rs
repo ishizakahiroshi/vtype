@@ -1,6 +1,7 @@
 //! vtype desktop. The Chrome extension recognizes speech; this program receives the text over
 //! Native Messaging and types it into whatever app is in front.
 
+mod beside_field;
 mod cli;
 mod config;
 mod daemon;

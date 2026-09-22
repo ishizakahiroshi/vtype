@@ -33,7 +33,7 @@ pub fn trusted(prompt: bool) -> bool {
     }
 }
 
-fn attribute(element: &AXUIElement, name: &'static str) -> Option<CFRetained<CFType>> {
+pub(super) fn attribute(element: &AXUIElement, name: &'static str) -> Option<CFRetained<CFType>> {
     let name = CFString::from_static_str(name);
     let mut value: *const CFType = std::ptr::null();
     let err = unsafe { element.copy_attribute_value(&name, NonNull::from(&mut value)) };
@@ -44,14 +44,14 @@ fn attribute(element: &AXUIElement, name: &'static str) -> Option<CFRetained<CFT
     NonNull::new(value as *mut CFType).map(|p| unsafe { CFRetained::from_raw(p) })
 }
 
-fn point_or_size<T: Default>(element: &AXUIElement, name: &'static str, kind: AXValueType) -> Option<T> {
+pub(super) fn point_or_size<T: Default>(element: &AXUIElement, name: &'static str, kind: AXValueType) -> Option<T> {
     let value = attribute(element, name)?.downcast::<AXValue>().ok()?;
     let mut out = T::default();
     let ok = unsafe { value.value(kind, NonNull::from(&mut out).cast::<c_void>()) };
     ok.then_some(out)
 }
 
-fn bundle_id(element: &AXUIElement) -> Option<String> {
+pub(super) fn bundle_id(element: &AXUIElement) -> Option<String> {
     let mut pid: i32 = 0;
     let err = unsafe { element.pid(NonNull::from(&mut pid)) };
     if err != AXError::Success || pid <= 0 {

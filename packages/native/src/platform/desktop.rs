@@ -139,6 +139,72 @@ pub fn update_checks(checks: &[(MenuAction, CheckMenuItem)], state: &TrayState) 
     }
 }
 
+/// Milliseconds from a `FieldChanged` report to the beside mic on screen (child plan C8).
+#[cfg(any(windows, target_os = "macos"))]
+#[derive(Default)]
+pub struct Timing {
+    count: u32,
+    last_ms: u128,
+    max_ms: u128,
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+impl Timing {
+    pub fn record(&mut self, ms: u128) {
+        self.count += 1;
+        self.last_ms = ms;
+        self.max_ms = self.max_ms.max(ms);
+    }
+
+    pub fn describe(&self) -> Option<String> {
+        (self.count > 0).then(|| format!("last {}ms, max {}ms, {} times", self.last_ms, self.max_ms, self.count))
+    }
+}
+
+/// The beside mic's watcher. The daemon may ask for it before the event loop (and with it the
+/// event sender) is up; it starts once both are there. Dropping a watcher stops it.
+#[cfg(any(windows, target_os = "macos"))]
+pub struct BesideControl<W> {
+    events: Option<std::sync::mpsc::Sender<crate::platform::PlatformEvent>>,
+    config: Option<crate::config::BesideFieldConfig>,
+    watcher: Option<W>,
+    start: fn(crate::config::BesideFieldTrigger, std::sync::mpsc::Sender<crate::platform::PlatformEvent>) -> W,
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+impl<W> BesideControl<W> {
+    pub fn new(
+        start: fn(crate::config::BesideFieldTrigger, std::sync::mpsc::Sender<crate::platform::PlatformEvent>) -> W,
+    ) -> Self {
+        BesideControl { events: None, config: None, watcher: None, start }
+    }
+
+    fn restart(&mut self) {
+        self.watcher = None;
+        if let (Some(events), Some(config)) = (&self.events, &self.config) {
+            if config.enabled {
+                self.watcher = Some((self.start)(config.trigger, events.clone()));
+            }
+        }
+    }
+
+    pub fn set_events(&mut self, events: std::sync::mpsc::Sender<crate::platform::PlatformEvent>) {
+        self.events = Some(events);
+        self.restart();
+    }
+
+    pub fn set_config(&mut self, config: &crate::config::BesideFieldConfig) {
+        if self.config.as_ref() != Some(config) {
+            self.config = Some(config.clone());
+            self.restart();
+        }
+    }
+
+    pub fn stop(&mut self) {
+        self.watcher = None;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,5 +219,31 @@ mod tests {
         let f = to_global_hotkey(&parse("Win+Shift+F24").unwrap()).unwrap();
         assert_eq!(f, HotKey::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::F24));
         assert!(to_global_hotkey(&parse("Ctrl+9").unwrap()).is_some());
+    }
+
+    #[cfg(any(windows, target_os = "macos"))]
+    #[test]
+    fn the_watcher_starts_once_it_has_both_a_sender_and_an_enabled_config() {
+        use crate::config::{BesideFieldConfig, BesideFieldTrigger};
+        fn start(
+            trigger: BesideFieldTrigger,
+            _events: std::sync::mpsc::Sender<crate::platform::PlatformEvent>,
+        ) -> BesideFieldTrigger {
+            trigger
+        }
+        let mut c = BesideControl::new(start);
+        let on = BesideFieldConfig { enabled: true, trigger: BesideFieldTrigger::Hover };
+        c.set_config(&on);
+        assert!(c.watcher.is_none(), "no sender yet");
+        let (tx, _rx) = std::sync::mpsc::channel();
+        c.set_events(tx);
+        assert_eq!(c.watcher, Some(BesideFieldTrigger::Hover));
+        c.set_config(&BesideFieldConfig { enabled: false, ..on });
+        assert!(c.watcher.is_none());
+        let mut t = Timing::default();
+        assert_eq!(t.describe(), None);
+        t.record(40);
+        t.record(12);
+        assert_eq!(t.describe().as_deref(), Some("last 12ms, max 40ms, 2 times"));
     }
 }

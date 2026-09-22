@@ -51,13 +51,13 @@ pub fn describe(element: &IUIAutomationElement) -> FieldInfo {
 }
 
 /// The element of a given window (for checks that must not depend on who has the focus).
+pub fn element_for_window(hwnd: isize) -> Option<IUIAutomationElement> {
+    let uia = automation()?;
+    unsafe { uia.ElementFromHandle(windows::Win32::Foundation::HWND(hwnd as *mut _)).ok() }
+}
+
 pub fn window_field(hwnd: isize) -> FieldInfo {
-    let Some(uia) = automation() else { return FieldInfo::default() };
-    unsafe {
-        uia.ElementFromHandle(windows::Win32::Foundation::HWND(hwnd as *mut _))
-            .map(|e| describe(&e))
-            .unwrap_or_default()
-    }
+    element_for_window(hwnd).map(|e| describe(&e)).unwrap_or_default()
 }
 
 pub fn focused_field() -> FieldInfo {

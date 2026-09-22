@@ -17,11 +17,14 @@ use anyhow::{Context, Result};
 use interprocess::local_socket::{prelude::*, Listener, Stream};
 use serde_json::Value;
 
+use crate::beside_field;
 use crate::config::{self, NativeConfig};
 use crate::diag::{self, ErrorLog};
 use crate::i18n::{t, t_with};
 use crate::ipc;
-use crate::platform::{IconState, InjectOutcome, MenuAction, Platform, PlatformError, PlatformEvent, TrayState};
+use crate::platform::{
+    FieldProbe, IconState, InjectOutcome, MenuAction, Platform, PlatformError, PlatformEvent, TrayState,
+};
 use crate::protocol::{FromExtension, InputMode, Reply, Request, SessionEvent, ToExtension};
 use crate::report::{self, ReportInfo, Surface};
 
@@ -73,6 +76,8 @@ pub struct Core {
     now: Box<dyn Fn() -> Instant + Send>,
     /// Last character typed in this recording (to space English finals apart).
     last_char: Option<char>,
+    /// The mic beside the field is up (child plan C8).
+    beside_shown: bool,
 }
 
 impl Core {
@@ -89,6 +94,7 @@ impl Core {
             errors: ErrorLog::default(),
             now: Box::new(Instant::now),
             last_char: None,
+            beside_shown: false,
         }
     }
 
@@ -110,6 +116,7 @@ impl Core {
     /// Everything that happens once, when the daemon comes up.
     pub fn start(&mut self) {
         self.register_hotkey();
+        self.platform.watch_fields(&self.config.beside_field);
         if self.config.icon.visible {
             self.platform.show_icon(IconState::Idle, self.icon_position());
         }
@@ -362,6 +369,9 @@ impl Core {
     }
 
     fn show_icon(&self, state: IconState) {
+        if self.beside_shown {
+            self.platform.set_beside_look(state);
+        }
         if self.config.icon.visible {
             self.platform.show_icon(state, self.icon_position());
         }
@@ -457,7 +467,15 @@ impl Core {
         }
         let hotkey_changed = new.effective_hotkey() != self.config.effective_hotkey();
         let icon_changed = new.icon.visible != self.config.icon.visible;
+        let beside_changed = new.beside_field != self.config.beside_field;
         self.config = new;
+        if beside_changed {
+            self.platform.watch_fields(&self.config.beside_field);
+            if !self.config.beside_field.enabled && self.beside_shown {
+                self.beside_shown = false;
+                self.platform.hide_beside();
+            }
+        }
         self.save_config();
         if hotkey_changed {
             self.register_hotkey();
@@ -472,11 +490,28 @@ impl Core {
         self.update_tray();
     }
 
+    /// The mic beside the field follows the focus (or the pointer): shown, moved or hidden.
+    fn field_changed(&mut self, probe: &FieldProbe, at: Instant) {
+        match beside_field::decide(&self.config.beside_field, probe) {
+            Some(pos) => {
+                let look = if self.recording { IconState::Recording } else { IconState::Idle };
+                self.platform.show_beside(pos, look, at);
+                self.beside_shown = true;
+            }
+            None if self.beside_shown => {
+                self.platform.hide_beside();
+                self.beside_shown = false;
+            }
+            None => {}
+        }
+    }
+
     fn handle_platform(&mut self, ev: PlatformEvent) -> Flow {
         match ev {
             PlatformEvent::ToggleRequested => {
                 let _ = self.toggle(None);
             }
+            PlatformEvent::FieldChanged { probe, at } => self.field_changed(&probe, at),
             PlatformEvent::IconMoved { x, y } => {
                 self.config.icon.x = Some(x);
                 self.config.icon.y = Some(y);
@@ -734,6 +769,18 @@ pub mod tests {
         }
         fn ui_language(&self) -> String {
             "en".into()
+        }
+        fn watch_fields(&self, config: &crate::config::BesideFieldConfig) {
+            self.log(format!("watch {} {:?}", config.enabled, config.trigger));
+        }
+        fn show_beside(&self, pos: (i32, i32), look: IconState, _reported_at: Instant) {
+            self.log(format!("beside {look:?} {},{}", pos.0, pos.1));
+        }
+        fn hide_beside(&self) {
+            self.log("hide beside".into());
+        }
+        fn set_beside_look(&self, look: IconState) {
+            self.log(format!("beside look {look:?}"));
         }
     }
 
@@ -1005,5 +1052,62 @@ pub mod tests {
             Some(STORE_EXTENSION_ID)
         );
         assert_eq!(extension_id_from_origin("https://example.com/"), None);
+    }
+
+    fn text_field() -> FieldProbe {
+        FieldProbe {
+            is_text_field: true,
+            is_password: Some(false),
+            app_id: Some("notepad.exe".into()),
+            caret: Some(Rect { x: 100, y: 200, width: 1, height: 18 }),
+            bounds: None,
+        }
+    }
+
+    fn focus(h: &mut Harness, probe: FieldProbe) {
+        h.core.handle(Event::Platform(PlatformEvent::FieldChanged { probe, at: Instant::now() }));
+    }
+
+    #[test]
+    fn the_beside_mic_stays_off_by_default() {
+        let mut h = Harness::new();
+        h.core.start();
+        assert!(h.fake.take().contains(&"watch false Focus".to_string()));
+        focus(&mut h, text_field());
+        assert!(h.fake.take().iter().all(|c| !c.starts_with("beside")));
+    }
+
+    #[test]
+    fn the_beside_mic_follows_the_focus_once_enabled() {
+        let mut h = Harness::new();
+        h.connect();
+        let mut cfg = NativeConfig::default();
+        cfg.beside_field.enabled = true;
+        h.ext(json!({"type": "set-native-config", "config": cfg}));
+        assert!(h.fake.take().contains(&"watch true Focus".to_string()));
+
+        focus(&mut h, text_field());
+        assert_eq!(h.fake.take(), vec![format!("beside Idle {},{}", 100 + 4, 200 - 26)]);
+
+        // Recording turns it orange, and back.
+        h.ext(json!({"type":"session","event":{"kind":"started"}}));
+        assert!(h.fake.take().contains(&"beside look Recording".to_string()));
+        h.ext(json!({"type":"session","event":{"kind":"ended","reason":"stopped"}}));
+        assert!(h.fake.take().contains(&"beside look Idle".to_string()));
+
+        // A password field, then something that is not a field: it goes, once.
+        focus(&mut h, FieldProbe { is_password: Some(true), ..text_field() });
+        assert_eq!(h.fake.take(), vec!["hide beside".to_string()]);
+        focus(&mut h, FieldProbe::default());
+        assert!(h.fake.take().is_empty());
+
+        // Turning it off hides it and stops watching.
+        focus(&mut h, text_field());
+        h.fake.take();
+        cfg.beside_field.enabled = false;
+        h.ext(json!({"type": "set-native-config", "config": cfg}));
+        let calls = h.fake.take();
+        assert!(calls.contains(&"watch false Focus".to_string()));
+        assert!(calls.contains(&"hide beside".to_string()));
     }
 }

@@ -31,6 +31,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WM_SETCURSOR, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
+use crate::beside_field::{keep_on_screen, BESIDE_SIZE};
 use crate::icon_draw::{draw_icon, draw_rounded_panel, to_premultiplied_bgra};
 use crate::overlay_logic::{resolve_position, tail, Gesture, Press, ICON_SIZE};
 use crate::platform::{IconState, PlatformEvent, Rect};
@@ -428,6 +429,87 @@ impl Overlay {
         if self.bubble_shown {
             unsafe { ShowWindow(self.bubble, SW_HIDE) };
             self.bubble_shown = false;
+        }
+    }
+}
+
+// --- the mic beside the text field (child plan C8) ---------------------------------------------
+
+const BESIDE_CLASS: &str = "vtypeBeside";
+
+thread_local! {
+    static BESIDE_EVENTS: RefCell<Option<Sender<PlatformEvent>>> = const { RefCell::new(None) };
+}
+
+unsafe extern "system" fn beside_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    match msg {
+        // Pressing it must leave the focus in the field it sits beside.
+        WM_MOUSEACTIVATE => MA_NOACTIVATE as LRESULT,
+        WM_SETCURSOR => {
+            SetCursor(LoadCursorW(null_mut(), IDC_HAND));
+            1
+        }
+        WM_LBUTTONUP => {
+            BESIDE_EVENTS.with(|slot| {
+                if let Some(events) = slot.borrow().as_ref() {
+                    let _ = events.send(PlatformEvent::ToggleRequested);
+                }
+            });
+            0
+        }
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
+}
+
+/// The small mic next to the focused field: a layered window like the floating mic, 26 px, always
+/// opaque (it only shows while a field has the focus), no dragging.
+pub struct BesideMic {
+    hwnd: HWND,
+    shown: bool,
+    look: IconState,
+    pos: (i32, i32),
+}
+
+impl BesideMic {
+    pub fn new(events: Sender<PlatformEvent>) -> BesideMic {
+        register_class(BESIDE_CLASS, beside_proc);
+        BESIDE_EVENTS.with(|slot| *slot.borrow_mut() = Some(events));
+        BesideMic { hwnd: create_layered(BESIDE_CLASS), shown: false, look: IconState::Idle, pos: (0, 0) }
+    }
+
+    fn size(&self) -> i32 {
+        (BESIDE_SIZE as f32 * scale_for(self.hwnd)).round() as i32
+    }
+
+    fn render(&self) {
+        let size = self.size();
+        let pm = draw_icon(size as u32, self.look, true);
+        update_layered(self.hwnd, self.pos.0, self.pos.1, size, size, &to_premultiplied_bgra(&pm), |_, _| {});
+    }
+
+    /// Puts the mic at `pos` (screen pixels), kept on that screen.
+    pub fn show(&mut self, pos: (i32, i32), look: IconState) {
+        let (areas, primary) = work_areas();
+        self.pos = keep_on_screen(pos, self.size(), &areas, primary);
+        self.look = look;
+        self.render();
+        if !self.shown {
+            unsafe { ShowWindow(self.hwnd, SW_SHOWNOACTIVATE) };
+            self.shown = true;
+        }
+    }
+
+    pub fn set_look(&mut self, look: IconState) {
+        self.look = look;
+        if self.shown {
+            self.render();
+        }
+    }
+
+    pub fn hide(&mut self) {
+        if self.shown {
+            unsafe { ShowWindow(self.hwnd, SW_HIDE) };
+            self.shown = false;
         }
     }
 }

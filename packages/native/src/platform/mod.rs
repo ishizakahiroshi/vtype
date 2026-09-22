@@ -7,9 +7,12 @@
 
 use std::sync::mpsc::Sender;
 
+use std::time::Instant;
+
 use thiserror::Error;
 
-use crate::config::InjectMethod;
+pub use crate::beside_field::FieldProbe;
+use crate::config::{BesideFieldConfig, InjectMethod};
 use crate::protocol::InputMode;
 
 pub mod desktop;
@@ -46,6 +49,14 @@ pub enum PlatformEvent {
     IconMoved {
         x: i32,
         y: i32,
+    },
+    /// The focused element changed, or (hover) the pointer settled on or left a field; for the
+    /// mic beside the field. `at` is when the OS told us, to measure how fast the mic appears.
+    /// (Linux has no beside mic, so nothing sends it there.)
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
+    FieldChanged {
+        probe: FieldProbe,
+        at: Instant,
     },
 }
 
@@ -136,6 +147,16 @@ pub trait Platform: Send + Sync {
     fn platform_notes(&self) -> Vec<(String, String)> {
         Vec::new()
     }
+
+    // The mic beside the text field (child plan C8). Systems without it keep these no-ops.
+
+    /// Starts, changes or stops watching the focused element (or the pointer, for hover).
+    fn watch_fields(&self, _config: &BesideFieldConfig) {}
+    /// Shows the beside mic with its top-left at `pos` (kept on a screen by the platform).
+    /// `reported_at` is the `FieldChanged` time, to measure how fast the mic appeared.
+    fn show_beside(&self, _pos: (i32, i32), _look: IconState, _reported_at: Instant) {}
+    fn hide_beside(&self) {}
+    fn set_beside_look(&self, _look: IconState) {}
 }
 
 /// The implementation for the OS this binary was built for.

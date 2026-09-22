@@ -17,7 +17,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use super::overlay::{wide, ICON_CLASS};
-use crate::config::InjectMethod;
+use crate::beside_field::decide;
+use crate::config::{BesideFieldConfig, InjectMethod};
 
 /// Title of the window in front.
 pub fn foreground_title() -> String {
@@ -54,13 +55,30 @@ pub fn debug_field(delay_ms: u64, hwnd: Option<isize>) -> String {
         Some(h) => super::uia::window_field(h),
         None => super::uia::focused_field(),
     };
-    format!(
+    let mut out = format!(
         "foreground: {}\nis_password: {:?}\napp: {:?}\nrect: {:?}",
         foreground_title(),
         field.is_password,
         field.app_id,
         field.caret_rect
-    )
+    );
+    // What the beside mic would make of the same element (child plan C8), as if it were on.
+    let element = match hwnd {
+        Some(h) => super::uia::element_for_window(h),
+        None => super::uia::focused_element(),
+    };
+    if let Some(element) = element {
+        let probe = super::beside::probe(&element, true);
+        let on = BesideFieldConfig { enabled: true, ..BesideFieldConfig::default() };
+        out.push_str(&format!(
+            "\nbeside: text field {}, caret {:?}, bounds {:?}\nbeside mic at: {:?}",
+            probe.is_text_field,
+            probe.caret,
+            probe.bounds,
+            decide(&on, &probe)
+        ));
+    }
+    out
 }
 
 fn mouse(dx: i32, dy: i32, flags: u32) -> INPUT {
