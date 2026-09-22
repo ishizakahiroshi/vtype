@@ -20,6 +20,8 @@ thiserror = "2.0.20"
 tiny-skia = "0.12.0"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "std"] }
+# The speech page's WebSocket (standalone plan C3). Synchronous, no TLS: it serves 127.0.0.1 only.
+tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
 # The desktop UI every system shares (tray, shortcut, clipboard, notifications, opening URLs).
 arboard = "3.6.1"
 global-hotkey = "0.8.0"

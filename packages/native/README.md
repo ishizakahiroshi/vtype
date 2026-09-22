@@ -27,6 +27,9 @@ time.
 
 The Rust version is pinned in `rust-toolchain.toml`.
 
+Run `pnpm install` and `pnpm -r build` at the repository root first: `build.rs` embeds the speech
+page from `packages/extension/dist-desktop/`, and the build stops with that hint when it is missing.
+
 ```sh
 cargo test
 cargo clippy --all-targets -- -D warnings

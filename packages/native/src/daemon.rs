@@ -78,6 +78,9 @@ pub struct Core {
     last_char: Option<char>,
     /// The mic beside the field is up (child plan C8).
     beside_shown: bool,
+    /// The daemon's own speech page (speech_host.rs), when it could listen.
+    #[allow(dead_code)] // opened in the daemon's own Chrome from standalone plan C4 on
+    speech_page: Option<String>,
 }
 
 impl Core {
@@ -95,7 +98,13 @@ impl Core {
             now: Box::new(Instant::now),
             last_char: None,
             beside_shown: false,
+            speech_page: None,
         }
+    }
+
+    /// Where the speech page is served (`http://127.0.0.1:<port>/t/<token>/speech`).
+    pub fn set_speech_page(&mut self, url: String) {
+        self.speech_page = Some(url);
     }
 
     /// Replaces the clock, for tests.
@@ -604,7 +613,8 @@ pub fn extension_id_from_origin(origin: &str) -> Option<String> {
     (!id.is_empty() && id.chars().all(|c| c.is_ascii_lowercase())).then(|| id.to_string())
 }
 
-static NEXT_CONN: AtomicU64 = AtomicU64::new(1);
+/// Shared with speech_host.rs, whose page connections are hosts too.
+pub(crate) static NEXT_CONN: AtomicU64 = AtomicU64::new(1);
 
 fn serve_connection(stream: Stream, tx: Sender<Event>) {
     let conn = NEXT_CONN.fetch_add(1, Ordering::Relaxed);
@@ -671,6 +681,13 @@ pub fn run() -> Result<()> {
     let (tx, rx) = mpsc::channel::<Event>();
     let accept_tx = tx.clone();
     thread::spawn(move || accept_loop(listener, accept_tx));
+    let speech_page = match crate::speech_host::start(tx.clone()) {
+        Ok(host) => Some(host.page_url()),
+        Err(e) => {
+            tracing::warn!(error = %e, "could not serve the speech page");
+            None
+        }
+    };
 
     let (ptx, prx) = mpsc::channel::<PlatformEvent>();
     let forward_tx = tx.clone();
@@ -686,6 +703,9 @@ pub fn run() -> Result<()> {
     let core_platform = platform.clone();
     thread::spawn(move || {
         let mut core = Core::new(core_platform.clone(), cfg, Some(config_path));
+        if let Some(url) = speech_page {
+            core.set_speech_page(url);
+        }
         core.start();
         core.run(rx);
         tracing::info!("quit");

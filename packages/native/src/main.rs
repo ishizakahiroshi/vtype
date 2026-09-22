@@ -24,6 +24,8 @@ mod paths;
 mod platform;
 mod protocol;
 mod report;
+mod speech_assets;
+mod speech_host;
 #[cfg(any(target_os = "macos", test))]
 mod text_chunks;
 #[cfg(any(target_os = "linux", test))]

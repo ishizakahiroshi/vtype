@@ -69,6 +69,22 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # build.rs embeds the speech page that the extension's build writes to
+      # packages/extension/dist-desktop/ (standalone plan C3), so the workspace is built first.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Build the speech page
+        working-directory: .
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm -r build
       - name: Build
         working-directory: packages/native
         run: cargo build --release --locked
@@ -107,6 +123,22 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # build.rs embeds the speech page that the extension's build writes to
+      # packages/extension/dist-desktop/ (standalone plan C3), so the workspace is built first.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Build the speech page
+        working-directory: .
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm -r build
       # Both architectures, joined into one universal binary.
       - name: Build
         working-directory: packages/native
@@ -144,6 +176,22 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # build.rs embeds the speech page that the extension's build writes to
+      # packages/extension/dist-desktop/ (standalone plan C3), so the workspace is built first.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Build the speech page
+        working-directory: .
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm -r build
       - name: Linux libraries
         run: |
           sudo apt-get update

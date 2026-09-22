@@ -66,6 +66,60 @@ fn main() {
     }
     let dest = PathBuf::from(env::var("OUT_DIR").unwrap()).join("native_messages.rs");
     fs::write(dest, out).unwrap();
+
+    embed_speech_page(&manifest_dir.join("../extension/dist-desktop"));
+}
+
+/// The speech page the daemon serves on 127.0.0.1 (standalone plan C2 / C3), built by
+/// packages/extension/build.mjs into dist-desktop/. Every file is compiled in with its path and
+/// Content-Type; a missing directory fails the build rather than shipping an empty page.
+fn embed_speech_page(dir: &Path) {
+    println!("cargo:rerun-if-changed={}", dir.display());
+    if !dir.join("speech.html").is_file() {
+        panic!(
+            "{} is missing: the speech page is built by the extension. Run `pnpm install` and \
+             `pnpm -r build` at the repository root first.",
+            dir.display()
+        );
+    }
+    let mut files = Vec::new();
+    collect_files(dir, dir, &mut files);
+    files.sort();
+    let mut out = String::from("pub static SPEECH_ASSETS: &[(&str, &str, &[u8])] = &[\n");
+    for (rel, abs) in &files {
+        println!("cargo:rerun-if-changed={}", abs.display());
+        let content_type = if rel.ends_with(".html") {
+            "text/html; charset=utf-8"
+        } else if rel.ends_with(".js") {
+            "text/javascript; charset=utf-8"
+        } else if rel.ends_with(".txt") || rel.ends_with(".md") {
+            "text/plain; charset=utf-8"
+        } else {
+            "application/octet-stream"
+        };
+        out.push_str(&format!("    ({rel:?}, {content_type:?}, include_bytes!({:?})),\n", abs.display().to_string()));
+    }
+    out.push_str("];\n");
+    let dest = PathBuf::from(env::var("OUT_DIR").unwrap()).join("speech_assets.rs");
+    fs::write(dest, out).unwrap();
+}
+
+fn collect_files(root: &Path, dir: &Path, files: &mut Vec<(String, PathBuf)>) {
+    let entries = fs::read_dir(dir).unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_files(root, &path, files);
+        } else {
+            let rel = path
+                .strip_prefix(root)
+                .unwrap()
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>();
+            files.push((rel.join("/"), path));
+        }
+    }
 }
 
 fn collect_used_keys(dir: &Path, used: &mut Vec<String>) {
