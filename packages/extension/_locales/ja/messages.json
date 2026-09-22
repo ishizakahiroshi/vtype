@@ -244,5 +244,61 @@
   },
   "optionsResetFailed": {
     "message": "保存された位置を消せませんでした。"
+  },
+  "native_trayTooltip": {
+    "message": "vtype: クリックで音声入力",
+    "description": "Desktop app: tooltip of the tray / menu bar icon"
+  },
+  "native_trayShowIcon": {
+    "message": "マイクアイコンを表示する",
+    "description": "Desktop app: tray menu checkbox that shows the floating mic near the taskbar"
+  },
+  "native_trayHideOnFullscreen": {
+    "message": "全画面のアプリでは隠す",
+    "description": "Desktop app: tray menu checkbox that hides the floating mic while a full-screen app is in front"
+  },
+  "native_trayModeNormal": {
+    "message": "モード: 通常",
+    "description": "Desktop app: tray menu radio item, input mode that uses the language as recognized"
+  },
+  "native_trayModeEn": {
+    "message": "モード: 英語",
+    "description": "Desktop app: tray menu radio item, input mode that recognizes English"
+  },
+  "native_trayModeKana": {
+    "message": "モード: カタカナ",
+    "description": "Desktop app: tray menu radio item, input mode that turns the result into katakana"
+  },
+  "native_trayOpenSettings": {
+    "message": "設定を開く",
+    "description": "Desktop app: tray menu item that opens the extension's settings page in Chrome"
+  },
+  "native_trayReportBug": {
+    "message": "不具合を報告",
+    "description": "Desktop app: tray menu item that opens the GitHub issue form"
+  },
+  "native_trayCopyDiagnostics": {
+    "message": "診断情報をコピー",
+    "description": "Desktop app: tray menu item that copies the diagnostic information (no transcripts)"
+  },
+  "native_trayQuit": {
+    "message": "vtype を終了",
+    "description": "Desktop app: tray menu item that ends the desktop app"
+  },
+  "native_notifyHotkeyFailed": {
+    "message": "ショートカット {hotkey} はほかのアプリが使っています。設定で別のキーを選んでください。",
+    "description": "Desktop app: notification when the global shortcut could not be registered. {hotkey} is the shortcut"
+  },
+  "native_notifyChromeNotConnected": {
+    "message": "Chrome の vtype とつながりませんでした。Chrome を開き、vtype の設定でデスクトップ連携をオンにしてください。",
+    "description": "Desktop app: notification when the vtype extension in Chrome could not be reached"
+  },
+  "native_notifyPasteManually": {
+    "message": "文字をクリップボードに入れました。Ctrl+V で貼り付けてください。",
+    "description": "Desktop app: notification when the text could only be put on the clipboard"
+  },
+  "native_notifyPasswordField": {
+    "message": "パスワード欄が前面にあるため、入力しませんでした。",
+    "description": "Desktop app: notification when recognized text was not typed because a password field is in front"
   }
 }

@@ -23,6 +23,14 @@ const sources = [
   "src/ui/toolbar.ts",
 ].map((path) => readFileSync(join(extensionRoot, path), "utf8"));
 
+// Keys that start with `native_` belong to the desktop app (packages/native), which compiles them
+// in with build.rs. They count as used when its Rust source asks for them.
+const nativeSrc = join(extensionRoot, "..", "native", "src");
+const nativeSources = readdirSync(nativeSrc, { recursive: true, encoding: "utf8" })
+  .filter((path) => path.endsWith(".rs"))
+  .map((path) => readFileSync(join(nativeSrc, path), "utf8"));
+const NATIVE_KEY = /\bt(?:_with)?\(\s*"(native_[A-Za-z0-9_]+)"/g;
+
 const defaultKeys = Object.keys(messages[DEFAULT_LOCALE] ?? {});
 
 describe("locales", () => {
@@ -99,9 +107,22 @@ describe("the keys the code asks for", () => {
     for (const key of used) expect(defaultKeys, `used in the source: ${key}`).toContain(key);
   });
 
+  it("has every key the desktop app asks for", () => {
+    const used = new Set<string>();
+    for (const source of nativeSources) for (const match of source.matchAll(NATIVE_KEY)) used.add(match[1]!);
+    expect(used.size).toBeGreaterThan(5);
+    for (const key of used) expect(defaultKeys, `used in packages/native: ${key}`).toContain(key);
+  });
+
   it("leaves no message in the dictionaries that nothing uses", () => {
     const text = sources.join("\n") + JSON.stringify(manifest);
-    const unused = defaultKeys.filter((key) => !text.includes(`"${key}"`) && !text.includes(`__MSG_${key}__`));
+    const nativeUsed = new Set<string>();
+    for (const source of nativeSources) for (const match of source.matchAll(NATIVE_KEY)) nativeUsed.add(match[1]!);
+    const unused = defaultKeys.filter((key) =>
+      key.startsWith("native_")
+        ? !nativeUsed.has(key)
+        : !text.includes(`"${key}"`) && !text.includes(`__MSG_${key}__`),
+    );
     expect(unused).toEqual([]);
   });
 });

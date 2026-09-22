@@ -1,0 +1,255 @@
+//! Messages on the local IPC channel: one JSON object per line (parent plan D14).
+//!
+//! Two kinds of peers talk to the daemon over the same endpoint: the command line (`vtype toggle`
+//! and friends, one request and one reply) and the Native Messaging host, which introduces itself
+//! with `host-hello` and then relays the extension's messages in both directions.
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// Input mode, the same three values as `InputMode` in vtype-core.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum InputMode {
+    #[default]
+    Normal,
+    En,
+    Kana,
+}
+
+impl InputMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            InputMode::Normal => "normal",
+            InputMode::En => "en",
+            InputMode::Kana => "kana",
+        }
+    }
+}
+
+/// Client (CLI or host) to daemon.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum Request {
+    Toggle {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mode: Option<InputMode>,
+    },
+    Start {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mode: Option<InputMode>,
+    },
+    Stop,
+    SetMode {
+        mode: InputMode,
+    },
+    Status,
+    OpenSettings,
+    Diagnostics,
+    Quit,
+    /// First line from the Native Messaging host. `origin` is `chrome-extension://<id>/`.
+    HostHello {
+        origin: String,
+    },
+    /// A message the extension sent, relayed unchanged by the host.
+    FromExtension {
+        message: Value,
+    },
+}
+
+/// Daemon to client.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum Reply {
+    Ok,
+    Status {
+        connected: bool,
+        recording: bool,
+        mode: InputMode,
+        version: String,
+    },
+    Error {
+        code: String,
+        message: String,
+    },
+    Diagnostics {
+        report: Value,
+    },
+    /// A message for the extension; the host writes it to Chrome unchanged.
+    ToExtension {
+        message: Value,
+    },
+}
+
+impl Reply {
+    pub fn error(code: &str, message: impl Into<String>) -> Reply {
+        Reply::Error {
+            code: code.to_string(),
+            message: message.into(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Native Messaging: what the desktop app and the extension say to each other. The TypeScript
+// side is packages/extension/src/shared/native-messages.ts; both are tested against
+// tests/fixtures/nm-messages.json.
+// ---------------------------------------------------------------------------
+
+/// Desktop app to extension.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ToExtension {
+    Hello {
+        native_version: String,
+        os: String,
+    },
+    Start {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mode: Option<InputMode>,
+    },
+    Stop,
+    SetMode {
+        mode: InputMode,
+    },
+    GetState,
+    /// The desktop app's current settings, for the extension's options page.
+    NativeConfig {
+        config: crate::config::NativeConfig,
+    },
+    OpenOptions,
+}
+
+/// Extension to desktop app.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum FromExtension {
+    Hello {
+        extension_version: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        browser: Option<String>,
+    },
+    State {
+        mode: InputMode,
+        recording: bool,
+    },
+    Session {
+        event: SessionEvent,
+    },
+    /// The options page changed the desktop app's settings.
+    SetNativeConfig {
+        config: crate::config::NativeConfig,
+    },
+    GetNativeConfig,
+    Error {
+        code: String,
+    },
+}
+
+/// A recognition session the desktop app started. `interim` is shown, only `final` is typed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum SessionEvent {
+    Started,
+    Interim {
+        text: String,
+    },
+    Final {
+        text: String,
+    },
+    Ended {
+        reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn round_trip_request(req: Request, expected: Value) {
+        let text = serde_json::to_string(&req).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), expected);
+        assert_eq!(serde_json::from_str::<Request>(&text).unwrap(), req);
+    }
+
+    #[test]
+    fn requests_round_trip() {
+        round_trip_request(Request::Toggle { mode: None }, json!({"type":"toggle"}));
+        round_trip_request(
+            Request::Start {
+                mode: Some(InputMode::Kana),
+            },
+            json!({"type":"start","mode":"kana"}),
+        );
+        round_trip_request(Request::Stop, json!({"type":"stop"}));
+        round_trip_request(
+            Request::SetMode {
+                mode: InputMode::En,
+            },
+            json!({"type":"set-mode","mode":"en"}),
+        );
+        round_trip_request(Request::Status, json!({"type":"status"}));
+        round_trip_request(Request::OpenSettings, json!({"type":"open-settings"}));
+        round_trip_request(Request::Quit, json!({"type":"quit"}));
+        round_trip_request(
+            Request::HostHello {
+                origin: "chrome-extension://abc/".into(),
+            },
+            json!({"type":"host-hello","origin":"chrome-extension://abc/"}),
+        );
+        round_trip_request(
+            Request::FromExtension {
+                message: json!({"type":"hello"}),
+            },
+            json!({"type":"from-extension","message":{"type":"hello"}}),
+        );
+    }
+
+    #[test]
+    fn replies_round_trip() {
+        let cases = [
+            (Reply::Ok, json!({"type":"ok"})),
+            (
+                Reply::Status {
+                    connected: false,
+                    recording: false,
+                    mode: InputMode::Normal,
+                    version: "0.1.0".into(),
+                },
+                json!({"type":"status","connected":false,"recording":false,"mode":"normal","version":"0.1.0"}),
+            ),
+            (
+                Reply::error("not_connected", "x"),
+                json!({"type":"error","code":"not_connected","message":"x"}),
+            ),
+            (
+                Reply::ToExtension {
+                    message: json!({"type":"stop"}),
+                },
+                json!({"type":"to-extension","message":{"type":"stop"}}),
+            ),
+        ];
+        for (reply, expected) in cases {
+            let text = serde_json::to_string(&reply).unwrap();
+            assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), expected);
+            assert_eq!(serde_json::from_str::<Reply>(&text).unwrap(), reply);
+        }
+    }
+
+    #[test]
+    fn a_missing_mode_reads_as_none() {
+        let req: Request = serde_json::from_str(r#"{"type":"toggle"}"#).unwrap();
+        assert_eq!(req, Request::Toggle { mode: None });
+    }
+}

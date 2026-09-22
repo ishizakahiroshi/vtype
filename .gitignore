@@ -7,6 +7,9 @@ build/
 *.crx
 *.xpi
 
+# === Rust（packages/native） ===
+packages/native/target/
+
 # === Node / TypeScript ===
 coverage/
 .cache/

@@ -1,6 +1,7 @@
 name: CI
 
-# Build, typecheck and test the workspace on every pull request and every push to main.
+# Build, typecheck and test the workspace on every pull request and every push to main or
+# develop, and the desktop app (packages/native) on Windows, macOS and Linux.
 #
 # Order matters and is not the usual one: `packages/extension` resolves `vtype-core` through the
 # workspace package's published entry (`dist/index.js` / `dist/index.d.ts`), not through a path
@@ -17,6 +18,7 @@ on:
   push:
     branches:
       - main
+      - develop
 
 permissions:
   contents: read
@@ -62,3 +64,47 @@ jobs:
           path: packages/extension/dist
           if-no-files-found: error
           retention-days: 14
+
+  # The desktop app (packages/native) on the three systems it ships for. The development machine
+  # is Windows only, so for macOS and Linux this job is the whole guarantee: it has to build,
+  # lint clean and pass its tests there. build.rs reads the extension's _locales, which the
+  # checkout already has; no Node step is needed.
+  rust:
+    name: rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    defaults:
+      run:
+        working-directory: packages/native
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/native
+
+      # tray-icon (GTK / AppIndicator), the X11 and keyboard libraries the Linux build links to.
+      - name: Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxdo-dev libayatana-appindicator3-dev libxkbcommon-dev
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --locked
