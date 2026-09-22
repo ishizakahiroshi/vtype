@@ -1,0 +1,21 @@
+{
+  "name": "@ishizakahiroshi/vtype-linux-x64",
+  "version": "0.1.0",
+  "description": "The vtype desktop binary for Linux x64. Install @ishizakahiroshi/vtype instead.",
+  "license": "MIT",
+  "author": "ishizakahiroshi <ishizakahiroshi.dev@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ishizakahiroshi/vtype.git",
+    "directory": "packages/native/npm/vtype-linux-x64"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/"
+  ]
+}

@@ -12,11 +12,35 @@ from it. Releasing turns `## [Unreleased]` into `## [X.Y.Z] - YYYY-MM-DD` and op
 
 ### Added
 
--
+- Input modes: normal, English (recognition in en-US) and katakana (recognised text turned into
+  full-width katakana with a dictionary shipped in the package). The mode stays until changed,
+  also across restarts. A replacement table ("write B for A") applies after recognition. The
+  conversion lives in `vtype-core`, so the extension and the desktop app share it.
+- vtype desktop (`packages/native`, 0.1.0, not published yet): one Rust program for Windows,
+  macOS and Linux that types what the extension recognises into any app. A global shortcut
+  (Ctrl+Alt+Space; Control+Option+V on macOS), a tray or menu bar icon, a floating mic icon, the
+  in-progress text above it, commands (`vtype toggle` / `start` / `stop` / `mode` / `status`) for
+  launchers and AutoHotkey, no typing into password fields, and an experimental mic beside the
+  text field in use (Windows and macOS, off by default). On Linux: X11 through XTest, Wayland
+  through the remote desktop portal, then `ydotool`, then the clipboard.
+- The desktop link on the settings page, through the optional `nativeMessaging` permission. It
+  is off and the permission is not held until the user turns it on; the desktop app's settings
+  (shortcut, typing or pasting, the icons) are edited on the same page.
+- "Report a problem" on the settings page and in the desktop app's menu: opens GitHub's issue
+  form with the version, OS and browser filled in, and sends nothing itself. A bug report issue
+  template goes with it. "Copy diagnostic info" in the desktop app's menu never includes audio or
+  transcripts.
+- Release tooling for the desktop app (nothing is published by it): a workflow that builds all
+  three systems on a `native-v*` tag into a draft GitHub Release (zip, universal macOS tar.gz,
+  `.deb`, unsigned MSIX, third-party notices, checksums, Homebrew formula), and the npm package
+  layout `@ishizakahiroshi/vtype`.
 
 ### Changed
 
--
+- The privacy policy and the store texts describe the desktop app, the new settings and the
+  `nativeMessaging` permission. The store listing itself is updated only with v0.2.0.
+- The packaging check accepts `fetch(chrome.runtime.getURL(...))`, which can only read files
+  inside the package (the katakana dictionary); every other network call still fails it.
 
 ### Fixed
 

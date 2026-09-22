@@ -45,6 +45,7 @@ Chrome 版とは配管が異なる。共有コア + ブラウザ別アダプタ�
 
 pnpm workspace。`packages/core`（`vtype-core`・認識エンジン。DOM を触らない）と
 `packages/extension`（Chrome MV3。**出荷物は `dist/`** で、`build.mjs` が 1 本ずつ classic bundle に焼く）。
+`packages/native` は pnpm の外の Rust crate（デスクトップ版 `vtype`・Windows / macOS / Linux。配布の雛形は `packaging/` と `npm/`）。
 `scripts/` は検査・ストア用パッケージング・secrets-scan、`docs/store/` はストア掲載文。詳細は `README.md`。
 
 ## 主要コマンド

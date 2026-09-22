@@ -41,6 +41,9 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
     let result = if let Some(origin) = cli::host_origin(&args) {
         host::run(origin)
+    } else if args.len() == 1 && std::env::current_exe().is_ok_and(|exe| install::is_msix_install(&exe)) {
+        // The Store package starts vtype without arguments (its StartupTask, its Start menu tile).
+        daemon::run()
     } else {
         let cli = Cli::parse();
         match cli.command {

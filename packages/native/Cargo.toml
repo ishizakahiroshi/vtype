@@ -30,6 +30,26 @@ tray-icon = "0.25.1"
 [build-dependencies]
 serde_json = "1.0.151"
 
+# cargo-deb (child plan C9-C3): the binary, Chrome's and Chromium's Native Messaging registration
+# for every user (so no `vtype install` is needed), and the autostart entry. The release workflow
+# builds it with `cargo deb --no-build` after `cargo build --release`.
+[package.metadata.deb]
+maintainer = "ishizakahiroshi <ishizakahiroshi.dev@gmail.com>"
+copyright = "2026, ishizakahiroshi"
+license-file = ["../../LICENSE", "0"]
+extended-description = """\
+Types what the vtype Chrome extension recognizes into any app. Chrome does the speech \
+recognition; this program receives the text over Native Messaging."""
+section = "utils"
+priority = "optional"
+depends = "$auto, libayatana-appindicator3-1 | libappindicator3-1, libxdo3"
+assets = [
+  ["target/release/vtype", "usr/bin/", "755"],
+  ["packaging/deb/com.ishizakahiroshi.vtype.json", "etc/opt/chrome/native-messaging-hosts/", "644"],
+  ["packaging/deb/com.ishizakahiroshi.vtype.json", "etc/chromium/native-messaging-hosts/", "644"],
+  ["packaging/deb/vtype.desktop", "etc/xdg/autostart/", "644"],
+]
+
 [profile.release]
 lto = true
 codegen-units = 1

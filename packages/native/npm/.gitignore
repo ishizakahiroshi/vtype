@@ -1,0 +1,2 @@
+# The binaries are copied in only to publish (see README.md); they never belong in git.
+vtype-*/bin/

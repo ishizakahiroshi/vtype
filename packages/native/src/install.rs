@@ -113,6 +113,31 @@ pub fn is_msix_install(exe: &Path) -> bool {
     text.split('\\').any(|part| part == "windowsapps") && !text.contains(r"\microsoft\windowsapps\")
 }
 
+/// Whether Chrome's registration file is missing or points somewhere else than `expected_path`.
+pub fn needs_registration(manifest_text: Option<&str>, expected_path: &str) -> bool {
+    let recorded = manifest_text
+        .and_then(|t| serde_json::from_str::<Value>(t).ok())
+        .and_then(|v| v.get("path").and_then(Value::as_str).map(str::to_string));
+    recorded.as_deref() != Some(expected_path)
+}
+
+/// The Store package has no installer step, so its daemon registers itself with Chrome the first
+/// time it runs (and again if the registration went missing or points elsewhere).
+pub fn register_if_packaged() {
+    let Ok(exe) = std::env::current_exe() else { return };
+    if !is_msix_install(&exe) {
+        return;
+    }
+    let (Ok(expected), Ok(locations)) = (host_exe_path(), current_locations()) else { return };
+    let current = locations.manifest_files.first().and_then(|f| fs::read_to_string(f).ok());
+    if needs_registration(current.as_deref(), &expected.to_string_lossy()) {
+        tracing::info!("registering with Chrome (Store package)");
+        if let Err(e) = install(&[]) {
+            tracing::warn!(error = %format!("{e:#}"), "could not register with Chrome");
+        }
+    }
+}
+
 pub fn install(extra_ids: &[String]) -> Result<()> {
     for id in extra_ids {
         if !is_extension_id(id) {
@@ -271,6 +296,28 @@ mod tests {
                 home.join(".config/chromium/NativeMessagingHosts").join(HOST_FILE),
             ]
         );
+    }
+
+    #[test]
+    fn the_deb_ships_the_same_registration_and_autostart_entry() {
+        let shipped: Value =
+            serde_json::from_str(include_str!("../packaging/deb/com.ishizakahiroshi.vtype.json")).unwrap();
+        assert_eq!(shipped, host_manifest("/usr/bin/vtype", &[]));
+        assert_eq!(
+            include_str!("../packaging/deb/vtype.desktop").replace("\r\n", "\n"),
+            crate::linux_setup::autostart_entry(Path::new("/usr/bin/vtype"))
+        );
+    }
+
+    #[test]
+    fn registers_again_only_when_the_file_is_missing_or_stale() {
+        let alias = r"X:\profile\AppData\Local\Microsoft\WindowsApps\vtype.exe";
+        let good = host_manifest(alias, &[]).to_string();
+        assert!(!needs_registration(Some(&good), alias));
+        assert!(needs_registration(None, alias));
+        assert!(needs_registration(Some("not json"), alias));
+        let old = host_manifest(r"X:\old\vtype.exe", &[]).to_string();
+        assert!(needs_registration(Some(&old), alias));
     }
 
     #[test]

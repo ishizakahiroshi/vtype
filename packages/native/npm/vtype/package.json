@@ -1,0 +1,28 @@
+{
+  "name": "@ishizakahiroshi/vtype",
+  "version": "0.1.0",
+  "description": "vtype desktop: voice input into any app, with the vtype Chrome extension's speech recognition",
+  "license": "MIT",
+  "author": "ishizakahiroshi <ishizakahiroshi.dev@gmail.com>",
+  "homepage": "https://github.com/ishizakahiroshi/vtype#desktop",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ishizakahiroshi/vtype.git",
+    "directory": "packages/native/npm/vtype"
+  },
+  "bin": {
+    "vtype": "bin/vtype.js"
+  },
+  "files": [
+    "bin/"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "@ishizakahiroshi/vtype-darwin-arm64": "0.1.0",
+    "@ishizakahiroshi/vtype-darwin-x64": "0.1.0",
+    "@ishizakahiroshi/vtype-linux-x64": "0.1.0",
+    "@ishizakahiroshi/vtype-win32-x64": "0.1.0"
+  }
+}

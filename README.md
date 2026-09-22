@@ -44,6 +44,74 @@ has no offscreen documents, so it needs a recognition engine of its own.
 - English and Japanese, following the browser's language. Another language is one file:
   see [adding a language](packages/extension/README.md#adding-a-language)
 
+## Desktop
+
+vtype desktop (Windows, macOS, Linux) takes the same recognition out of the browser: press a
+shortcut in any app (a text editor, a chat client, a terminal) and what you say is typed there.
+Chrome still does the recognition; the desktop app receives the text from the extension over
+Chrome's Native Messaging and types it into the app in front. It is a separate program, and the
+extension works without it.
+
+- A shortcut from anywhere: Ctrl+Alt+Space on Windows and Linux, Control+Option+V on macOS
+  (change it on the extension's settings page)
+- A small mic icon near the bottom right, and a tray / menu bar icon with the same controls
+- Three input modes that stay until you change them: normal, English, katakana
+- Nothing is typed into password fields (on Linux, wherever the desktop's accessibility service
+  can tell that it is one)
+- Experimental, off by default (Windows and macOS): a mic beside the text field you are in
+
+It is not published yet. When it is, it comes from the Microsoft Store on Windows, a Homebrew tap
+on macOS (`brew install ishizakahiroshi/tap/vtype`), a `.deb` on GitHub Releases for Linux, and
+npm everywhere (`npm i -g @ishizakahiroshi/vtype`). How the packages are made is in
+[`packages/native/README.md`](packages/native/README.md).
+
+### Connecting it to the extension
+
+1. On the extension's settings page, press **Turn on the desktop link** and allow the permission
+   Chrome asks for (`nativeMessaging`; nothing changes until you do).
+2. Run `vtype install` once. It tells Chrome where the desktop app is and starts it with the OS.
+   The Store and `.deb` packages do this for you; with Homebrew or npm, run it yourself.
+   `vtype uninstall` undoes it.
+
+### Commands
+
+```sh
+vtype toggle          # start dictation, or stop it if it is running
+vtype start           # start
+vtype stop            # stop
+vtype mode kana       # normal | en | kana
+vtype status          # is the extension connected, is dictation running
+vtype diag            # diagnostic information (never any words you said)
+```
+
+The commands talk to the running app, so any launcher can bind them to a key. For example, in
+AutoHotkey v2 on Windows:
+
+```ahk
+^!k::Run "vtype mode kana"
+```
+
+On GNOME, `vtype install` adds Ctrl+Alt+Space as a custom shortcut (Wayland lets no app grab keys
+itself); a shortcut of your own under **Settings > Keyboard > Custom Shortcuts** that runs
+`vtype toggle` works the same.
+
+### Per system
+
+- macOS: allow vtype in **System Settings > Privacy & Security > Accessibility**, or it cannot type
+  into other apps. The binary is not signed, so after an update you may need to allow it again.
+- Linux on Wayland: apps may not send keystrokes, so vtype asks through the desktop's remote
+  desktop portal (the desktop asks you to allow it), then tries `ydotool` (English letters only),
+  and otherwise puts the
+  text on the clipboard and tells you to paste it. There is no floating mic icon on Wayland; use
+  the top bar icon.
+
+### Reporting a problem
+
+**Report a problem** in the tray menu (and on the extension's settings page) opens a new GitHub
+issue in your browser with the OS and version filled in. Nothing is sent until you submit it
+yourself. **Copy diagnostic info** puts the OS, version, settings and recent errors on the clipboard
+for you to paste; it never includes audio or what you said.
+
 ## Privacy
 
 vtype hands your voice to the browser's own speech recognition. **In Chrome, that recognition
@@ -53,7 +121,8 @@ says it above the button that grants the permission.
 
 Nothing else leaves your browser. vtype sends nothing to its developer, and has no server to send
 it to. It collects no personal information, no browsing history, no page content and no
-analytics, and it keeps no transcript history. The full text is in [PRIVACY.md](PRIVACY.md).
+analytics, and it keeps no transcript history. The desktop app sends nothing over the network
+either: it only talks to Chrome on your own computer. The full text is in [PRIVACY.md](PRIVACY.md).
 
 ## Repository layout
 
@@ -62,6 +131,7 @@ analytics, and it keeps no transcript history. The full text is in [PRIVACY.md](
 | `packages/core` | `vtype-core`: the recognition engine. Renders nothing; the caller owns every pixel |
 | `packages/extension` | The Chrome MV3 extension. Builds to `dist/`, which is what you load |
 | `packages/extension/_locales` | Every user-facing string, one file per language ([adding one](packages/extension/README.md#adding-a-language)) |
+| `packages/native` | vtype desktop: one Rust program for Windows, macOS and Linux, and its packaging ([details](packages/native/README.md)) |
 | `scripts/` | Validation, store packaging and the secrets-scan gate |
 | `docs/store/` | The Chrome Web Store listing text, privacy policy and per-version submission notes |
 | `spike/mic-permission` | A throwaway spike that established how the microphone permission works. Not shipped |

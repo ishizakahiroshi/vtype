@@ -1,0 +1,29 @@
+# cargo-about (child plan C9-C4): `cargo about generate --locked about.hbs` writes the licence
+# notices of every crate the release builds contain. The release workflow runs it once for all
+# three systems, so the targets below cover each build.
+targets = [
+  "x86_64-pc-windows-msvc",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+]
+# vtype itself is MIT (the repository's LICENSE); only third-party crates are listed.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+private = { ignore = true }
+
+# Every licence the dependency tree uses today. A new crate under another licence fails the
+# release build, so it gets a look before it ships.
+accepted = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "BSL-1.0",
+  "ISC",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Zlib",
+  "0BSD",
+]

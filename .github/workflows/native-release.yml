@@ -1,0 +1,228 @@
+name: native release
+
+# Builds the desktop app (packages/native) for Windows, macOS and Linux and gathers what each
+# channel ships: a zip, a universal tar.gz, a .deb, an unsigned MSIX (the Store signs it), the
+# third-party licence notices, SHA256SUMS.txt and a Homebrew formula with the checksum filled in.
+#
+# A `native-v*` tag attaches all of it to a *draft* GitHub Release; publishing that draft, the
+# Store submission, npm and the Homebrew tap stay manual steps (see packages/native/README.md).
+# Running it by hand (workflow_dispatch) is a dry run: the files end up as workflow artifacts and
+# no release is made.
+
+on:
+  push:
+    tags:
+      - 'native-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  version:
+    name: version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The number comes from packages/native/Cargo.toml; a tag has to say the same.
+      - name: Read and check the version
+        id: read
+        run: |
+          version=$(sed -n 's/^version = "\([0-9][0-9.]*\)"$/\1/p' packages/native/Cargo.toml | head -n 1)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "native-v$version" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match packages/native/Cargo.toml ($version)"
+            exit 1
+          fi
+
+  windows:
+    name: windows
+    needs: version
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        working-directory: packages/native
+        run: cargo build --release --locked
+
+      - name: Zip
+        run: |
+          mkdir -p out/zip
+          cp packages/native/target/release/vtype.exe LICENSE out/zip/
+          (cd out/zip && 7z a "../vtype-${VERSION}-windows-x64.zip" vtype.exe LICENSE)
+
+      # Unsigned: the Store re-signs packages it accepts. Identity values are placeholders until
+      # the app is reserved in Partner Center (see the script).
+      - name: MSIX
+        shell: pwsh
+        run: ./scripts/release/build-msix.ps1 -OutDir out
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-windows
+          path: |
+            out/*.zip
+            out/*.msix
+          if-no-files-found: error
+
+  macos:
+    name: macos
+    needs: version
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # Both architectures, joined into one universal binary.
+      - name: Build
+        working-directory: packages/native
+        run: |
+          rustup target add x86_64-apple-darwin aarch64-apple-darwin
+          cargo build --release --locked --target x86_64-apple-darwin
+          cargo build --release --locked --target aarch64-apple-darwin
+          lipo -create -output vtype \
+            target/x86_64-apple-darwin/release/vtype target/aarch64-apple-darwin/release/vtype
+          lipo -info vtype
+
+      - name: Archive
+        run: |
+          mkdir -p out/tar
+          cp packages/native/vtype LICENSE out/tar/
+          tar -czf "out/vtype-${VERSION}-macos-universal.tar.gz" -C out/tar vtype LICENSE
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-macos
+          path: out/*.tar.gz
+          if-no-files-found: error
+
+  linux:
+    name: linux
+    needs: version
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Linux libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxdo-dev libayatana-appindicator3-dev libxkbcommon-dev
+
+      - name: Tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb,cargo-about
+
+      - name: Build
+        working-directory: packages/native
+        run: cargo build --release --locked
+
+      # The .deb carries the Native Messaging registration for every user and the autostart
+      # entry, so it needs no `vtype install`. Its contents are listed so the log shows them.
+      - name: Debian package
+        working-directory: packages/native
+        run: |
+          cargo deb --no-build --locked --output "../../out/vtype_${VERSION}_amd64.deb"
+          dpkg-deb --contents "../../out/vtype_${VERSION}_amd64.deb" | tee ../../out/deb-contents.txt
+          for f in ./usr/bin/vtype \
+                   ./etc/opt/chrome/native-messaging-hosts/com.ishizakahiroshi.vtype.json \
+                   ./etc/chromium/native-messaging-hosts/com.ishizakahiroshi.vtype.json \
+                   ./etc/xdg/autostart/vtype.desktop; do
+            grep -q " $f\$" ../../out/deb-contents.txt || { echo "::error::$f is missing from the .deb"; exit 1; }
+          done
+
+      # The plain binary as well, for the npm package and for other distributions.
+      - name: Archive
+        run: |
+          mkdir -p out/tar
+          cp packages/native/target/release/vtype LICENSE out/tar/
+          tar -czf "out/vtype-${VERSION}-linux-x64.tar.gz" -C out/tar vtype LICENSE
+
+      # Licences of every crate the three builds use (about.toml lists the targets).
+      - name: Third-party notices
+        working-directory: packages/native
+        run: cargo about generate --locked about.hbs --output-file ../../out/THIRD_PARTY_NOTICES.txt
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-linux
+          path: |
+            out/*.deb
+            out/*.tar.gz
+            out/THIRD_PARTY_NOTICES.txt
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: [version, windows, macos, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums and the Homebrew formula
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          mac_sha=$(sha256sum "vtype-${VERSION}-macos-universal.tar.gz" | cut -d' ' -f1)
+          sed -e "s/@@VERSION@@/${VERSION}/g" -e "s/@@SHA256@@/${mac_sha}/g" \
+            ../packages/native/packaging/homebrew/vtype.rb > vtype.rb
+          ! grep -q '@@' vtype.rb
+
+      - name: Upload (dry run)
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-release-dry-run
+          path: dist/*
+          if-no-files-found: error
+
+      # A draft: nothing is public until someone presses Publish on the release page.
+      - name: Draft release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --draft --title "vtype desktop ${VERSION}" --notes-file packages/native/RELEASE_NOTES.md

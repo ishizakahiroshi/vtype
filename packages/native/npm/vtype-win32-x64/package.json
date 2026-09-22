@@ -1,0 +1,21 @@
+{
+  "name": "@ishizakahiroshi/vtype-win32-x64",
+  "version": "0.1.0",
+  "description": "The vtype desktop binary for Windows x64. Install @ishizakahiroshi/vtype instead.",
+  "license": "MIT",
+  "author": "ishizakahiroshi <ishizakahiroshi.dev@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ishizakahiroshi/vtype.git",
+    "directory": "packages/native/npm/vtype-win32-x64"
+  },
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/"
+  ]
+}

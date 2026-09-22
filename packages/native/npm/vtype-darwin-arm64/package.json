@@ -1,0 +1,21 @@
+{
+  "name": "@ishizakahiroshi/vtype-darwin-arm64",
+  "version": "0.1.0",
+  "description": "The vtype desktop binary for macOS (Apple silicon). Install @ishizakahiroshi/vtype instead.",
+  "license": "MIT",
+  "author": "ishizakahiroshi <ishizakahiroshi.dev@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ishizakahiroshi/vtype.git",
+    "directory": "packages/native/npm/vtype-darwin-arm64"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/"
+  ]
+}

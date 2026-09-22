@@ -55,6 +55,13 @@ browsers you are signed in to.
 - `micOffsets`: where you dragged the mic to, one entry per site origin, at most 50
 - `excludedSites`: the sites vtype stays off on, at most 100
 - `diagnostics`: whether the diagnostic log is kept (off by default)
+- `inputMode`: the input mode (normal / English / katakana)
+- `desktopBridge`: whether the link to the desktop app is on (off by default)
+
+The replacement table (`replacements`: pairs of "when A is recognised, write B" that you entered
+yourself) is kept in `chrome.storage.local`. Whether the desktop app is connected, and a copy of
+its settings (`desktopBridgeStatus` / `nativeConfig`), are kept in `chrome.storage.session` and
+are gone when the browser closes.
 
 `excludedSites` is also written to `chrome.storage.local`. Some enterprise policies refuse sync
 outright, and "the mic came back on the site I switched it off on" is not an acceptable outcome
@@ -100,6 +107,38 @@ an allowlist, and password is not in it. Read-only and disabled fields are exclu
   every kind of site, so the mic has to be able to appear on any of them. vtype requests neither
   host permissions nor the `tabs` permission, so the extension's background never learns which
   site a tab is on
+- `nativeMessaging` (optional; not held at first): granted only when you press "Turn on the
+  desktop link" on the settings page and allow it. It is used only to hand recognised text to the
+  desktop app on the same computer, and talks to no other program
+
+## The desktop app (Windows / macOS / Linux)
+
+The desktop app is a separate program that types what the extension recognised into apps outside
+the browser. Installing it is optional; the extension works the same without it.
+
+- Chrome still does the speech recognition (see "Where your voice goes" above). The desktop app
+  does not use the microphone and never handles audio
+- The desktop app sends nothing over the network. The only things it talks to are Chrome on the
+  same computer (Native Messaging) and its own commands run on the same computer (`vtype toggle`
+  and the like)
+- Recognised text goes into the app in front and that is the end of it; nothing is kept. If you
+  choose the "paste" method in the settings, or on Linux under Wayland when direct typing is not
+  possible, the text is put on the clipboard (the paste method puts the clipboard's previous
+  contents back afterwards)
+- It types nothing into password fields (on Windows and macOS it asks the system what kind of
+  field it is; on Linux it leaves out the ones the system's accessibility service can identify)
+- On your computer it keeps a settings file (`config.json`: the shortcut, the input mode, whether
+  the icon is shown, and so on) and a log (`vtype.log`: at most 1 MB, two generations; times,
+  kinds of events and errors only, never what you said or the text). Neither is sent to the
+  developer
+
+## Reporting a problem
+
+"Report a problem", on the extension's settings page and in the desktop app's menu, only opens
+GitHub's new-issue form in your browser with the version, the system and the browser's name filled
+in. Nothing is sent automatically: you look at the form and decide whether to submit it. "Copy
+diagnostic info" in the desktop app's menu copies the system, version, settings and recent errors
+to the clipboard, and never includes audio or transcripts.
 
 ## Changes
 

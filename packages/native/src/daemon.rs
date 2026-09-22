@@ -656,6 +656,7 @@ pub fn run() -> Result<()> {
     let platform: Arc<dyn Platform> = Arc::from(crate::platform::current());
     crate::i18n::init(&platform.ui_language());
 
+    crate::install::register_if_packaged();
     let config_path = crate::paths::config_file();
     let (cfg, outcome) = config::load(&config_path);
     tracing::info!(?outcome, "config");

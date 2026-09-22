@@ -1,0 +1,20 @@
+vtype desktop - third-party software notices
+
+vtype desktop includes the following open-source software. Each is used under the licence shown.
+
+{{#each overview}}
+{{{name}}} ({{id}}): {{count}} crate(s)
+{{/each}}
+
+{{#each licenses}}
+==============================================================================
+{{{name}}} ({{id}})
+
+Used by:
+{{#each used_by}}
+  {{{crate.name}}} {{crate.version}}{{#if crate.repository}} - {{{crate.repository}}}{{/if}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}
