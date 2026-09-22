@@ -197,12 +197,12 @@ describe("first run", () => {
     expect(page.step).toBe("consent");
   });
 
-  it("the consent button sends consent, then asks for the microphone", async () => {
+  it("in a window that stays, the consent button sends consent, then asks for the microphone", async () => {
     document.body.innerHTML = readFileSync(
       join(dirname(fileURLToPath(import.meta.url)), "..", "src", "speech", "speech.html"),
       "utf8",
     ).replace(/<script[^>]*><\/script>/, "");
-    page = makePage(PAGE, "prompt", document);
+    page = makePage(`${PAGE}?stay=1`, "prompt", document);
     const s = await connected();
     expect(document.getElementById("consent-lead")?.textContent).toContain("Google へ送られ");
     expect(document.getElementById("consent-step")?.hidden).toBe(false);
@@ -225,7 +225,7 @@ describe("first run", () => {
 });
 
 describe("the window", () => {
-  it("the first-run window closes itself once consent and the microphone are done", async () => {
+  it("the first-run window closes itself once the user agreed (the microphone is the desktop app's job)", async () => {
     page = makePage(`${PAGE}?setup=1`, "prompt");
     await connected();
     await page.consent();
@@ -249,6 +249,14 @@ describe("the window", () => {
     expect(s.ofType("page-state").at(-1)).toEqual({ type: "page-state", consented: true, micGranted: false });
     await flush(vi, 500);
     expect(closed).toBe(1);
+  });
+
+  it("a window that stays never closes itself, even without the microphone", async () => {
+    page = makePage(`${PAGE}?consent=1&stay=1`, "prompt");
+    await connected();
+    await flush(vi, SETUP_CLOSE_MS * 2);
+    expect(page.step).toBe("microphone");
+    expect(closed).toBe(0);
   });
 
   it("an off-screen page that is ready stays", async () => {

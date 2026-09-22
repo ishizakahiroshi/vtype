@@ -7,20 +7,22 @@
 // extension's Native Messaging bridge (shared/native-messages.ts), so the Rust side keeps its
 // vocabulary.
 //
-//   page URL   http://127.0.0.1:<port>/t/<token>/speech[?consent=1][&setup=1]
+//   page URL   http://127.0.0.1:<port>/t/<token>/speech[?consent=1][&setup=1|&stay=1]
 //   WebSocket  ws://127.0.0.1:<port>/t/<token>/ws      (the page's own directory + "ws")
 //   dictionary /t/<token>/dict/                        (relative, so reading.ts works as is)
 //
 // First run: nothing is recognised before the user agrees that their voice goes to Google
 // through Chrome's speech recognition (Microsoft Store policy 10.5.2). The desktop app keeps the
-// answer in its config.json and says so with `?consent=1` in the URL. Then the microphone is
-// asked for once; the grant stays with the desktop app's Chrome profile.
+// answer in its config.json and says so with `?consent=1` in the URL. The microphone is then
+// allowed by the desktop app itself, in its own Chrome profile: Chrome's per-site prompt means
+// nothing to someone using a desktop app, and its "allow this time" would not survive the window
+// being started again.
 //
-// The window: the desktop app opens it on screen for the first run (`setup=1`) and off screen
-// otherwise. A page cannot move its own window off screen (Chrome pulls `window.moveTo` back
-// onto it), so once the setup is done the page closes itself and the desktop app starts it again
-// off screen. An off-screen page that finds consent or the microphone missing closes itself too,
-// and comes back on screen.
+// The window: the first-run window (`setup=1`) only asks for consent and then closes itself; a page
+// cannot move its own window off screen (Chrome pulls `window.moveTo` back onto it), so the
+// desktop app starts it again off screen. An off-screen page that finds consent or the microphone
+// missing closes itself and comes back on screen. If the microphone grant did not hold, the page
+// comes back as a window that stays (`stay=1`): it asks for the microphone and never closes itself.
 //
 // A lost WebSocket is retried from 1 s, doubling up to 30 s. A recording that loses the desktop
 // app is stopped: nobody is left to type what it hears.
@@ -118,6 +120,7 @@ export function createSpeechPage(options: SpeechPageOptions = {}): SpeechPage {
   const params = new URL(href).searchParams;
   let consented = params.get("consent") === "1";
   const setup = params.get("setup") === "1";
+  const stay = params.get("stay") === "1";
   const closeWindow = options.closeWindow ?? (() => globalThis.close?.());
   /** The microphone's state was read once; until then the page state is not reported. */
   let micKnown = false;
@@ -188,6 +191,7 @@ export function createSpeechPage(options: SpeechPageOptions = {}): SpeechPage {
    */
   function placeWindow(): void {
     if (closing || !micKnown || socket === null || !connected) return;
+    if (stay) return;
     const ready = step() === "ready";
     if (setup && ready) {
       closing = true;
@@ -290,6 +294,8 @@ export function createSpeechPage(options: SpeechPageOptions = {}): SpeechPage {
 
   function step(): PageStep {
     if (!consented) return "consent";
+    // The first-run window only asks for consent; the desktop app allows the microphone.
+    if (setup) return "ready";
     return micGranted ? "ready" : "microphone";
   }
 
@@ -348,8 +354,8 @@ export function createSpeechPage(options: SpeechPageOptions = {}): SpeechPage {
     }
     render();
     postPageState();
-    // The click is the user's gesture: ask for the microphone right away.
-    if (!micGranted) await requestMicrophone();
+    // In a window that stays, the click is the user's gesture: ask for the microphone right away.
+    if (stay && !micGranted) await requestMicrophone();
     else placeWindow();
   }
 
@@ -358,7 +364,7 @@ export function createSpeechPage(options: SpeechPageOptions = {}): SpeechPage {
   setText("consent-button", t("speech_consent_button"));
   setText("microphone-lead", t("speech_mic_lead"));
   setText("microphone-button", t("speech_mic_button"));
-  setText("ready-lead", t("speech_ready"));
+  setText("ready-lead", stay ? t("speech_ready_stay") : t("speech_ready"));
   doc?.getElementById("consent-button")?.addEventListener("click", () => void consent());
   doc?.getElementById("microphone-button")?.addEventListener("click", () => void requestMicrophone());
   render();

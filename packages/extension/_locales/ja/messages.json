@@ -127,7 +127,7 @@
     "message": "同意して始める"
   },
   "speech_mic_lead": {
-    "message": "マイクを許可してください。"
+    "message": "マイクを許可してください。Chrome の確認では「サイトへのアクセス時は許可」を選ぶと、次から聞かれません。"
   },
   "speech_mic_button": {
     "message": "マイクを許可する"
@@ -136,7 +136,11 @@
     "message": "マイクが許可されませんでした。Chrome でこのページのマイクを許可してから、もう一度押してください。"
   },
   "speech_ready": {
-    "message": "vtype は準備ができました。この窓は閉じずにそのままにしてください（vtype が隠します）。"
+    "message": "vtype は準備ができました。この窓は自動で閉じます。"
+  },
+  "speech_ready_stay": {
+    "message": "vtype は準備ができました。この窓は開いたままにしてください。閉じると、次の録音でまたマイクの許可を聞きます。",
+    "description": "Desktop app's speech page, when it has to stay on screen because the microphone was allowed only this time"
   },
   "speech_disconnected": {
     "message": "vtype 本体とつながっていません。vtype が起動しているか確かめてください。"

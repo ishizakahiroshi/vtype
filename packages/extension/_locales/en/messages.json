@@ -127,7 +127,7 @@
     "message": "Agree and start"
   },
   "speech_mic_lead": {
-    "message": "Please allow the microphone."
+    "message": "Please allow the microphone. In Chrome's prompt, choose to allow it while visiting the site, and you will not be asked again."
   },
   "speech_mic_button": {
     "message": "Allow the microphone"
@@ -136,7 +136,11 @@
     "message": "The microphone was not allowed. Allow it for this page in Chrome, then press the button again."
   },
   "speech_ready": {
-    "message": "vtype is ready. Leave this window open (vtype hides it)."
+    "message": "vtype is ready. This window closes by itself."
+  },
+  "speech_ready_stay": {
+    "message": "vtype is ready. Leave this window open: closing it means the microphone is asked for again at the next recording.",
+    "description": "Desktop app's speech page, when it has to stay on screen because the microphone was allowed only this time"
   },
   "speech_disconnected": {
     "message": "Not connected to vtype. Check that vtype is running."

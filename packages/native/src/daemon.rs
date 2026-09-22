@@ -64,8 +64,9 @@ struct Pending {
     deadline: Option<Instant>,
 }
 
-/// How long the setup window has to be gone before Chrome is started again off screen.
-pub const RELAUNCH_DELAY: Duration = Duration::from_millis(1500);
+/// How long the setup window has to be gone before Chrome is started again off screen. Chrome
+/// rewrites the profile's Preferences as it exits; the microphone grant is written after that.
+pub const RELAUNCH_DELAY: Duration = Duration::from_secs(3);
 
 /// How long the first-run request is held in the bubble.
 const SETUP_HOLD: Duration = Duration::from_secs(30);
@@ -94,8 +95,15 @@ pub struct Core {
     launched: Option<WindowPlacement>,
     /// The page said consent or the microphone is missing: the next launch shows the window.
     needs_setup: bool,
-    /// The page finished its first-run setup (consent and microphone).
+    /// The page has consent and the microphone.
     page_ready: bool,
+    /// The microphone grant did not hold off screen: use a window that stays on screen for the
+    /// rest of this run instead of asking again and again.
+    keep_visible: bool,
+    /// Write the microphone grant into the profile before launching (off in tests).
+    grant_in_profile: bool,
+    /// The mode of the last recording asked of a page, for a page started again in its place.
+    last_start_mode: Option<InputMode>,
     /// Start Chrome again at this time, placed like this (after the setup window closed).
     relaunch: Option<(Instant, WindowPlacement)>,
 }
@@ -120,8 +128,16 @@ impl Core {
             launched: None,
             needs_setup: false,
             page_ready: false,
+            keep_visible: false,
+            grant_in_profile: false,
+            last_start_mode: None,
             relaunch: None,
         }
+    }
+
+    /// Lets the daemon write the microphone grant into its Chrome profile (chrome_launch.rs).
+    pub fn enable_profile_grant(&mut self) {
+        self.grant_in_profile = true;
     }
 
     /// Where the speech page is served (`http://127.0.0.1:<port>/t/<token>/speech`).
@@ -139,9 +155,15 @@ impl Core {
         self.host.as_ref().is_some_and(|h| h.extension_version.is_some())
     }
 
-    /// Connected, and not to the first-run window (which only asks for consent and the microphone).
+    /// Connected to a page that can record: not the first-run window (it only asks for consent),
+    /// and a kept window only once it has the microphone.
     fn ready(&self) -> bool {
-        self.connected() && self.launched != Some(WindowPlacement::Visible)
+        self.connected()
+            && match self.launched {
+                Some(WindowPlacement::Visible) => false,
+                Some(WindowPlacement::Kept) => self.page_ready,
+                _ => true,
+            }
     }
 
     #[cfg(test)]
@@ -194,6 +216,11 @@ impl Core {
         self.platform.set_tray(&self.tray_state());
     }
 
+    fn send_start(&mut self, mode: Option<InputMode>) {
+        self.last_start_mode = mode;
+        self.send(&ToExtension::Start { mode });
+    }
+
     fn send(&self, msg: &ToExtension) -> bool {
         let Some(host) = &self.host else { return false };
         match serde_json::to_value(msg) {
@@ -236,6 +263,13 @@ impl Core {
             self.fail_launch("speech_page_unavailable", &t("native_notifySpeechPageNotConnected"));
             return;
         };
+        if self.config.consented && self.grant_in_profile {
+            if let Some(origin) = chrome_launch::origin_of(&base) {
+                if let Err(e) = chrome_launch::grant_microphone_in_profile(&self.profile_dir, origin) {
+                    tracing::warn!(error = %e, "could not allow the microphone in the Chrome profile");
+                }
+            }
+        }
         let url = chrome_launch::page_url(&base, self.config.consented, placement);
         let args = chrome_launch::speech_args(&self.profile_dir, &url, placement);
         tracing::info!(?placement, "not connected; starting Chrome");
@@ -251,7 +285,7 @@ impl Core {
         self.launched = Some(placement);
         self.page_ready = false;
         let deadline = match placement {
-            WindowPlacement::Visible => {
+            WindowPlacement::Visible | WindowPlacement::Kept => {
                 self.platform.tell(&t("native_bubbleConsent"), SETUP_HOLD, true);
                 None
             }
@@ -336,7 +370,7 @@ impl Core {
 
     fn start_recording(&mut self, mode: Option<InputMode>) -> Reply {
         if self.ready() {
-            self.send(&ToExtension::Start { mode });
+            self.send_start(mode);
             return Reply::Ok;
         }
         if let Some(p) = self.pending.as_mut() {
@@ -348,20 +382,34 @@ impl Core {
         if self.connected() || self.relaunch.is_some() {
             return Reply::Ok; // the first-run window is up, or Chrome is about to start again
         }
-        let placement =
-            if self.config.consented && !self.needs_setup { WindowPlacement::Hidden } else { WindowPlacement::Visible };
+        let placement = if !self.config.consented {
+            WindowPlacement::Visible
+        } else if self.keep_visible {
+            WindowPlacement::Kept
+        } else {
+            WindowPlacement::Hidden
+        };
         self.launch_speech_page(placement);
         Reply::Ok
     }
 
-    /// The page's connection is gone. After the first-run window closed itself, Chrome is started
-    /// again off screen; a hidden page that found the microphone missing is started on screen.
+    /// The page's connection is gone. After the first-run window closed itself (consent given),
+    /// Chrome is started again off screen. A hidden page that found consent or the microphone
+    /// missing comes back on screen: for consent as the first-run window, for the microphone as a
+    /// window that stays (the grant did not hold, so hiding it again would only ask again).
     fn page_closed(&mut self) {
         let next = match self.launched.take() {
-            Some(WindowPlacement::Visible) if self.page_ready => Some(WindowPlacement::Hidden),
-            Some(WindowPlacement::Hidden) if self.needs_setup => Some(WindowPlacement::Visible),
-            Some(WindowPlacement::Visible) => {
-                // Closed before the setup was done: nothing to wait for any more.
+            Some(WindowPlacement::Visible) if self.config.consented => Some(WindowPlacement::Hidden),
+            Some(WindowPlacement::Hidden) if self.needs_setup => {
+                if self.config.consented {
+                    self.keep_visible = true;
+                    Some(WindowPlacement::Kept)
+                } else {
+                    Some(WindowPlacement::Visible)
+                }
+            }
+            Some(WindowPlacement::Visible | WindowPlacement::Kept) => {
+                // The user closed it: nothing to wait for any more.
                 if self.pending.take().is_some() {
                     self.platform.hide_bubble();
                 }
@@ -372,7 +420,8 @@ impl Core {
         self.page_ready = false;
         if let Some(placement) = next {
             if self.pending.is_none() {
-                self.pending = Some(Pending { start_mode: None, deadline: None });
+                // The page that went away may have been asked to record: its replacement is.
+                self.pending = Some(Pending { start_mode: self.last_start_mode, deadline: None });
             }
             self.relaunch = Some(((self.now)() + RELAUNCH_DELAY, placement));
         }
@@ -463,7 +512,7 @@ impl Core {
                 if self.ready() {
                     if let Some(p) = self.pending.take() {
                         self.platform.hide_bubble(); // "connecting…"
-                        self.send(&ToExtension::Start { mode: p.start_mode });
+                        self.send_start(p.start_mode);
                     }
                 }
                 self.update_tray();
@@ -482,6 +531,13 @@ impl Core {
                 if self.launched == Some(WindowPlacement::Hidden) && self.needs_setup {
                     // The page closes itself; page_closed() starts it again on screen.
                     self.platform.tell(&t("native_bubbleConsent"), SETUP_HOLD, true);
+                }
+                // A kept window just got the microphone: the waiting recording starts.
+                if self.launched == Some(WindowPlacement::Kept) && self.page_ready {
+                    if let Some(p) = self.pending.take() {
+                        self.platform.hide_bubble();
+                        self.send_start(p.start_mode);
+                    }
                 }
             }
             FromExtension::State { mode, recording } => {
@@ -841,6 +897,7 @@ pub fn run() -> Result<()> {
         if let Some(url) = speech_page {
             core.set_speech_page(url);
         }
+        core.enable_profile_grant();
         core.start();
         core.run(rx);
         tracing::info!("quit");
@@ -1061,7 +1118,8 @@ pub mod tests {
         assert!(!h.sent().iter().any(|m| m["type"] == "start"));
         h.ext(json!({"type":"consent"}));
         assert!(h.core.config().consented);
-        h.ext(json!({"type":"page-state","consented":true,"micGranted":true}));
+        // Consent is all the first-run window asks: the microphone is allowed in the profile.
+        h.ext(json!({"type":"page-state","consented":true,"micGranted":false}));
         // The page closes itself; Chrome comes back off screen a moment later.
         h.core.handle(Event::Closed { conn: 1 });
         h.fake.take();
@@ -1107,21 +1165,31 @@ pub mod tests {
     }
 
     #[test]
-    fn a_hidden_page_without_the_microphone_comes_back_on_screen() {
+    fn a_microphone_grant_that_does_not_hold_keeps_the_window_up_instead_of_asking_again() {
         let mut h = Harness::new();
         h.core.config.consented = true;
-        h.cli(Request::Start { mode: None });
+        h.cli(Request::Start { mode: Some(InputMode::Kana) });
         h.page_hello();
+        h.sent(); // the off-screen page was asked to record; it has no microphone
         h.ext(json!({"type":"page-state","consented":true,"micGranted":false}));
         assert!(h.fake.take().contains(&format!("tell {} 30s notify=true", t("native_bubbleConsent"))));
         h.core.handle(Event::Closed { conn: 1 });
         h.advance(RELAUNCH_DELAY);
         h.core.tick();
+        let kept = chrome_call(&format!("{PAGE}?consent=1&stay=1"), WindowPlacement::Kept);
         let calls = h.fake.take();
-        assert!(
-            calls.contains(&chrome_call(&format!("{PAGE}?consent=1&setup=1"), WindowPlacement::Visible)),
-            "{calls:?}"
-        );
+        assert!(calls.contains(&kept), "{calls:?}");
+        // The kept window asks for the microphone; once it has it, the recording starts there.
+        h.page_hello();
+        assert!(!h.sent().iter().any(|m| m["type"] == "start"));
+        h.ext(json!({"type":"page-state","consented":true,"micGranted":true}));
+        assert_eq!(h.sent().last().unwrap(), &json!({"type":"start","mode":"kana"}));
+        // Closed by the user: the next press opens the kept window again, not the off-screen one.
+        h.core.handle(Event::Closed { conn: 1 });
+        assert!(h.core.next_deadline().is_none());
+        h.fake.take();
+        h.cli(Request::Start { mode: None });
+        assert!(h.fake.take().contains(&kept));
     }
 
     #[test]

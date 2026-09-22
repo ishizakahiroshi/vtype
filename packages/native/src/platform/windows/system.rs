@@ -56,6 +56,14 @@ pub fn launch_chrome(args: &[String]) -> Result<(), PlatformError> {
         return Ok(());
     }
     let chrome = find_chrome().ok_or_else(|| PlatformError::Failed("Chrome was not found".into()))?;
+    // A window started by a process that is not in front opens behind the others, and the
+    // first-run window has to be seen. vtype may hand its foreground right on (it has it right
+    // after the shortcut or the tray); without that right the call does nothing.
+    unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(
+            windows_sys::Win32::UI::WindowsAndMessaging::ASFW_ANY,
+        );
+    }
     Command::new(chrome).args(args).spawn().map(|_| ()).map_err(PlatformError::failed)
 }
 
