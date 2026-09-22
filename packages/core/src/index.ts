@@ -128,6 +128,26 @@ export type {
   WhisperRecorder,
 } from './whisper.js';
 
+export {
+  INPUT_MODES,
+  isInputMode,
+  recognitionLangFor,
+  MAX_REPLACEMENT_RULES,
+  normalizeReplacementRules,
+  applyReplacements,
+  toKatakana,
+  transformTranscript,
+  transformTranscriptSync,
+} from './input-modes.js';
+
+export type {
+  InputMode,
+  ReplacementRule,
+  ReadingProvider,
+  TransformOptions,
+  AsyncTransformOptions,
+} from './input-modes.js';
+
 // ---------------------------------------------------------------------------
 // Engine selection and mutual exclusion
 // ---------------------------------------------------------------------------
