@@ -297,6 +297,10 @@
     "message": "Could not reach vtype in Chrome. Open Chrome and turn on the desktop link in the vtype settings.",
     "description": "Desktop app: notification when the vtype extension in Chrome could not be reached"
   },
+  "native_bubbleConnecting": {
+    "message": "Connecting to vtype in Chrome…",
+    "description": "Desktop app: shown above the mic icon while it waits (up to 10 seconds) for the extension in Chrome"
+  },
   "native_notifyPasteManually": {
     "message": "The text is on the clipboard. Press Ctrl+V to paste it.",
     "description": "Desktop app: notification when the text could only be put on the clipboard"

@@ -6,7 +6,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use objc2_foundation::NSLocale;
 
-use crate::i18n::t;
 use crate::launch_agent;
 use crate::platform::PlatformError;
 
@@ -71,11 +70,10 @@ pub fn notify(title: &str, body: &str) {
 
 static TOLD_ABOUT_ACCESSIBILITY: AtomicBool = AtomicBool::new(false);
 
-/// Once per run: typing needs the Accessibility permission, and where to give it.
-pub fn notify_accessibility_once() {
-    if !TOLD_ABOUT_ACCESSIBILITY.swap(true, Ordering::AcqRel) {
-        notify("vtype", &t("native_notifyAccessibility"));
-    }
+/// True the first time in a run: that typing needs the Accessibility permission, and where to
+/// give it, is said once.
+pub fn first_accessibility_notice() -> bool {
+    !TOLD_ABOUT_ACCESSIBILITY.swap(true, Ordering::AcqRel)
 }
 
 pub fn open_url(url: &str) -> Result<(), PlatformError> {

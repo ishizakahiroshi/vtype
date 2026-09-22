@@ -405,11 +405,11 @@ impl Overlay {
         self.bubble.label.sizeThatFits(NSSize::new(width, 10_000.0)).height.ceil()
     }
 
-    pub fn show_bubble(&mut self, text: &str) {
+    /// At most `max_lines`; a longer text loses its start (live text: the latest words matter).
+    pub fn show_bubble(&mut self, text: &str, max_lines: i32) {
         let mtm = self.icon.mtm;
         let inner = BUBBLE_WIDTH - BUBBLE_PADDING * 2.0;
-        // At most two lines; drop the start until it fits.
-        let max_height = self.text_height("Xg", inner) * 2.0 + 1.0;
+        let max_height = self.text_height("Xg", inner) * f64::from(max_lines) + 1.0;
         let mut shown = text.to_string();
         let mut limit = text.chars().count();
         let text_height = loop {

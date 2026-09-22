@@ -7,7 +7,7 @@
 
 use std::sync::mpsc::Sender;
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
@@ -83,6 +83,13 @@ pub struct TrayState {
     pub hide_on_fullscreen: bool,
 }
 
+/// How long a message (`Platform::tell`) stays in the bubble.
+pub const MESSAGE_HOLD: Duration = Duration::from_secs(6);
+
+/// Bubble height in lines. Live text keeps its latest words in two; a message is shown whole.
+pub const LIVE_LINES: i32 = 2;
+pub const MESSAGE_LINES: i32 = 6;
+
 /// The floating mic's look.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum IconState {
@@ -131,9 +138,14 @@ pub trait Platform: Send + Sync {
     fn focused_field(&self) -> FieldInfo;
     fn show_icon(&self, state: IconState, position: Option<(i32, i32)>);
     fn hide_icon(&self);
+    /// Recognition in progress above the floating mic; it goes away shortly after the last text.
     fn show_bubble(&self, text: &str);
     fn hide_bubble(&self);
-    fn notify(&self, title: &str, body: &str);
+    /// Tells the user something, the same way on every system: in the bubble above the floating
+    /// mic for `hold` while the mic is on screen. Only when it is not (Wayland has no mic; the
+    /// user can switch it off; it hides over full-screen apps) and `or_notify` is set does it fall
+    /// back to a system notification, whose showing depends on the system's settings.
+    fn tell(&self, text: &str, hold: Duration, or_notify: bool);
     fn set_autostart(&self, enabled: bool) -> Result<(), PlatformError>;
     /// Starts Chrome with `args` (e.g. `--no-startup-window`, or a URL to open).
     fn launch_chrome(&self, args: &[String]) -> Result<(), PlatformError>;

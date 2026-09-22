@@ -20,7 +20,7 @@ use crate::hotkey::HotkeySpec;
 use crate::linux_setup::Session;
 use crate::menu::tooltip;
 use crate::platform::desktop::{build_menu, to_global_hotkey, tray_icons, update_checks};
-use crate::platform::{IconState, MenuAction, PlatformError, PlatformEvent, TrayState};
+use crate::platform::{IconState, MenuAction, PlatformError, PlatformEvent, TrayState, LIVE_LINES};
 
 /// How long the green check stays after text went in.
 const DONE: Duration = Duration::from_millis(800);
@@ -181,14 +181,20 @@ impl Ui {
     }
 
     pub fn show_bubble(&mut self, text: &str) {
-        let Some(overlay) = &mut self.overlay else { return };
+        self.show_bubble_for(text, BUBBLE_IDLE, LIVE_LINES);
+    }
+
+    /// Shows `text` above the mic for `hold`; false when there is no mic on screen to speak from
+    /// (Wayland, switched off, or hidden over a full-screen app).
+    pub fn show_bubble_for(&mut self, text: &str, hold: Duration, max_lines: i32) -> bool {
+        let Some(overlay) = &mut self.overlay else { return false };
         if !overlay.is_shown() {
-            return; // no mic to speak from (hidden, or over a full-screen app)
+            return false;
         }
-        overlay.show_bubble(text);
+        overlay.show_bubble(text, max_lines);
         self.bubble_generation += 1;
         let generation = self.bubble_generation;
-        glib::timeout_add_local_once(BUBBLE_IDLE, move || {
+        glib::timeout_add_local_once(hold, move || {
             with_ui(|ui| {
                 if ui.bubble_generation == generation {
                     if let Some(o) = &mut ui.overlay {
@@ -197,6 +203,7 @@ impl Ui {
                 }
             })
         });
+        true
     }
 
     pub fn hide_bubble(&mut self) {

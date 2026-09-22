@@ -16,11 +16,14 @@ mod ui;
 
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::desktop::BesideControl;
-use super::{FieldInfo, IconState, InjectOutcome, Platform, PlatformError, PlatformEvent, TrayState};
+use super::{
+    FieldInfo, IconState, InjectOutcome, Platform, PlatformError, PlatformEvent, TrayState, MESSAGE_HOLD, MESSAGE_LINES,
+};
 use crate::config::{BesideFieldConfig, InjectMethod};
+use crate::i18n::t;
 
 pub struct MacPlatform {
     shared: Arc<ui::Shared>,
@@ -66,7 +69,9 @@ impl Platform for MacPlatform {
 
     fn inject_text(&self, text: &str, method: InjectMethod) -> Result<InjectOutcome, PlatformError> {
         if !ax::trusted(false) {
-            system::notify_accessibility_once();
+            if system::first_accessibility_notice() {
+                self.tell(&t("native_notifyAccessibility"), MESSAGE_HOLD, true);
+            }
             return Err(PlatformError::Failed("vtype is not allowed to use Accessibility".into()));
         }
         inject::inject(text, method)
@@ -93,8 +98,14 @@ impl Platform for MacPlatform {
         self.shared.run(|ui| ui.hide_bubble());
     }
 
-    fn notify(&self, title: &str, body: &str) {
-        system::notify(title, body);
+    fn tell(&self, text: &str, hold: Duration, or_notify: bool) {
+        let text = text.to_string();
+        self.shared.run(move |ui| {
+            if !ui.show_bubble_for(&text, hold, MESSAGE_LINES) && or_notify {
+                // Off the main thread: showing a notification may take a moment.
+                std::thread::spawn(move || system::notify("vtype", &text));
+            }
+        });
     }
 
     fn set_autostart(&self, enabled: bool) -> Result<(), PlatformError> {

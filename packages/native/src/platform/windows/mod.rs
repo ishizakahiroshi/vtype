@@ -13,7 +13,7 @@ pub mod debug;
 
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::CloseHandle;
 use windows_sys::Win32::System::Threading::{
@@ -21,7 +21,7 @@ use windows_sys::Win32::System::Threading::{
 };
 
 use super::desktop::BesideControl;
-use super::{FieldInfo, IconState, InjectOutcome, Platform, PlatformError, PlatformEvent, TrayState};
+use super::{FieldInfo, IconState, InjectOutcome, Platform, PlatformError, PlatformEvent, TrayState, MESSAGE_LINES};
 use crate::config::{BesideFieldConfig, InjectMethod};
 
 pub struct WindowsPlatform {
@@ -110,8 +110,14 @@ impl Platform for WindowsPlatform {
         self.shared.run(|ui| ui.hide_bubble());
     }
 
-    fn notify(&self, title: &str, body: &str) {
-        system::notify(title, body);
+    fn tell(&self, text: &str, hold: Duration, or_notify: bool) {
+        let text = text.to_string();
+        self.shared.run(move |ui| {
+            if !ui.show_bubble_for(&text, hold, MESSAGE_LINES) && or_notify {
+                // Off the UI thread: showing a notification may take a moment.
+                std::thread::spawn(move || system::notify("vtype", &text));
+            }
+        });
     }
 
     fn set_autostart(&self, enabled: bool) -> Result<(), PlatformError> {

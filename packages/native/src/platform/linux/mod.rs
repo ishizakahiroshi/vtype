@@ -15,8 +15,9 @@ mod x11;
 
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use super::{FieldInfo, IconState, InjectOutcome, Platform, PlatformError, PlatformEvent, TrayState};
+use super::{FieldInfo, IconState, InjectOutcome, Platform, PlatformError, PlatformEvent, TrayState, MESSAGE_LINES};
 use crate::config::InjectMethod;
 use crate::linux_setup::{current_session, Session};
 
@@ -104,8 +105,14 @@ impl Platform for LinuxPlatform {
         self.shared.run(|ui| ui.hide_bubble());
     }
 
-    fn notify(&self, title: &str, body: &str) {
-        system::notify(title, body);
+    fn tell(&self, text: &str, hold: Duration, or_notify: bool) {
+        let text = text.to_string();
+        self.shared.run(move |ui| {
+            if !ui.show_bubble_for(&text, hold, MESSAGE_LINES) && or_notify {
+                // Off GTK's thread: the notification goes over D-Bus and may take a moment.
+                std::thread::spawn(move || system::notify("vtype", &text));
+            }
+        });
     }
 
     fn set_autostart(&self, enabled: bool) -> Result<(), PlatformError> {

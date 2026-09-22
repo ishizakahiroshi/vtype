@@ -22,7 +22,7 @@ use super::overlay::{screen_frames, BesideMic, Overlay};
 use crate::hotkey::HotkeySpec;
 use crate::menu::tooltip;
 use crate::platform::desktop::{build_menu, to_global_hotkey, tray_icons, update_checks, Timing};
-use crate::platform::{IconState, MenuAction, PlatformError, PlatformEvent, TrayState};
+use crate::platform::{IconState, MenuAction, PlatformError, PlatformEvent, TrayState, LIVE_LINES};
 
 /// How long the green check stays after text went in.
 const DONE: Duration = Duration::from_millis(800);
@@ -190,17 +190,24 @@ impl Ui {
     }
 
     pub fn show_bubble(&mut self, text: &str) {
+        self.show_bubble_for(text, BUBBLE_IDLE, LIVE_LINES);
+    }
+
+    /// Shows `text` above the mic for `hold`; false when there is no mic on screen to speak from
+    /// (switched off, or hidden over a full-screen app).
+    pub fn show_bubble_for(&mut self, text: &str, hold: Duration, max_lines: i32) -> bool {
         if !self.overlay.is_shown() {
-            return; // no mic to speak from (hidden, or over a full-screen app)
+            return false;
         }
-        self.overlay.show_bubble(text);
+        self.overlay.show_bubble(text, max_lines);
         let generation = self.shared.bubble_generation.fetch_add(1, Ordering::AcqRel) + 1;
         let shared = self.shared.clone();
-        self.shared.later(BUBBLE_IDLE, move |ui| {
+        self.shared.later(hold, move |ui| {
             if shared.bubble_generation.load(Ordering::Acquire) == generation {
                 ui.overlay.hide_bubble();
             }
         });
+        true
     }
 
     pub fn hide_bubble(&mut self) {

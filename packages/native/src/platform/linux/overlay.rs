@@ -310,9 +310,9 @@ impl Overlay {
         natural - BUBBLE_PADDING * 2
     }
 
-    pub fn show_bubble(&mut self, text: &str) {
-        // At most two lines; drop the start until it fits.
-        let max_height = self.text_height("Xg") * 2 + 1;
+    /// At most `max_lines`; a longer text loses its start (live text: the latest words matter).
+    pub fn show_bubble(&mut self, text: &str, max_lines: i32) {
+        let max_height = self.text_height("Xg") * max_lines + 1;
         let mut shown = text.to_string();
         let mut limit = text.chars().count();
         let text_height = loop {

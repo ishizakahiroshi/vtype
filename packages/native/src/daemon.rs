@@ -23,7 +23,7 @@ use crate::diag::{self, ErrorLog};
 use crate::i18n::{t, t_with};
 use crate::ipc;
 use crate::platform::{
-    FieldProbe, IconState, InjectOutcome, MenuAction, Platform, PlatformError, PlatformEvent, TrayState,
+    FieldProbe, IconState, InjectOutcome, MenuAction, Platform, PlatformError, PlatformEvent, TrayState, MESSAGE_HOLD,
 };
 use crate::protocol::{FromExtension, InputMode, Reply, Request, SessionEvent, ToExtension};
 use crate::report::{self, ReportInfo, Surface};
@@ -115,11 +115,12 @@ impl Core {
 
     /// Everything that happens once, when the daemon comes up.
     pub fn start(&mut self) {
-        self.register_hotkey();
-        self.platform.watch_fields(&self.config.beside_field);
+        // The mic first: a shortcut that cannot be registered is said in its bubble.
         if self.config.icon.visible {
             self.platform.show_icon(IconState::Idle, self.icon_position());
         }
+        self.register_hotkey();
+        self.platform.watch_fields(&self.config.beside_field);
         self.update_tray();
     }
 
@@ -138,7 +139,7 @@ impl Core {
             Err(PlatformError::Failed(e)) => {
                 tracing::warn!(hotkey = %spec, error = %e, "hotkey registration failed");
                 self.errors.push("hotkey_failed");
-                self.platform.notify("vtype", &t_with("native_notifyHotkeyFailed", &[("hotkey", &spec)]));
+                self.platform.tell(&t_with("native_notifyHotkeyFailed", &[("hotkey", &spec)]), MESSAGE_HOLD, true);
             }
         }
     }
@@ -176,7 +177,7 @@ impl Core {
                 self.pending = None;
                 tracing::warn!("Chrome did not connect in time");
                 self.errors.push("chrome_not_connected");
-                self.platform.notify("vtype", &t("native_notifyChromeNotConnected"));
+                self.platform.tell(&t("native_notifyChromeNotConnected"), MESSAGE_HOLD, true);
             }
         }
     }
@@ -250,6 +251,9 @@ impl Core {
         self.pending = Some(Pending { start_mode: mode, deadline: (self.now)() + CHROME_WAIT });
         if first {
             tracing::info!("not connected; starting Chrome");
+            // Otherwise nothing shows for up to CHROME_WAIT. Held a little past it, so the bubble
+            // is still up when the outcome replaces it; no notification for a passing state.
+            self.platform.tell(&t("native_bubbleConnecting"), CHROME_WAIT + Duration::from_secs(2), false);
             if let Err(e) = self.platform.launch_chrome(&["--no-startup-window".to_string()]) {
                 tracing::warn!(error = %e, "could not start Chrome");
                 self.errors.push("chrome_launch_failed");
@@ -259,7 +263,9 @@ impl Core {
     }
 
     fn stop_recording(&mut self) -> Reply {
-        self.pending = None;
+        if self.pending.take().is_some() {
+            self.platform.hide_bubble(); // "connecting…"
+        }
         if self.send(&ToExtension::Stop) {
             Reply::Ok
         } else {
@@ -337,6 +343,7 @@ impl Core {
                 }
                 self.send(&ToExtension::GetState);
                 if let Some(p) = self.pending.take() {
+                    self.platform.hide_bubble(); // "connecting…"
                     self.send(&ToExtension::Start { mode: p.start_mode });
                 }
                 self.update_tray();
@@ -428,7 +435,7 @@ impl Core {
         let field = self.platform.focused_field();
         if field.is_password == Some(true) {
             tracing::info!(len = text.chars().count(), "password field in front; not inserting");
-            self.platform.notify("vtype", &t("native_notifyPasswordField"));
+            self.platform.tell(&t("native_notifyPasswordField"), MESSAGE_HOLD, true);
             return;
         }
         match self.platform.inject_text(text, self.config.inject) {
@@ -438,13 +445,13 @@ impl Core {
                 self.show_icon(IconState::Done);
             }
             Ok(InjectOutcome::CopiedOnly) => {
-                self.platform.notify("vtype", &t("native_notifyPasteManually"));
+                self.platform.tell(&t("native_notifyPasteManually"), MESSAGE_HOLD, true);
             }
             Err(e) => {
                 tracing::warn!(error = %e, "could not insert; copying instead");
                 self.errors.push("inject_failed");
                 if self.platform.copy_to_clipboard(text).is_ok() {
-                    self.platform.notify("vtype", &t("native_notifyPasteManually"));
+                    self.platform.tell(&t("native_notifyPasteManually"), MESSAGE_HOLD, true);
                 }
             }
         }
@@ -746,8 +753,8 @@ pub mod tests {
         fn hide_bubble(&self) {
             self.log("hide bubble".into());
         }
-        fn notify(&self, _title: &str, body: &str) {
-            self.log(format!("notify {body}"));
+        fn tell(&self, text: &str, hold: Duration, or_notify: bool) {
+            self.log(format!("tell {text} {}s notify={or_notify}", hold.as_secs()));
         }
         fn set_autostart(&self, enabled: bool) -> Result<(), PlatformError> {
             self.log(format!("autostart {enabled}"));
@@ -868,13 +875,19 @@ pub mod tests {
     fn toggle_while_disconnected_launches_chrome_and_starts_once_it_connects() {
         let mut h = Harness::new();
         assert_eq!(h.cli(Request::Toggle { mode: Some(InputMode::En) }), Reply::Ok);
-        assert!(h.fake.take().contains(&"chrome --no-startup-window".to_string()));
+        let calls = h.fake.take();
+        assert!(calls.contains(&"chrome --no-startup-window".to_string()));
+        // The wait is said in the bubble (held past CHROME_WAIT), never as a notification.
+        let connecting = format!("tell {} 12s notify=false", t("native_bubbleConnecting"));
+        assert!(calls.contains(&connecting), "{calls:?}");
         // A second press while waiting does not start Chrome again.
         h.cli(Request::Toggle { mode: Some(InputMode::En) });
-        assert!(!h.fake.take().iter().any(|c| c.starts_with("chrome")));
+        let calls = h.fake.take();
+        assert!(!calls.iter().any(|c| c.starts_with("chrome") || c.starts_with("tell ")));
 
         h.attach_host();
         h.ext(json!({"type":"hello","extensionVersion":"0.1.0"}));
+        assert!(h.fake.take().contains(&"hide bubble".to_string()));
         let sent = h.sent();
         assert_eq!(sent[0]["type"], "hello");
         assert_eq!(sent.last().unwrap(), &json!({"type":"start","mode":"en"}));
@@ -892,8 +905,17 @@ pub mod tests {
         h.advance(Duration::from_secs(2));
         h.core.tick();
         let calls = h.fake.take();
-        assert_eq!(calls.len(), 1);
-        assert!(calls[0].starts_with("notify "));
+        assert_eq!(calls, vec![format!("tell {} 6s notify=true", t("native_notifyChromeNotConnected"))]);
+        assert!(h.core.next_deadline().is_none());
+    }
+
+    #[test]
+    fn stopping_while_waiting_takes_the_connecting_bubble_away() {
+        let mut h = Harness::new();
+        h.cli(Request::Start { mode: None });
+        h.fake.take();
+        h.cli(Request::Stop);
+        assert!(h.fake.take().contains(&"hide bubble".to_string()));
         assert!(h.core.next_deadline().is_none());
     }
 
@@ -960,7 +982,7 @@ pub mod tests {
         h.ext(json!({"type":"session","event":{"kind":"final","text":"secret words"}}));
         let calls = h.fake.take();
         assert!(!calls.iter().any(|c| c.starts_with("inject")));
-        assert!(calls.iter().any(|c| c.starts_with("notify")));
+        assert!(calls.contains(&format!("tell {} 6s notify=true", t("native_notifyPasswordField"))));
     }
 
     #[test]
@@ -971,7 +993,7 @@ pub mod tests {
         h.ext(json!({"type":"session","event":{"kind":"final","text":"abc"}}));
         let calls = h.fake.take();
         assert!(calls.contains(&"copy 3".to_string()));
-        assert!(calls.iter().any(|c| c.starts_with("notify")));
+        assert!(calls.contains(&format!("tell {} 6s notify=true", t("native_notifyPasteManually"))));
     }
 
     #[test]
@@ -1002,7 +1024,11 @@ pub mod tests {
         let mut h = Harness::new();
         *h.fake.hotkey.lock().unwrap() = Some(Err(PlatformError::Failed("taken".into())));
         h.core.start();
-        assert!(h.fake.take().iter().any(|c| c.starts_with("notify ")));
+        let calls = h.fake.take();
+        // The mic is up before the message, so the message can be said in its bubble.
+        let icon = calls.iter().position(|c| c == "icon Idle").expect("icon shown");
+        let told = calls.iter().position(|c| c.starts_with("tell ") && c.ends_with("6s notify=true")).expect("told");
+        assert!(icon < told, "{calls:?}");
     }
 
     #[test]

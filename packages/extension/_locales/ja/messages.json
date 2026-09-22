@@ -297,6 +297,10 @@
     "message": "Chrome の vtype とつながりませんでした。Chrome を開き、vtype の設定でデスクトップ連携をオンにしてください。",
     "description": "Desktop app: notification when the vtype extension in Chrome could not be reached"
   },
+  "native_bubbleConnecting": {
+    "message": "Chrome の vtype とつないでいます…",
+    "description": "Desktop app: shown above the mic icon while it waits (up to 10 seconds) for the extension in Chrome"
+  },
   "native_notifyPasteManually": {
     "message": "文字をクリップボードに入れました。Ctrl+V で貼り付けてください。",
     "description": "Desktop app: notification when the text could only be put on the clipboard"

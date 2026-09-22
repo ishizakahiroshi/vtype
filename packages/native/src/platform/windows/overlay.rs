@@ -343,7 +343,8 @@ impl Overlay {
         self.shown
     }
 
-    pub fn show_bubble(&mut self, text: &str) {
+    /// At most `max_lines`; a longer text loses its start (live text: the latest words matter).
+    pub fn show_bubble(&mut self, text: &str, max_lines: i32) {
         let scale = scale_for(self.icon.hwnd.get());
         let width = (BUBBLE_WIDTH as f32 * scale).round() as i32;
         let pad = (BUBBLE_PADDING as f32 * scale).round() as i32;
@@ -366,12 +367,15 @@ impl Overlay {
                 FF_DONTCARE as u32,
                 face.as_ptr(),
             );
-            // Measure: at most two lines; drop the start until it fits.
+            // Measure: at most `max_lines`; drop the start until it fits.
             let screen = GetDC(null_mut());
             let measure = CreateCompatibleDC(screen);
             let old_font = SelectObject(measure, font);
             let flags = DT_WORDBREAK | DT_EDITCONTROL | DT_NOPREFIX;
-            let max_height = font_px * 2 + font_px / 2;
+            let mut one = wide("Xg");
+            let mut line = RECT { left: 0, top: 0, right: width - pad * 2, bottom: 0 };
+            DrawTextW(measure, one.as_mut_ptr(), -1, &mut line, flags | DT_CALCRECT);
+            let max_height = line.bottom * max_lines + 1;
             let mut shown = text.to_string();
             let mut limit = text.chars().count();
             let text_height = loop {
