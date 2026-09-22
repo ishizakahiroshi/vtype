@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>vtype-spike-speech</title>
+</head>
+<body>
+<p>vtype spike (disposable, not shipped). probe=<span id="probe"></span></p>
+<script>
+(function () {
+  var port = "__PORT__";
+  var params = new URLSearchParams(location.search);
+  var probe = params.get("probe") || "none";
+  document.getElementById("probe").textContent = probe;
+
+  var ws = new WebSocket("ws://127.0.0.1:" + port + "/ws");
+  var stopped = false;
+  var rec = null;
+  var track = null;
+
+  function send(obj) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(obj));
+    }
+  }
+
+  function geom() {
+    return {
+      screenX: window.screenX,
+      screenY: window.screenY,
+      outerWidth: window.outerWidth,
+      outerHeight: window.outerHeight
+    };
+  }
+
+  function startRec() {
+    var Rec = window.webkitSpeechRecognition || window.SpeechRecognition;
+    if (!Rec) {
+      send({ type: "error", error: "no-api", message: "webkitSpeechRecognition is missing" });
+      return;
+    }
+    if (!rec) {
+      rec = new Rec();
+      rec.lang = "ja-JP";
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.onresult = function (ev) {
+        var results = [];
+        for (var i = ev.resultIndex; i < ev.results.length; i++) {
+          var r = ev.results[i];
+          var alt = r[0] || null;
+          results.push({
+            transcript: alt ? alt.transcript : "",
+            confidence: alt ? alt.confidence : null,
+            isFinal: !!r.isFinal
+          });
+        }
+        send({ type: "result", resultIndex: ev.resultIndex, results: results });
+      };
+      rec.onerror = function (ev) {
+        send({ type: "error", error: ev.error || "", message: ev.message || "" });
+      };
+      rec.onend = function () {
+        send({ type: "end" });
+        if (stopped) return;
+        window.setTimeout(function () {
+          if (stopped) return;
+          try {
+            if (track) rec.start(track);
+            else rec.start();
+            send({ type: "start", reason: "onend" });
+          } catch (e) {
+            send({ type: "error", error: "restart-failed", message: String(e) });
+          }
+        }, 250);
+      };
+    }
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      track = stream.getAudioTracks()[0] || null;
+      send({ type: "device", label: track ? track.label : "" });
+      try {
+        rec.start(track);
+        send({ type: "start", reason: "track" });
+      } catch (e) {
+        send({ type: "error", error: "start-track-failed", message: String(e) });
+        try {
+          rec.start();
+          send({ type: "start", reason: "mic-fallback" });
+        } catch (e2) {
+          send({ type: "error", error: "start-failed", message: String(e2) });
+        }
+      }
+    }).catch(function (e) {
+      send({ type: "error", error: "gum", message: String(e) });
+    });
+  }
+
+  ws.onopen = function () {
+    send({ type: "hello", probe: probe, href: location.href, geom: geom() });
+    if (probe === "level") {
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+        var ctx = new AudioContext();
+        var src = ctx.createMediaStreamSource(stream);
+        var an = ctx.createAnalyser();
+        an.fftSize = 2048;
+        src.connect(an);
+        var buf = new Float32Array(an.fftSize);
+        navigator.mediaDevices.enumerateDevices().then(function (list) {
+          send({
+            type: "devices",
+            devices: list.filter(function (d) { return d.kind === "audioinput"; }).map(function (d) {
+              return { label: d.label, deviceId: (d.deviceId || "").slice(0, 12) };
+            })
+          });
+        });
+        var n = 0;
+        var timer = window.setInterval(function () {
+          an.getFloatTimeDomainData(buf);
+          var sum = 0;
+          for (var i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+          send({ type: "level", rms: Math.round(Math.sqrt(sum / buf.length) * 10000) / 10000 });
+          n += 1;
+          if (n >= 8) window.clearInterval(timer);
+        }, 1000);
+      }).catch(function (e) {
+        send({ type: "error", error: "gum", message: String(e) });
+      });
+      return;
+    }
+    if (probe === "close") {
+      window.setTimeout(function () {
+        send({ type: "probe", action: "close-before", geom: geom() });
+        window.setTimeout(function () { window.close(); }, 300);
+      }, 4000);
+      return;
+    }
+    if (probe === "move") {
+      window.setTimeout(function () {
+        send({ type: "probe", action: "move-before", geom: geom() });
+        window.moveTo(-32000, -32000);
+        window.resizeTo(400, 300);
+        window.setTimeout(function () {
+          send({
+            type: "probe",
+            action: "move-after",
+            geom: geom(),
+            requested: { x: -32000, y: -32000, w: 400, h: 300 }
+          });
+        }, 800);
+      }, 4000);
+      return;
+    }
+    startRec();
+  };
+})();
+</script>
+</body>
+</html>
