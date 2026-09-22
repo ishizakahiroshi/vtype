@@ -20,6 +20,12 @@ thiserror = "2.0.20"
 tiny-skia = "0.12.0"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "std"] }
+# The desktop UI every system shares (tray, shortcut, clipboard, notifications, opening URLs).
+arboard = "3.6.1"
+global-hotkey = "0.8.0"
+notify-rust = "4.18.0"
+open = "5.4.4"
+tray-icon = "0.25.1"
 
 [build-dependencies]
 serde_json = "1.0.151"
@@ -28,14 +34,6 @@ serde_json = "1.0.151"
 lto = true
 codegen-units = 1
 strip = true
-
-# The desktop UI shared by the systems that have it written (tray, shortcut, clipboard, toasts).
-[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
-arboard = "3.6.1"
-global-hotkey = "0.8.0"
-notify-rust = "4.18.0"
-open = "5.4.4"
-tray-icon = "0.25.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 dispatch2 = "0.3.1"
@@ -49,3 +47,12 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 [target."cfg(windows)".dependencies]
 windows = { version = "0.62.2", features = ["Win32_UI_Accessibility", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant", "Win32_Foundation"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
+# One async runtime on Linux: zbus's own async-io (ashpd would bring tokio by default).
+[target.'cfg(target_os = "linux")'.dependencies]
+arboard = { version = "3.6.1", features = ["wayland-data-control"] }
+ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "remote_desktop", "screencast"] }
+atspi = { version = "0.30.0", default-features = false, features = ["connection", "proxies", "wrappers"] }
+gtk = "0.18"
+x11rb = { version = "0.14.0", features = ["xtest"] }
+zbus = "5.19.0"

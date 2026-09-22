@@ -70,7 +70,6 @@ pub struct Core {
     recording: bool,
     pending: Option<Pending>,
     errors: ErrorLog,
-    notes: Vec<(String, String)>,
     now: Box<dyn Fn() -> Instant + Send>,
     /// Last character typed in this recording (to space English finals apart).
     last_char: Option<char>,
@@ -88,13 +87,13 @@ impl Core {
             recording: false,
             pending: None,
             errors: ErrorLog::default(),
-            notes: Vec::new(),
             now: Box::new(Instant::now),
             last_char: None,
         }
     }
 
     /// Replaces the clock, for tests.
+    #[cfg(test)]
     pub fn set_clock(&mut self, now: Box<dyn Fn() -> Instant + Send>) {
         self.now = now;
     }
@@ -103,6 +102,7 @@ impl Core {
         self.host.as_ref().is_some_and(|h| h.extension_version.is_some())
     }
 
+    #[cfg(test)]
     pub fn config(&self) -> &NativeConfig {
         &self.config
     }
@@ -293,6 +293,7 @@ impl Core {
     pub fn diagnostics(&self) -> Value {
         let os = self.platform.os_description();
         let host = self.host.as_ref();
+        let notes = self.platform.platform_notes();
         diag::report(&diag::Snapshot {
             os: &os,
             config: &self.config,
@@ -300,14 +301,8 @@ impl Core {
             extension_version: host.and_then(|h| h.extension_version.as_deref()),
             browser: host.and_then(|h| h.browser.as_deref()),
             errors: &self.errors,
-            notes: &self.notes,
+            notes: &notes,
         })
-    }
-
-    /// Records a named fact for the diagnostic report (replacing an older value of the same name).
-    pub fn note(&mut self, name: &str, value: &str) {
-        self.notes.retain(|(k, _)| k != name);
-        self.notes.push((name.to_string(), value.to_string()));
     }
 
     fn on_extension_message(&mut self, message: Value) {
@@ -488,6 +483,9 @@ impl Core {
                 self.save_config();
             }
             PlatformEvent::Menu(action) => match action {
+                MenuAction::ToggleRecording => {
+                    let _ = self.toggle(None);
+                }
                 MenuAction::ToggleIconVisible => {
                     let mut c = self.config.clone();
                     c.icon.visible = !c.icon.visible;

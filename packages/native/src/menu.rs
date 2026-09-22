@@ -17,13 +17,25 @@ pub fn tooltip() -> String {
     t("native_trayTooltip")
 }
 
+/// Linux trays (AppIndicator) report no clicks, so there the menu itself starts and stops.
+pub const MENU_STARTS_RECORDING: bool = cfg!(target_os = "linux");
+
 pub fn tray_menu(state: &TrayState) -> Vec<MenuItem> {
+    menu_items(state, MENU_STARTS_RECORDING)
+}
+
+pub fn menu_items(state: &TrayState, with_record_item: bool) -> Vec<MenuItem> {
     let mode = |m: InputMode, label: String| MenuItem::Radio {
         action: MenuAction::SetMode(m),
         label,
         checked: state.mode == m,
     };
-    vec![
+    let mut items = Vec::new();
+    if with_record_item {
+        items.push(MenuItem::Action { action: MenuAction::ToggleRecording, label: t("native_trayToggleRecording") });
+        items.push(MenuItem::Separator);
+    }
+    items.extend([
         MenuItem::Check {
             action: MenuAction::ToggleIconVisible,
             label: t("native_trayShowIcon"),
@@ -44,7 +56,8 @@ pub fn tray_menu(state: &TrayState) -> Vec<MenuItem> {
         MenuItem::Action { action: MenuAction::CopyDiagnostics, label: t("native_trayCopyDiagnostics") },
         MenuItem::Separator,
         MenuItem::Action { action: MenuAction::Quit, label: t("native_trayQuit") },
-    ]
+    ]);
+    items
 }
 
 #[cfg(test)]
@@ -67,5 +80,19 @@ mod tests {
             .collect();
         assert_eq!(checked, vec![MenuAction::ToggleIconVisible, MenuAction::SetMode(InputMode::Kana)]);
         assert!(matches!(menu.last(), Some(MenuItem::Action { action: MenuAction::Quit, .. })));
+    }
+
+    #[test]
+    fn the_record_item_leads_only_where_the_tray_has_no_click() {
+        let state = TrayState::default();
+        let first = |items: Vec<MenuItem>| items.into_iter().next();
+        assert!(matches!(
+            first(menu_items(&state, true)),
+            Some(MenuItem::Action { action: MenuAction::ToggleRecording, .. })
+        ));
+        assert!(matches!(
+            first(menu_items(&state, false)),
+            Some(MenuItem::Check { action: MenuAction::ToggleIconVisible, .. })
+        ));
     }
 }

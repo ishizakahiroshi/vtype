@@ -6,9 +6,8 @@ use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
 use windows_sys::Win32::System::Registry::{
-    RegCloseKey, RegCreateKeyExW, RegDeleteKeyValueW, RegDeleteKeyW, RegDeleteTreeW, RegGetValueW, RegOpenKeyExW,
-    RegSetValueExW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE,
-    REG_SZ, RRF_RT_REG_SZ,
+    RegCloseKey, RegCreateKeyExW, RegDeleteKeyValueW, RegDeleteKeyW, RegDeleteTreeW, RegGetValueW, RegSetValueExW,
+    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ, RRF_RT_REG_SZ,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -112,19 +111,6 @@ pub fn delete_tree(hive: Hive, subkey: &str) -> io::Result<()> {
         Ok(())
     } else {
         check(code)
-    }
-}
-
-/// True if the key exists.
-pub fn key_exists(hive: Hive, subkey: &str) -> bool {
-    let subkey_w = wide(subkey);
-    let mut key: HKEY = null_mut();
-    let code = unsafe { RegOpenKeyExW(hive.key(), subkey_w.as_ptr(), 0, KEY_READ, &mut key) };
-    if code == ERROR_SUCCESS {
-        unsafe { RegCloseKey(key) };
-        true
-    } else {
-        false
     }
 }
 

@@ -249,6 +249,10 @@
     "message": "vtype: click to dictate",
     "description": "Desktop app: tooltip of the tray / menu bar icon"
   },
+  "native_trayToggleRecording": {
+    "message": "Start / stop dictation",
+    "description": "Desktop app: tray menu item that starts or stops recording (shown where the tray icon cannot be clicked)"
+  },
   "native_trayShowIcon": {
     "message": "Show the mic icon",
     "description": "Desktop app: tray menu checkbox that shows the floating mic near the taskbar"

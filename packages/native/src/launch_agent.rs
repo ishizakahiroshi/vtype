@@ -1,5 +1,7 @@
 //! Starting with the user's session on macOS: a LaunchAgent plist in `~/Library/LaunchAgents`
 //! (child plan C6-C1). Plain text in, plain text out, so it is tested on every OS.
+// On other systems this is built only for its tests.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
 use std::path::{Path, PathBuf};
 

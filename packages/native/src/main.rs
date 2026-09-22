@@ -1,10 +1,6 @@
 //! vtype desktop. The Chrome extension recognizes speech; this program receives the text over
 //! Native Messaging and types it into whatever app is in front.
 
-// The platform layer is filled in OS by OS (Windows, then macOS, then Linux); until all three
-// use the whole trait, parts of it are unused on some targets.
-#![allow(dead_code)]
-
 mod cli;
 mod config;
 mod daemon;
@@ -15,7 +11,10 @@ mod i18n;
 mod icon_draw;
 mod install;
 mod ipc;
+#[cfg(any(target_os = "macos", test))]
 mod launch_agent;
+#[cfg(any(target_os = "linux", test))]
+mod linux_setup;
 mod log;
 mod menu;
 mod nm_frame;
@@ -24,7 +23,10 @@ mod paths;
 mod platform;
 mod protocol;
 mod report;
+#[cfg(any(target_os = "macos", test))]
 mod text_chunks;
+#[cfg(any(target_os = "linux", test))]
+mod wayland_inject;
 #[cfg(windows)]
 mod win_registry;
 

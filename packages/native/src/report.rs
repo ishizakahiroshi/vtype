@@ -8,6 +8,8 @@ pub const ISSUE_FORM: &str = "https://github.com/ishizakahiroshi/vtype/issues/ne
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Surface {
+    /// The extension builds its URL itself (TypeScript); the variant is here for the shared fixture.
+    #[cfg_attr(not(test), allow(dead_code))]
     Extension,
     Desktop,
 }

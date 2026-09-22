@@ -240,10 +240,6 @@ impl Ui {
         self.overlay.hide_bubble();
     }
 
-    pub fn overlay_hwnd(&self) -> HWND {
-        self.overlay.hwnd()
-    }
-
     /// Hides the mic while a full-screen app (a game, a video, a presentation) is in front.
     fn check_fullscreen(&mut self) {
         if !self.hide_on_fullscreen || !self.icon_wanted {

@@ -203,10 +203,19 @@ fn unregister(_locations: &HostLocations) -> Result<()> {
     Ok(())
 }
 
-/// OS-specific extras after registering (the Linux GNOME shortcut lives here).
-fn after_install_hooks() {}
+/// OS-specific extras after registering: GNOME's custom shortcut, the only global shortcut on
+/// GNOME's Wayland.
+fn after_install_hooks() {
+    #[cfg(target_os = "linux")]
+    if let Ok(exe) = std::env::current_exe() {
+        crate::platform::linux::gnome::install(&exe);
+    }
+}
 
-fn before_uninstall_hooks() {}
+fn before_uninstall_hooks() {
+    #[cfg(target_os = "linux")]
+    crate::platform::linux::gnome::uninstall();
+}
 
 #[cfg(test)]
 mod tests {

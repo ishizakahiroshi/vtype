@@ -1,6 +1,8 @@
 //! Text cut into key events for systems that take a short Unicode string per event (macOS takes
 //! at most 20 UTF-16 units in one `CGEventKeyboardSetUnicodeString`). Line breaks and tabs
 //! become real keys. A surrogate pair is never split across two events.
+// On other systems this is built only for its tests.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum KeyStep {

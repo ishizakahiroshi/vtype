@@ -12,10 +12,9 @@ use thiserror::Error;
 use crate::config::InjectMethod;
 use crate::protocol::InputMode;
 
-#[cfg(any(windows, target_os = "macos"))]
 pub mod desktop;
 #[cfg(target_os = "linux")]
-mod linux;
+pub mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(windows)]
@@ -23,7 +22,9 @@ pub mod windows;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum PlatformError {
+    /// (Every macOS feature is there, so the macOS code never says this.)
     #[error("not supported on this system")]
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     Unsupported,
     #[error("{0}")]
     Failed(String),
@@ -50,6 +51,8 @@ pub enum PlatformEvent {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuAction {
+    /// Start or stop recording (the menu item exists where the tray cannot be clicked).
+    ToggleRecording,
     ToggleIconVisible,
     ToggleHideOnFullscreen,
     SetMode(InputMode),
@@ -83,7 +86,9 @@ pub enum IconState {
 pub enum InjectOutcome {
     Typed,
     Pasted,
-    /// Could not type or paste; the text is on the clipboard for the user to paste.
+    /// Could not type or paste; the text is on the clipboard for the user to paste. Only the
+    /// Wayland fallback ends here (elsewhere a failure is an error, and the daemon copies).
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     CopiedOnly,
 }
 
@@ -127,6 +132,10 @@ pub trait Platform: Send + Sync {
     fn os_description(&self) -> String;
     /// BCP 47-ish UI language of the OS, e.g. `ja-JP`.
     fn ui_language(&self) -> String;
+    /// Named facts for the diagnostic report (e.g. how far the Wayland typing fallback got).
+    fn platform_notes(&self) -> Vec<(String, String)> {
+        Vec::new()
+    }
 }
 
 /// The implementation for the OS this binary was built for.
@@ -146,6 +155,7 @@ pub fn current() -> Box<dyn Platform> {
 }
 
 /// Language from the POSIX locale variables, for the systems that have no better source.
+#[cfg(not(windows))]
 pub fn language_from_env() -> String {
     for var in ["LC_ALL", "LC_MESSAGES", "LANG"] {
         if let Ok(v) = std::env::var(var) {
@@ -156,24 +166,4 @@ pub fn language_from_env() -> String {
         }
     }
     "en".to_string()
-}
-
-/// A loop that just waits for `quit`, for platforms whose UI is not written yet.
-#[derive(Default)]
-pub struct IdleLoop {
-    quit: std::sync::Mutex<bool>,
-    cv: std::sync::Condvar,
-}
-
-impl IdleLoop {
-    pub fn run(&self) {
-        let mut done = self.quit.lock().unwrap_or_else(|e| e.into_inner());
-        while !*done {
-            done = self.cv.wait(done).unwrap_or_else(|e| e.into_inner());
-        }
-    }
-    pub fn quit(&self) {
-        *self.quit.lock().unwrap_or_else(|e| e.into_inner()) = true;
-        self.cv.notify_all();
-    }
 }

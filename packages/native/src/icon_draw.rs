@@ -123,7 +123,9 @@ pub fn to_straight_rgba(pm: &Pixmap) -> Vec<u8> {
     out
 }
 
-/// Premultiplied RGBA → premultiplied BGRA (what Windows' layered windows take).
+/// Premultiplied RGBA → premultiplied BGRA (what Windows' layered windows and cairo's ARGB32
+/// take). macOS draws through a PNG instead.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub fn to_premultiplied_bgra(pm: &Pixmap) -> Vec<u8> {
     let mut out = Vec::with_capacity(pm.data().len());
     for &[r, g, b, a] in pm.data().as_chunks::<4>().0 {
