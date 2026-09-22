@@ -32,9 +32,6 @@ use crate::report::{self, ReportInfo, Surface};
 /// How long a start request waits for Chrome to come up and connect (parent plan D13).
 pub const CHROME_WAIT: Duration = Duration::from_secs(10);
 
-/// The store build of the extension (parent plan D10).
-pub const STORE_EXTENSION_ID: &str = "nngfilimeplngdjdmgkddlhbdjpmikgn";
-
 pub type ConnId = u64;
 
 pub enum Event {
@@ -52,7 +49,6 @@ pub enum Flow {
 struct HostLink {
     conn: ConnId,
     out: Sender<Reply>,
-    origin: String,
     /// Set once the extension said hello through this host.
     extension_version: Option<String>,
     browser: Option<String>,
@@ -77,8 +73,6 @@ pub struct Core {
     config_path: Option<PathBuf>,
     host: Option<HostLink>,
     mode: InputMode,
-    /// A mode chosen while no extension was connected, sent once one says hello.
-    pending_mode: Option<InputMode>,
     recording: bool,
     pending: Option<Pending>,
     errors: ErrorLog,
@@ -110,13 +104,13 @@ pub struct Core {
 
 impl Core {
     pub fn new(platform: Arc<dyn Platform>, config: NativeConfig, config_path: Option<PathBuf>) -> Core {
+        let mode = config.input_mode;
         Core {
             platform,
             config,
             config_path,
             host: None,
-            mode: InputMode::Normal,
-            pending_mode: None,
+            mode,
             recording: false,
             pending: None,
             errors: ErrorLog::default(),
@@ -338,13 +332,20 @@ impl Core {
             Request::SetMode { mode } => Some(self.set_mode(mode)),
             Request::OpenSettings => Some(self.open_settings()),
             Request::Diagnostics => Some(Reply::Diagnostics { report: self.diagnostics() }),
+            Request::GetConfig => Some(Reply::Config { config: self.config.clone() }),
+            Request::SetConfig { config } => {
+                self.apply_config(config);
+                // The speech page takes the replacement table from here.
+                self.send(&ToExtension::NativeConfig { config: self.config.clone() });
+                Some(Reply::Config { config: self.config.clone() })
+            }
             Request::Quit => {
                 let _ = out.send(Reply::Ok);
                 return Flow::Quit;
             }
             Request::HostHello { origin } => {
-                tracing::info!("host attached");
-                self.host = Some(HostLink { conn, out: out.clone(), origin, extension_version: None, browser: None });
+                tracing::info!(%origin, "host attached");
+                self.host = Some(HostLink { conn, out: out.clone(), extension_version: None, browser: None });
                 None
             }
             Request::FromExtension { message } => {
@@ -441,29 +442,23 @@ impl Core {
 
     fn set_mode(&mut self, mode: InputMode) -> Reply {
         self.mode = mode;
-        if self.connected() {
-            self.send(&ToExtension::SetMode { mode });
-        } else {
-            self.pending_mode = Some(mode);
+        if self.config.input_mode != mode {
+            // Kept across restarts (standalone plan C5); a page hears it when it says hello.
+            self.config.input_mode = mode;
+            self.save_config();
         }
+        self.send(&ToExtension::SetMode { mode });
         self.update_tray();
         Reply::Ok
     }
 
-    fn extension_id(&self) -> String {
-        self.host
-            .as_ref()
-            .and_then(|h| extension_id_from_origin(&h.origin))
-            .unwrap_or_else(|| STORE_EXTENSION_ID.to_string())
-    }
-
+    /// The daemon's own settings page (standalone plan C5), in its own Chrome profile.
     fn open_settings(&mut self) -> Reply {
-        if self.connected() {
-            self.send(&ToExtension::OpenOptions);
-            return Reply::Ok;
-        }
-        let url = format!("chrome-extension://{}/options.html", self.extension_id());
-        match self.platform.launch_chrome(&[url]) {
+        let Some(page) = self.speech_page.as_deref() else {
+            return Reply::error("speech_page_unavailable", "the settings page is not being served");
+        };
+        let args = chrome_launch::settings_args(&self.profile_dir, &chrome_launch::settings_url(page));
+        match self.platform.launch_chrome(&args) {
             Ok(()) => Reply::Ok,
             Err(e) => Reply::error("chrome_launch_failed", e.to_string()),
         }
@@ -503,10 +498,9 @@ impl Core {
                     native_version: env!("CARGO_PKG_VERSION").to_string(),
                     os: self.platform.os_description(),
                 });
+                // The replacement table travels in the config; the mode is said on its own.
                 self.send(&ToExtension::NativeConfig { config: self.config.clone() });
-                if let Some(mode) = self.pending_mode.take() {
-                    self.send(&ToExtension::SetMode { mode });
-                }
+                self.send(&ToExtension::SetMode { mode: self.mode });
                 self.send(&ToExtension::GetState);
                 // The first-run window only asks; the recording starts once it is hidden.
                 if self.ready() {
@@ -673,6 +667,7 @@ impl Core {
         }
         // Consent is given on the speech page only; a settings page does not take it back.
         new.consented = self.config.consented;
+        let mode_changed = new.input_mode != self.config.input_mode;
         let hotkey_changed = new.effective_hotkey() != self.config.effective_hotkey();
         let icon_changed = new.icon.visible != self.config.icon.visible;
         let beside_changed = new.beside_field != self.config.beside_field;
@@ -694,6 +689,10 @@ impl Core {
             } else {
                 self.platform.hide_icon();
             }
+        }
+        if mode_changed {
+            self.mode = self.config.input_mode;
+            self.send(&ToExtension::SetMode { mode: self.mode });
         }
         self.update_tray();
     }
@@ -797,12 +796,6 @@ impl Core {
             self.tick();
         }
     }
-}
-
-/// `chrome-extension://<id>/` to `<id>`.
-pub fn extension_id_from_origin(origin: &str) -> Option<String> {
-    let id = origin.strip_prefix("chrome-extension://")?.trim_end_matches('/');
-    (!id.is_empty() && id.chars().all(|c| c.is_ascii_lowercase())).then(|| id.to_string())
 }
 
 /// Shared with speech_host.rs, whose page connections are hosts too.
@@ -1207,6 +1200,25 @@ pub mod tests {
     }
 
     #[test]
+    fn the_mode_is_kept_in_the_config_and_told_to_every_page() {
+        let mut h = Harness::new();
+        h.cli(Request::SetMode { mode: InputMode::Kana });
+        assert_eq!(h.core.config().input_mode, InputMode::Kana);
+        h.connect();
+        // A page started later hears the mode, and the table with the config.
+        h.core.config.replacements =
+            vec![config::ReplacementRule { from: "ブイタイプ".into(), to: "vtype".into() }];
+        h.page_hello();
+        let sent = h.sent();
+        assert!(sent.contains(&json!({"type":"set-mode","mode":"kana"})), "{sent:?}");
+        let cfg = sent.iter().find(|m| m["type"] == "native-config").expect("native-config");
+        assert_eq!(cfg["config"]["replacements"], json!([{"from":"ブイタイプ","to":"vtype"}]));
+        // A daemon started with this config starts in that mode.
+        let restarted = Core::new(h.fake.clone(), h.core.config().clone(), None);
+        assert_eq!(restarted.mode, InputMode::Kana);
+    }
+
+    #[test]
     fn a_settings_page_does_not_take_the_consent_back() {
         let mut h = Harness::new();
         h.core.config.consented = true;
@@ -1347,13 +1359,16 @@ pub mod tests {
     }
 
     #[test]
-    fn open_settings_uses_the_connected_extension_or_starts_chrome() {
+    fn open_settings_opens_the_settings_page_in_its_own_chrome() {
         let mut h = Harness::new();
-        h.cli(Request::OpenSettings);
-        assert_eq!(h.fake.take(), vec![format!("chrome chrome-extension://{STORE_EXTENSION_ID}/options.html")]);
+        assert_eq!(h.cli(Request::OpenSettings), Reply::Ok);
+        let settings = "http://127.0.0.1:47213/t/0123456789abcdef0123456789abcdef/settings";
+        let expected = format!("chrome {}", chrome_launch::settings_args(Path::new("/p"), settings).join(" "));
+        assert_eq!(h.fake.take(), vec![expected]);
+        // The same with a page connected: nothing goes to the page.
         h.connect();
         h.cli(Request::OpenSettings);
-        assert_eq!(h.sent(), vec![json!({"type":"open-options"})]);
+        assert!(h.sent().is_empty());
     }
 
     #[test]
@@ -1375,15 +1390,6 @@ pub mod tests {
         h.ext(json!({"type":"session","event":{"kind":"final","text":"do not keep this sentence"}}));
         let text = serde_json::to_string(&h.core.diagnostics()).unwrap();
         assert!(!text.contains("do not keep"));
-    }
-
-    #[test]
-    fn origin_to_id() {
-        assert_eq!(
-            extension_id_from_origin("chrome-extension://nngfilimeplngdjdmgkddlhbdjpmikgn/").as_deref(),
-            Some(STORE_EXTENSION_ID)
-        );
-        assert_eq!(extension_id_from_origin("https://example.com/"), None);
     }
 
     fn text_field() -> FieldProbe {

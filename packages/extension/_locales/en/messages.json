@@ -537,5 +537,9 @@
   "optionsNativeSent": {
     "message": "Sent to the desktop app.",
     "description": "Options page: status after the desktop app's settings were sent"
+  },
+  "settings_failed": {
+    "message": "Could not reach vtype. Check that it is running, then reopen this page from its tray icon.",
+    "description": "Desktop app settings page: the settings could not be read or saved"
   }
 }

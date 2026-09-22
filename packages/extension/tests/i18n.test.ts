@@ -18,6 +18,7 @@ const manifest = JSON.parse(readFileSync(join(extensionRoot, "manifest.json"), "
 /** Source files that hold user-facing text, so the keys they use can be checked against the dictionaries. */
 const sources = [
   "src/content/controller.ts",
+  "src/desktop-settings/settings.ts",
   "src/options/options.ts",
   "src/permission/permission.ts",
   "src/speech/speech.ts",

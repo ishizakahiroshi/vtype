@@ -1,14 +1,53 @@
-//! `config.json`: the desktop app's own settings. The input mode and the replacement table are
-//! not here; they belong to the extension, which does the recognition (parent plan D7).
+//! `config.json`: the desktop app's own settings, including the input mode and the replacement
+//! table since the desktop app does its own recognition (standalone plan C5).
 //!
-//! The JSON uses camelCase because the extension's options page reads and writes the same object
-//! over Native Messaging.
+//! The JSON uses camelCase: the speech page and the settings page read the same object.
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
+
+use crate::protocol::InputMode;
+
+/// Same limit as vtype-core's `MAX_REPLACEMENT_RULES`.
+pub const MAX_REPLACEMENT_RULES: usize = 200;
+
+/// One entry of the replacement table: `from` is replaced by `to` in what is recognised.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplacementRule {
+    pub from: String,
+    pub to: String,
+}
+
+/// vtype-core's `normalizeReplacementRules`: entries that are not two strings and entries with an
+/// empty `from` are dropped, a `from` seen before (A-Z compared without case) is dropped, and the
+/// table stops at `MAX_REPLACEMENT_RULES`. Spaces are kept.
+pub fn normalize_replacements(raw: &Value) -> Vec<ReplacementRule> {
+    let mut out: Vec<ReplacementRule> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for item in raw.as_array().map(Vec::as_slice).unwrap_or_default() {
+        if out.len() >= MAX_REPLACEMENT_RULES {
+            break;
+        }
+        let (Some(from), Some(to)) = (item.get("from").and_then(Value::as_str), item.get("to").and_then(Value::as_str))
+        else {
+            continue;
+        };
+        if from.is_empty() || !seen.insert(from.to_ascii_lowercase()) {
+            continue;
+        }
+        out.push(ReplacementRule { from: from.to_string(), to: to.to_string() });
+    }
+    out
+}
+
+/// A broken table (or broken entries) must not make the whole file unreadable.
+fn lenient_replacements<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<ReplacementRule>, D::Error> {
+    Ok(normalize_replacements(&Value::deserialize(d)?))
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -25,6 +64,11 @@ pub struct NativeConfig {
     /// of this object (and the shared message fixture) is unchanged until then.
     #[serde(skip_serializing_if = "is_false")]
     pub consented: bool,
+    /// The input mode the recording starts in (standalone plan C5; the extension kept it before).
+    pub input_mode: InputMode,
+    /// Words the recognition gets wrong, and what to write instead.
+    #[serde(deserialize_with = "lenient_replacements")]
+    pub replacements: Vec<ReplacementRule>,
 }
 
 fn is_false(v: &bool) -> bool {
@@ -40,6 +84,8 @@ impl Default for NativeConfig {
             beside_field: BesideFieldConfig::default(),
             extra_extension_ids: Vec::new(),
             consented: false,
+            input_mode: InputMode::Normal,
+            replacements: Vec::new(),
         }
     }
 }
@@ -212,6 +258,42 @@ mod tests {
         assert!(serde_json::to_value(NativeConfig::default()).unwrap().get("consented").is_none());
         let given = NativeConfig { consented: true, ..NativeConfig::default() };
         assert_eq!(serde_json::to_value(&given).unwrap()["consented"], true);
+    }
+
+    #[test]
+    fn the_mode_and_the_table_are_kept_and_old_files_read() {
+        let old: NativeConfig = serde_json::from_str(r#"{"inject":"auto"}"#).unwrap();
+        assert_eq!(old.input_mode, InputMode::Normal);
+        assert!(old.replacements.is_empty());
+        let cfg: NativeConfig = serde_json::from_str(
+            r#"{"inputMode":"kana","replacements":[{"from":"ブイタイプ","to":"vtype"},{"from":1,"to":"x"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.input_mode, InputMode::Kana);
+        assert_eq!(cfg.replacements, vec![ReplacementRule { from: "ブイタイプ".into(), to: "vtype".into() }]);
+        let json = serde_json::to_value(&cfg).unwrap();
+        assert_eq!(json["inputMode"], "kana");
+        assert_eq!(json["replacements"][0]["to"], "vtype");
+    }
+
+    #[test]
+    fn the_table_is_normalized_like_vtype_core() {
+        let mut raw: Vec<Value> = vec![
+            serde_json::json!({"from":"","to":"empty"}),
+            serde_json::json!({"from":"GitHub","to":"first"}),
+            serde_json::json!({"from":"github","to":"dropped"}),
+            serde_json::json!({"from":" a ","to":" kept "}),
+            serde_json::json!("not an object"),
+        ];
+        for i in 0..300 {
+            raw.push(serde_json::json!({"from": format!("w{i}"), "to": "x"}));
+        }
+        let rules = normalize_replacements(&Value::Array(raw));
+        assert_eq!(rules.len(), MAX_REPLACEMENT_RULES);
+        assert_eq!(rules[0], ReplacementRule { from: "GitHub".into(), to: "first".into() });
+        assert_eq!(rules[1], ReplacementRule { from: " a ".into(), to: " kept ".into() });
+        assert_eq!(rules[2].from, "w0");
+        assert_eq!(rules.last().unwrap().from, "w197");
     }
 
     #[test]

@@ -14,7 +14,9 @@
         "icon": { "visible": true, "x": null, "y": null, "hideOnFullscreen": true },
         "inject": "auto",
         "besideField": { "enabled": false, "trigger": "focus" },
-        "extraExtensionIds": []
+        "extraExtensionIds": [],
+        "inputMode": "normal",
+        "replacements": []
       }
     },
     { "type": "open-options" }
@@ -35,7 +37,9 @@
         "icon": { "visible": false, "x": 1200, "y": -40, "hideOnFullscreen": false },
         "inject": "paste",
         "besideField": { "enabled": true, "trigger": "hover" },
-        "extraExtensionIds": ["abcdefghijklmnopabcdefghijklmnop"]
+        "extraExtensionIds": ["abcdefghijklmnopabcdefghijklmnop"],
+        "inputMode": "kana",
+        "replacements": [{ "from": "ブイタイプ", "to": "vtype" }]
       }
     },
     { "type": "get-native-config" },

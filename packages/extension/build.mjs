@@ -80,7 +80,7 @@ const scripts = [
 
 const bundle = (entry, outfile, kuromoji) =>
   build({
-    plugins: [rawImports, esbuildLocales(), kuromoji],
+    plugins: [rawImports, esbuildLocales(), kuromoji].filter(Boolean),
     entryPoints: [join(here, entry)],
     outfile,
     bundle: true,
@@ -192,12 +192,15 @@ await mkdir(distDesktop, { recursive: true });
 await bundle("src/speech/speech.ts", join(distDesktop, "speech.js"), kuromojiWith("src/speech/desktop-dictionary-loader.cjs"));
 await copyFile(join(here, "src/speech/speech.html"), join(distDesktop, "speech.html"));
 await copyDictionary(distDesktop);
-{
-  const code = await readFile(join(distDesktop, "speech.js"), "utf8");
+// Its settings page (standalone plan C5), opened from the tray in the same Chrome.
+await bundle("src/desktop-settings/settings.ts", join(distDesktop, "settings.js"));
+await copyFile(join(here, "src/desktop-settings/settings.html"), join(distDesktop, "settings.html"));
+for (const page of ["speech", "settings"]) {
+  const code = await readFile(join(distDesktop, `${page}.js`), "utf8");
   const moduleSyntax = code.match(/^\s*(import|export)\b.*$/m);
-  if (moduleSyntax !== null) throw new Error(`dist-desktop/speech.js contains module syntax: ${moduleSyntax[0]}`);
-  if (code.includes("chrome.runtime.getURL")) throw new Error("dist-desktop/speech.js uses the extension's dictionary loader");
-  const html = await readFile(join(distDesktop, "speech.html"), "utf8");
+  if (moduleSyntax !== null) throw new Error(`dist-desktop/${page}.js contains module syntax: ${moduleSyntax[0]}`);
+  if (code.includes("chrome.runtime.getURL")) throw new Error(`dist-desktop/${page}.js uses the extension's dictionary loader`);
+  const html = await readFile(join(distDesktop, `${page}.html`), "utf8");
   for (const m of html.matchAll(/<script[^>]*\bsrc="([^"]+)"/g)) await readFile(join(distDesktop, m[1]));
 }
 console.log(`built ${distDesktop}: ${(await readdir(distDesktop)).sort().join(", ")}`);

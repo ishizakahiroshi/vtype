@@ -537,5 +537,9 @@
   "optionsNativeSent": {
     "message": "デスクトップ版へ送りました。",
     "description": "Options page: status after the desktop app's settings were sent"
+  },
+  "settings_failed": {
+    "message": "vtype につながりませんでした。vtype が動いているか確かめてから、トレイのアイコンからこのページを開き直してください。",
+    "description": "Desktop app settings page: the settings could not be read or saved"
   }
 }

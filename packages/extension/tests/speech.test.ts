@@ -145,6 +145,26 @@ describe("the speech page and the desktop app", () => {
     expect(page.offscreen.sessionId).toBeNull();
   });
 
+  it("the desktop app's replacement table is applied to what is recognised", async () => {
+    page = makePage();
+    const s = await connected();
+    s.receive({
+      type: "native-config",
+      config: {
+        hotkey: null,
+        icon: { visible: true, x: null, y: null, hideOnFullscreen: true },
+        inject: "auto",
+        besideField: { enabled: false, trigger: "focus" },
+        extraExtensionIds: [],
+        replacements: [{ from: "ブイタイプ", to: "vtype" }],
+      },
+    });
+    const sr = await started(s);
+    sr.fireResult("ブイタイプで入力", true);
+    await flush(vi);
+    expect(s.events().at(-1)).toEqual({ kind: "final", text: "vtypeで入力" });
+  });
+
   it("set-mode is used by the next start", async () => {
     page = makePage();
     const s = await connected();

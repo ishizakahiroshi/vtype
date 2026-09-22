@@ -47,6 +47,12 @@ pub enum Request {
     OpenSettings,
     Diagnostics,
     Quit,
+    /// The settings page (and `vtype` itself) reads the desktop app's settings.
+    GetConfig,
+    /// The settings page changes them; the reply is the settings as applied.
+    SetConfig {
+        config: crate::config::NativeConfig,
+    },
     /// A recognizer connected: the speech page, with `origin` `http://127.0.0.1:<port>`.
     HostHello {
         origin: String,
@@ -74,6 +80,9 @@ pub enum Reply {
     },
     Diagnostics {
         report: Value,
+    },
+    Config {
+        config: crate::config::NativeConfig,
     },
     /// A message for the speech page; speech_host.rs sends it unchanged.
     ToExtension {

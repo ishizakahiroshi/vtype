@@ -40,6 +40,10 @@ const HEAD_LIMIT: usize = 8 * 1024;
 const HEAD_TIMEOUT: Duration = Duration::from_secs(5);
 /// How often the WebSocket loop looks for replies while it waits for the page.
 const POLL: Duration = Duration::from_millis(100);
+/// The largest settings body accepted (the replacement table is at most 200 short entries).
+const CONFIG_LIMIT: usize = 64 * 1024;
+/// How long a settings request waits for the daemon.
+const CONFIG_WAIT: Duration = Duration::from_secs(2);
 
 pub struct SpeechHost {
     port: u16,
@@ -165,6 +169,23 @@ fn respond(stream: &mut TcpStream, status: &str, content_type: &str, body: &[u8]
     stream.flush()
 }
 
+/// Answers a refused `POST` and reads what is left of its body (up to a bound): closing a socket
+/// with unread data makes Windows reset the connection, and the client never sees the answer.
+fn refuse(stream: &mut TcpStream, status: &str, text: &[u8]) -> io::Result<()> {
+    respond(stream, status, "text/plain; charset=utf-8", text)?;
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+    stream.set_read_timeout(Some(Duration::from_millis(500)))?;
+    let mut buf = [0u8; 8192];
+    let mut left = 4 * CONFIG_LIMIT;
+    while left > 0 {
+        match stream.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => left = left.saturating_sub(n),
+        }
+    }
+    Ok(())
+}
+
 fn not_found(stream: &mut TcpStream) -> io::Result<()> {
     respond(stream, "404 Not Found", "text/plain; charset=utf-8", b"not found")
 }
@@ -178,16 +199,71 @@ fn serve(mut stream: TcpStream, token: &str, origin: &str, tx: Sender<Event>) ->
     else {
         return not_found(&mut stream);
     };
+    if name == "api/config" {
+        return serve_config(stream, head, origin, tx);
+    }
     if head.method != "GET" || name.contains("..") {
         return not_found(&mut stream);
     }
     if name == "ws" {
         return serve_socket(stream, head, origin, tx);
     }
-    let name = if name == "speech" { "speech.html" } else { name };
+    let name = match name {
+        "speech" => "speech.html",
+        "settings" => "settings.html",
+        other => other,
+    };
     match asset(name) {
         Some((content_type, body)) => respond(&mut stream, "200 OK", content_type, body),
         None => not_found(&mut stream),
+    }
+}
+
+/// `GET` / `POST /t/<token>/api/config`: the settings page reads and changes the desktop app's
+/// settings. A change is accepted only from the page itself (`Origin`), as JSON, up to
+/// `CONFIG_LIMIT` bytes.
+fn serve_config(mut stream: TcpStream, head: Head, origin: &str, tx: Sender<Event>) -> io::Result<()> {
+    let header = |name: &str| head.headers.get(name).map(String::as_str).unwrap_or_default();
+    let req = match head.method.as_str() {
+        "GET" => Request::GetConfig,
+        "POST" => {
+            if header("origin") != origin {
+                return refuse(&mut stream, "403 Forbidden", b"forbidden");
+            }
+            if !header("content-type").to_ascii_lowercase().starts_with("application/json") {
+                return refuse(&mut stream, "415 Unsupported Media Type", b"json only");
+            }
+            let Ok(len) = header("content-length").parse::<usize>() else {
+                return refuse(&mut stream, "411 Length Required", b"length required");
+            };
+            if len > CONFIG_LIMIT {
+                return refuse(&mut stream, "413 Payload Too Large", b"too large");
+            }
+            let mut body = head.rest.clone();
+            body.truncate(len);
+            if body.len() < len {
+                let mut more = vec![0u8; len - body.len()];
+                stream.read_exact(&mut more)?;
+                body.extend_from_slice(&more);
+            }
+            match serde_json::from_slice(&body) {
+                Ok(config) => Request::SetConfig { config },
+                Err(_) => return respond(&mut stream, "400 Bad Request", "text/plain; charset=utf-8", b"bad config"),
+            }
+        }
+        _ => return not_found(&mut stream),
+    };
+    let (out, answer) = mpsc::channel::<Reply>();
+    let conn = NEXT_CONN.fetch_add(1, Ordering::Relaxed);
+    if tx.send(Event::Request { conn, req, out }).is_err() {
+        return respond(&mut stream, "503 Service Unavailable", "text/plain; charset=utf-8", b"unavailable");
+    }
+    match answer.recv_timeout(CONFIG_WAIT) {
+        Ok(Reply::Config { config }) => {
+            let body = serde_json::to_vec(&config).map_err(io::Error::other)?;
+            respond(&mut stream, "200 OK", "application/json; charset=utf-8", &body)
+        }
+        _ => respond(&mut stream, "503 Service Unavailable", "text/plain; charset=utf-8", b"unavailable"),
     }
 }
 
@@ -398,6 +474,86 @@ mod tests {
                 _ => continue,
             }
         }
+    }
+
+    /// Answers settings requests like Core: GetConfig with `current`, SetConfig by taking it.
+    fn settings_core(rx: Receiver<Event>) -> std::thread::JoinHandle<Vec<crate::config::NativeConfig>> {
+        thread::spawn(move || {
+            let mut current = crate::config::NativeConfig::default();
+            let mut set = Vec::new();
+            while let Ok(ev) = rx.recv_timeout(Duration::from_secs(3)) {
+                if let Event::Request { req, out, .. } = ev {
+                    match req {
+                        Request::GetConfig => {}
+                        Request::SetConfig { config } => {
+                            set.push(config.clone());
+                            current = config;
+                        }
+                        _ => continue,
+                    }
+                    let _ = out.send(Reply::Config { config: current.clone() });
+                }
+            }
+            set
+        })
+    }
+
+    fn raw(h: &SpeechHost, request: &str) -> (String, Vec<u8>) {
+        let mut s = TcpStream::connect(addr(h)).unwrap();
+        s.write_all(request.as_bytes()).unwrap();
+        let mut all = Vec::new();
+        s.read_to_end(&mut all).unwrap();
+        let end = all.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+        (String::from_utf8_lossy(&all[..end]).into_owned(), all[end + 4..].to_vec())
+    }
+
+    fn post(h: &SpeechHost, token: &str, origin: &str, content_type: &str, body: &str) -> (String, Vec<u8>) {
+        raw(
+            h,
+            &format!(
+                "POST /t/{token}/api/config HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {origin}\r\n\
+                 Content-Type: {content_type}\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            ),
+        )
+    }
+
+    #[test]
+    fn the_settings_page_reads_and_changes_the_config() {
+        let (tx, rx) = mpsc::channel();
+        let h = start_on(&[0], tx).unwrap();
+        let core = settings_core(rx);
+        let (head, body) = get(&h, &format!("/t/{}/api/config", h.token));
+        assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+        assert!(head.contains("application/json"));
+        let got: crate::config::NativeConfig = serde_json::from_slice(&body).unwrap();
+        assert_eq!(got, crate::config::NativeConfig::default());
+
+        let change = crate::config::NativeConfig { hotkey: Some("Ctrl+Alt+V".into()), ..Default::default() };
+        let (head, body) =
+            post(&h, &h.token, &h.origin(), "application/json", &serde_json::to_string(&change).unwrap());
+        assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+        let applied: crate::config::NativeConfig = serde_json::from_slice(&body).unwrap();
+        assert_eq!(applied.hotkey.as_deref(), Some("Ctrl+Alt+V"));
+        drop(h);
+        assert_eq!(core.join().unwrap(), vec![change]);
+    }
+
+    #[test]
+    fn a_change_from_elsewhere_or_not_json_or_too_big_is_refused() {
+        let (h, rx) = host();
+        let json = serde_json::to_string(&crate::config::NativeConfig::default()).unwrap();
+        let (head, _) = post(&h, &h.token, "https://example.com", "application/json", &json);
+        assert!(head.starts_with("HTTP/1.1 403"), "{head}");
+        let (head, _) = post(&h, &h.token, &h.origin(), "text/plain", &json);
+        assert!(head.starts_with("HTTP/1.1 415"), "{head}");
+        let big = format!("{{\"hotkey\":\"{}\"}}", "x".repeat(CONFIG_LIMIT));
+        let (head, _) = post(&h, &h.token, &h.origin(), "application/json", &big);
+        assert!(head.starts_with("HTTP/1.1 413"), "{head}");
+        let (head, _) = post(&h, &"0".repeat(32), &h.origin(), "application/json", &json);
+        assert!(head.starts_with("HTTP/1.1 404"), "{head}");
+        // None of them reached the daemon.
+        assert!(rx.recv_timeout(Duration::from_millis(300)).is_err());
     }
 
     #[test]

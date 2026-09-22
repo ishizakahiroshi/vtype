@@ -116,11 +116,39 @@ pub fn speech_args(profile_dir: &Path, url: &str, placement: WindowPlacement) ->
     args
 }
 
+/// The settings page (standalone plan C5) sits next to the speech page, under the same token.
+pub fn settings_url(speech_page: &str) -> String {
+    match speech_page.rsplit_once('/') {
+        Some((dir, _)) => format!("{dir}/settings"),
+        None => speech_page.to_string(),
+    }
+}
+
+/// The settings page in the same profile, as an ordinary on-screen app window sized for a form.
+pub fn settings_args(profile_dir: &Path, url: &str) -> Vec<String> {
+    vec![
+        format!("--user-data-dir={}", profile_dir.display()),
+        format!("--app={url}"),
+        "--no-first-run".to_string(),
+        "--no-default-browser-check".to_string(),
+        "--window-size=640,780".to_string(),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const BASE: &str = "http://127.0.0.1:47213/t/0123456789abcdef0123456789abcdef/speech";
+
+    #[test]
+    fn the_settings_page_sits_next_to_the_speech_page() {
+        assert_eq!(settings_url(BASE), "http://127.0.0.1:47213/t/0123456789abcdef0123456789abcdef/settings");
+        let args = settings_args(Path::new("/p"), &settings_url(BASE));
+        assert_eq!(args[0], "--user-data-dir=/p");
+        assert_eq!(args[1], format!("--app={}", settings_url(BASE)));
+        assert!(!args.iter().any(|a| a.contains("-32000")));
+    }
 
     #[test]
     fn a_profile_of_its_own_and_the_page_as_an_app() {

@@ -6,7 +6,7 @@
 // The desktop app starts and stops recognition; the extension recognizes and reports back.
 // Only `final` text is typed into the foreground app; `interim` is shown in a bubble.
 
-import { isInputMode, type InputMode } from "vtype-core";
+import { isInputMode, type InputMode, type ReplacementRule } from "vtype-core";
 import type { SessionEvent } from "./messages";
 
 export const NATIVE_HOST = "com.ishizakahiroshi.vtype";
@@ -23,6 +23,9 @@ export interface NativeConfig {
   readonly inject: "auto" | "type" | "paste";
   readonly besideField: { readonly enabled: boolean; readonly trigger: "focus" | "hover" };
   readonly extraExtensionIds: readonly string[];
+  /** The desktop app's own input mode and replacement table (standalone plan C5). */
+  readonly inputMode?: InputMode;
+  readonly replacements?: readonly ReplacementRule[];
 }
 
 export type NativeToExtension =
@@ -98,7 +101,9 @@ export function isNativeConfig(v: unknown): v is NativeConfig {
     typeof beside.enabled === "boolean" &&
     (beside.trigger === "focus" || beside.trigger === "hover") &&
     Array.isArray(r.extraExtensionIds) &&
-    r.extraExtensionIds.every((id) => typeof id === "string")
+    r.extraExtensionIds.every((id) => typeof id === "string") &&
+    (r.inputMode === undefined || isInputMode(r.inputMode)) &&
+    (r.replacements === undefined || Array.isArray(r.replacements))
   );
 }
 

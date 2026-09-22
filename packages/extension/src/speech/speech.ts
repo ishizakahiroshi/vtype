@@ -27,7 +27,13 @@
 // A lost WebSocket is retried from 1 s, doubling up to 30 s. A recording that loses the desktop
 // app is stopped: nobody is left to type what it hears.
 
-import type { InputMode, ReadingProvider, SpeechRecognizer } from "vtype-core";
+import {
+  normalizeReplacementRules,
+  type InputMode,
+  type ReadingProvider,
+  type ReplacementRule,
+  type SpeechRecognizer,
+} from "vtype-core";
 import { createOffscreen, type Offscreen } from "../offscreen/offscreen";
 import { createReadingProvider } from "../offscreen/reading";
 import { translator } from "../shared/i18n";
@@ -127,6 +133,8 @@ export function createSpeechPage(options: SpeechPageOptions = {}): SpeechPage {
   let closing = false;
   let micGranted = false;
   let mode: InputMode = DEFAULT_INPUT_MODE;
+  /** The desktop app's replacement table, from its latest `native-config`. */
+  let rules: ReplacementRule[] = [];
   let sessionId: string | null = null;
   let socket: SocketLike | null = null;
   let connected = false;
@@ -211,8 +219,7 @@ export function createSpeechPage(options: SpeechPageOptions = {}): SpeechPage {
     }
     sessionCount += 1;
     sessionId = globalThis.crypto?.randomUUID?.() ?? `desktop-${Date.now()}-${sessionCount}`;
-    // Replacement rules come with the desktop app's settings page (standalone plan C5).
-    toOffscreen({ target: "offscreen", type: "start", sessionId, owner: NATIVE_OWNER, mode: requested ?? mode, rules: [] });
+    toOffscreen({ target: "offscreen", type: "start", sessionId, owner: NATIVE_OWNER, mode: requested ?? mode, rules });
   }
 
   function stopSession(): void {
@@ -251,8 +258,10 @@ export function createSpeechPage(options: SpeechPageOptions = {}): SpeechPage {
         postState();
         break;
       case "native-config":
+        rules = normalizeReplacementRules(message.config.replacements ?? []);
+        break;
       case "open-options":
-        break; // the settings live in the desktop app from C5 on
+        break; // the settings page is the desktop app's own
     }
   }
 

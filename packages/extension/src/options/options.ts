@@ -13,7 +13,7 @@
 // page with empty elements, and the text filled in here from the browser's language.
 // The text itself lives in `_locales/` (one file per language) and is read through shared/i18n.
 
-import { isInputMode, MAX_REPLACEMENT_RULES, type InputMode, type ReplacementRule } from "vtype-core";
+import { isInputMode, type InputMode } from "vtype-core";
 import { translator } from "../shared/i18n";
 import { bugReportUrl, describeBrowser, describeOs } from "../shared/report";
 import type { OptionsToBackground } from "../shared/messages";
@@ -86,43 +86,15 @@ function manifestVersion(): string {
   return runtime?.getManifest?.().version ?? "";
 }
 
-/** The separator between what was recognized and what to type, one rule per line. */
-export const REPLACEMENT_ARROW = "=>";
-
-export interface ParsedReplacements {
-  readonly rules: ReplacementRule[];
-  /** 1-based numbers of the lines that could not be read. Blank lines are not counted. */
-  readonly badLines: number[];
-  /** More rules were written than MAX_REPLACEMENT_RULES; the rest were dropped. */
-  readonly truncated: boolean;
-}
-
-/** `認識結果 => 入れたい形`, one per line. Spaces around the arrow are ignored. */
-export function parseReplacementText(text: string): ParsedReplacements {
-  const rules: ReplacementRule[] = [];
-  const badLines: number[] = [];
-  let truncated = false;
-  text.split(/\r?\n/).forEach((line, index) => {
-    if (line.trim() === "") return;
-    const at = line.indexOf(REPLACEMENT_ARROW);
-    const from = at < 0 ? "" : line.slice(0, at).trim();
-    if (from === "") {
-      badLines.push(index + 1);
-      return;
-    }
-    if (rules.some((r) => r.from.toLowerCase() === from.toLowerCase())) return;
-    if (rules.length >= MAX_REPLACEMENT_RULES) {
-      truncated = true;
-      return;
-    }
-    rules.push({ from, to: line.slice(at + REPLACEMENT_ARROW.length).trim() });
-  });
-  return { rules, badLines, truncated };
-}
-
-export function formatReplacementText(rules: readonly ReplacementRule[]): string {
-  return rules.map((r) => `${r.from} ${REPLACEMENT_ARROW} ${r.to}`).join("\n");
-}
+// The replacement table as text lives in shared/replacement-text.ts (the desktop app's settings
+// page uses it too); re-exported for this page's callers and tests.
+export {
+  REPLACEMENT_ARROW,
+  formatReplacementText,
+  parseReplacementText,
+  type ParsedReplacements,
+} from "../shared/replacement-text";
+import { formatReplacementText, parseReplacementText } from "../shared/replacement-text";
 
 function setText(doc: Document, id: string, text: string, className?: string): void {
   const el = doc.getElementById(id);
