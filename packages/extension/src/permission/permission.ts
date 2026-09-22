@@ -38,6 +38,8 @@ export function initPermissionPage(options: PermissionPageOptions = {}): void {
 
   setText(doc, "title", t("permissionTitle"));
   setText(doc, "lead", t("permissionLead"));
+  // Before the button on purpose: the user decides with the audio's destination in view.
+  setText(doc, "privacy", t("permissionPrivacy"));
   setText(doc, "grant", t("permissionButton"));
   setText(doc, "after", t("permissionAfter"));
 

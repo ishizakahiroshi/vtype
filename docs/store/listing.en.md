@@ -41,11 +41,12 @@ What it does:
 
 Privacy:
 
-- Nothing is sent to the developer. vtype itself contacts no server at all
-- No personal information, browsing history, page content or typed input is collected
+- What you say is sent by the browser's speech recognition to Google's speech recognition
+  service, which turns it into text (this is how speech recognition works in Chrome). The
+  microphone permission page says so too
+- Nothing else is sent anywhere. Nothing goes to the developer, who runs no server
+- The developer receives no personal information, browsing history, page content or typed input
 - No transcript history is kept. The words go into the field and that is the end of it
-- The recognition is the browser's. In Chrome the browser performs it by sending the audio to
-  Google's speech recognition service; that is the browser's behaviour, not a connection vtype makes
 - Settings (what starts recording, which fields show a mic, dragged positions, excluded sites)
   are kept inside your browser
 
@@ -73,7 +74,17 @@ own listing file here.
 ## Screenshot plan
 
 Four images at 1280x800. **No other company's product may appear in any of them** (a certain
-problem in review). Shoot them on a purpose-made demo page.
+problem in review). Shoot 1-3 on the demo page `packages/extension/testbed/store-demo.html`
+(not `hostile.html`, which is meant to look broken).
+
+1. `node packages/extension/testbed/serve.mjs` → `http://127.0.0.1:8787/store-demo.html` (`?lang=en` for English)
+2. Capture the screen with the whole magenta frame in it (the whole browser window is fine; zoom out
+   with Ctrl+minus if it does not fit)
+3. `pwsh -NoProfile -File scripts/store-screenshot.ps1 <capture> ...` → `dist/store-screenshots/*-1280x800.png`.
+   It cuts along the inside of the frame and scales to 1280x800 whatever the display scaling; a capture
+   without the frame (the settings page) is fitted inside, padded with its top-left colour
+
+The four images:
 
 1. A single-line field (a search box) with the faint mic beside it
 2. The panel open under the mic (clear / send / mic)
@@ -89,7 +100,7 @@ problem in review). Shoot them on a purpose-made demo page.
 | Description | "Detailed description" |
 | Category | "Category" |
 | Language | "Languages" |
-| Screenshots | the four from "Screenshot plan" |
+| Screenshots | the four from "Screenshot plan" (v0.1.0: five, the settings page split in two), in the numbered order of `dist/store-screenshots/` |
 | Privacy policy URL | https://github.com/ishizakahiroshi/vtype/blob/main/PRIVACY.md |
 | Single purpose | "Single purpose" in `submission-notes-vX.Y.Z.en.md` |
 | Permission justification | "Permissions" in `submission-notes-vX.Y.Z.en.md` |

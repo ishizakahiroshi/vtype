@@ -6,8 +6,11 @@ fields, plus notes for the reviewer. One file per version; never overwrite the p
 ## Reviewer notes
 
 First release. The extension puts spoken words into the text fields of web pages, using the
-browser's built-in Web Speech API for the recognition. There is no developer server and no
-outbound connection of the extension's own.
+browser's built-in Web Speech API for the recognition. In Chrome the browser recognises speech by
+sending the audio to Google's speech recognition service, so what the user says reaches Google;
+this is stated before the user grants the microphone, in the store listing, the privacy policy and
+the permission page that opens right after installation. There is no other connection and no
+developer server.
 
 In this version:
 

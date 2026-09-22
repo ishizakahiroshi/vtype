@@ -96,6 +96,10 @@
   "permissionLead": {
     "message": "vtype は話した言葉を Web の入力欄に文字で入れます。ここで一度だけマイクを許可すると、以降はどのサイトでも確認は出ません。"
   },
+  "permissionPrivacy": {
+    "message": "話した声は、ブラウザの音声認識機能によって Google の音声認識サービスへ送られ、文字になります（Chrome の音声認識の仕組みです）。vtype の開発者のサーバーへは何も送りません。",
+    "description": "Shown above the grant button on the microphone permission page, before the user decides"
+  },
   "permissionButton": {
     "message": "マイクを許可する"
   },

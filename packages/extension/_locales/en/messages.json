@@ -96,6 +96,10 @@
   "permissionLead": {
     "message": "vtype turns your speech into text in web text fields. Allow the microphone once here; after that no site will ask again."
   },
+  "permissionPrivacy": {
+    "message": "What you say is sent by the browser's speech recognition to Google's speech recognition service, which turns it into text (this is how speech recognition works in Chrome). Nothing is sent to the developer of vtype.",
+    "description": "Shown above the grant button on the microphone permission page, before the user decides"
+  },
   "permissionButton": {
     "message": "Allow the microphone"
   },

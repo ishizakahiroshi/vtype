@@ -46,14 +46,14 @@ has no offscreen documents, so it needs a recognition engine of its own.
 
 ## Privacy
 
-vtype sends nothing to its developer, and has no server to send it to. It collects no personal
-information, no browsing history, no page content and no analytics, and it keeps no transcript
-history.
+vtype hands your voice to the browser's own speech recognition. **In Chrome, that recognition
+works by the browser sending the audio to Google's speech recognition service**, so what you say
+reaches Google. That is the thing to know before you speak, and the microphone permission page
+says it above the button that grants the permission.
 
-What it does do is hand your voice to the browser's own speech recognition. **In Chrome, that
-recognition works by the browser sending the audio to Google's speech recognition service.** That
-is the browser's behaviour rather than a connection vtype makes, but it is the thing to know
-before you speak. The full text is in [PRIVACY.md](PRIVACY.md).
+Nothing else leaves your browser. vtype sends nothing to its developer, and has no server to send
+it to. It collects no personal information, no browsing history, no page content and no
+analytics, and it keeps no transcript history. The full text is in [PRIVACY.md](PRIVACY.md).
 
 ## Repository layout
 

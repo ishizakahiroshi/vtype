@@ -22,7 +22,7 @@ from it. Releasing turns `## [Unreleased]` into `## [X.Y.Z] - YYYY-MM-DD` and op
 
 -
 
-## [0.1.0] - 2026-09-21
+## [0.1.0] - 2026-09-22
 
 The first Chrome Web Store release. Everything below is new, so nothing is listed as changed or
 fixed against a published version.
@@ -37,7 +37,9 @@ fixed against a published version.
 - A panel under the mic with three buttons: clear the field, submit the page, start or stop
   recording. A blue waveform moves while recording.
 - Recognition runs in the extension's offscreen document with the browser's built-in Web Speech
-  API, so the microphone is allowed once for the extension and no site ever asks.
+  API, so the microphone is allowed once for the extension and no site ever asks. In Chrome that
+  API sends the audio to Google's speech recognition service; the microphone permission page says
+  so above the button that grants the permission.
 - The recording is held by the field it started in: switching fields or tabs does not move it,
   and starting one in a second tab stops the first.
 - Japanese IME support: the field is not written to while a composition is in progress.

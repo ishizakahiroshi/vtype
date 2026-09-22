@@ -1,8 +1,14 @@
 # vtype privacy policy
 
-Last updated: 2026-09-21
+Last updated: 2026-09-22
 
-vtype does not collect, store, sell or share personal information. There is no account to create.
+**What you say is sent, for speech recognition, by the browser's speech recognition to Google's
+speech recognition service, which turns it into text (this is how speech recognition works in
+Chrome; see "Where your voice goes" below).**
+
+Apart from that, the developer of vtype receives no information about you. Personal information is
+never sold, and never passed to a third party for anything other than the speech recognition.
+There is no account to create.
 
 ## What is not collected
 
@@ -24,16 +30,19 @@ vtype does not do the recognition itself. What you say is handed to the browser'
 recognition (the Web Speech API).
 
 **In Chrome, that recognition works by the browser sending the audio to Google's speech
-recognition service.** So what you say reaches Chrome and that service. This is the browser's
-own behaviour rather than a connection vtype makes; vtype neither adds a destination to that
-path nor keeps a copy of anything on it.
+recognition service.** When you start a recording in vtype, Chrome sends what you say to that
+service and the recognised text comes back to vtype. The browser does the sending; vtype adds no
+other destination to that path and keeps no copy of the audio or the text.
 
-The handling of that audio is covered by the browser's own privacy policy. If you do not want
-what you say to reach an external recognition service, do not use vtype.
+The handling of the audio sent to Google is covered by Google's (Chrome's) privacy policy. If you
+do not want what you say to reach Google's recognition service, do not use vtype. The microphone
+permission page that opens right after installation says this too, above the button that grants
+the permission.
 
 ## Network
 
-vtype itself contacts no server at all. Nothing in the package is loaded from somewhere else;
+Apart from the speech recognition above, vtype sends no data to any server, the developer's
+included; the developer runs no server. Nothing in the package is loaded from somewhere else;
 all of its code ships inside the extension.
 
 ## What is stored in your browser
