@@ -301,6 +301,10 @@
     "message": "A password field is in front, so vtype did not type anything.",
     "description": "Desktop app: notification when recognized text was not typed because a password field is in front"
   },
+  "native_notifyAccessibility": {
+    "message": "To type, allow vtype in System Settings → Privacy & Security → Accessibility.",
+    "description": "Desktop app (macOS): notification when vtype may not send keystrokes yet"
+  },
   "optionsModeLegend": {
     "message": "Input mode",
     "description": "Options page: title of the input mode choice"

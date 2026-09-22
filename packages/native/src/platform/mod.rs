@@ -12,6 +12,8 @@ use thiserror::Error;
 use crate::config::InjectMethod;
 use crate::protocol::InputMode;
 
+#[cfg(any(windows, target_os = "macos"))]
+pub mod desktop;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]

@@ -1,81 +1,82 @@
-//! The UI thread: one Win32 message loop that owns the tray icon, the global shortcut and the
-//! overlay windows (all three need the thread that created them). Other threads hand it work
-//! through a queue and a posted message (`WM_APP_RUN`).
+//! The main thread: NSApplication's run loop, which owns the menu bar item, the global shortcut
+//! and the panels (AppKit allows them only there). Other threads hand it work through a queue and
+//! the main dispatch queue, the macOS counterpart of the Windows version's posted message.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ptr::{null, null_mut};
-use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::Duration;
 
+use dispatch2::DispatchQueue;
 use global_hotkey::hotkey::HotKey;
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
-use tray_icon::menu::{CheckMenuItem, ContextMenu, Menu, MenuEvent};
+use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSEvent, NSEventModifierFlags, NSEventType};
+use objc2_foundation::{MainThreadMarker, NSPoint};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
-use windows_sys::Win32::UI::Shell::{
-    SHQueryUserNotificationState, QUERY_USER_NOTIFICATION_STATE, QUNS_BUSY, QUNS_PRESENTATION_MODE,
-    QUNS_RUNNING_D3D_FULL_SCREEN,
-};
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, KillTimer, PostMessageW, PostQuitMessage,
-    RegisterClassExW, SetTimer, TranslateMessage, HWND_MESSAGE, MSG, WM_APP, WM_TIMER, WNDCLASSEXW,
-};
 
-use super::overlay::{wide, Overlay};
+use super::overlay::{screen_frames, Overlay};
 use crate::hotkey::HotkeySpec;
 use crate::menu::tooltip;
 use crate::platform::desktop::{build_menu, to_global_hotkey, tray_icons, update_checks};
 use crate::platform::{IconState, MenuAction, PlatformError, PlatformEvent, TrayState};
 
-pub const WM_APP_RUN: u32 = WM_APP + 1;
-pub const WM_APP_MENU: u32 = WM_APP + 2;
-const TIMER_FULLSCREEN: usize = 1;
-const TIMER_DONE: usize = 2;
-const TIMER_BUBBLE: usize = 3;
 /// How long the green check stays after text went in.
-const DONE_MS: u32 = 800;
+const DONE: Duration = Duration::from_millis(800);
 /// The bubble goes away this long after the last interim text.
-const BUBBLE_IDLE_MS: u32 = 1500;
+const BUBBLE_IDLE: Duration = Duration::from_millis(1500);
+const FULLSCREEN_CHECK: Duration = Duration::from_secs(1);
 
 type Job = Box<dyn FnOnce(&mut Ui) + Send>;
 
-/// Shared between the UI thread and everyone who sends it work.
+/// Shared between the main thread and everyone who sends it work.
 #[derive(Default)]
 pub struct Shared {
     queue: Mutex<Vec<Job>>,
-    msg_hwnd: AtomicIsize,
+    /// Set while the run loop is up; before that, jobs wait in the queue.
+    running: AtomicBool,
     menu_actions: Mutex<HashMap<String, MenuAction>>,
     hotkey_id: AtomicU32,
+    /// Bumped by each check mark / bubble text, so an older timer knows it is stale.
+    done_generation: AtomicU64,
+    bubble_generation: AtomicU64,
 }
 
 impl Shared {
-    /// Runs `job` on the UI thread (later, if its loop is not up yet).
-    pub fn run(&self, job: impl FnOnce(&mut Ui) + Send + 'static) {
+    /// Runs `job` on the main thread (later, if its loop is not up yet).
+    pub fn run(self: &Arc<Self>, job: impl FnOnce(&mut Ui) + Send + 'static) {
         self.queue.lock().unwrap_or_else(|e| e.into_inner()).push(Box::new(job));
-        let hwnd = self.msg_hwnd.load(Ordering::Acquire);
-        if hwnd != 0 {
-            unsafe { PostMessageW(hwnd as HWND, WM_APP_RUN, 0, 0) };
+        if self.running.load(Ordering::Acquire) {
+            let shared = self.clone();
+            DispatchQueue::main().exec_async(move || drain(&shared));
         }
     }
 
-    /// Runs `job` on the UI thread and waits for its answer.
-    pub fn call<R: Send + 'static>(&self, job: impl FnOnce(&mut Ui) -> R + Send + 'static) -> Option<R> {
+    /// Runs `job` on the main thread and waits for its answer.
+    pub fn call<R: Send + 'static>(self: &Arc<Self>, job: impl FnOnce(&mut Ui) -> R + Send + 'static) -> Option<R> {
         let (tx, rx) = mpsc::channel();
         self.run(move |ui| {
             let _ = tx.send(job(ui));
         });
         rx.recv_timeout(Duration::from_secs(10)).ok()
     }
+
+    /// Runs `job` on the main thread after `delay`.
+    fn later(self: &Arc<Self>, delay: Duration, job: impl FnOnce(&mut Ui) + Send + 'static) {
+        let shared = self.clone();
+        thread::spawn(move || {
+            thread::sleep(delay);
+            shared.run(job);
+        });
+    }
 }
 
 pub struct Ui {
     shared: Arc<Shared>,
-    msg_hwnd: HWND,
+    mtm: MainThreadMarker,
     tray: Option<TrayIcon>,
     menu: Menu,
     checks: Vec<(MenuAction, CheckMenuItem)>,
@@ -112,58 +113,6 @@ fn drain(shared: &Shared) {
                 }
             }
         });
-    }
-}
-
-fn with_ui(f: impl FnOnce(&mut Ui)) {
-    UI.with(|slot| {
-        if let Ok(mut guard) = slot.try_borrow_mut() {
-            if let Some(ui) = guard.as_mut() {
-                f(ui);
-            }
-        }
-    });
-}
-
-unsafe extern "system" fn msg_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    match msg {
-        WM_APP_RUN => {
-            let shared = UI.with(|slot| slot.try_borrow().ok().and_then(|g| g.as_ref().map(|u| u.shared.clone())));
-            if let Some(shared) = shared {
-                drain(&shared);
-            }
-            0
-        }
-        WM_APP_MENU => {
-            // Clone what is needed and let go of the borrow: the menu runs a modal loop.
-            let target = UI.with(|slot| {
-                slot.try_borrow().ok().and_then(|g| g.as_ref().map(|u| (u.menu.clone(), u.overlay.hwnd())))
-            });
-            if let Some((menu, owner)) = target {
-                menu.show_context_menu_for_hwnd(owner as isize, None);
-            }
-            0
-        }
-        WM_TIMER => {
-            match wparam {
-                TIMER_FULLSCREEN => with_ui(|ui| ui.check_fullscreen()),
-                TIMER_DONE => {
-                    KillTimer(hwnd, TIMER_DONE);
-                    with_ui(|ui| {
-                        if ui.overlay.look() == IconState::Done {
-                            ui.overlay.set_look(IconState::Idle);
-                        }
-                    });
-                }
-                TIMER_BUBBLE => {
-                    KillTimer(hwnd, TIMER_BUBBLE);
-                    with_ui(|ui| ui.overlay.hide_bubble());
-                }
-                _ => {}
-            }
-            0
-        }
-        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
 }
 
@@ -216,10 +165,15 @@ impl Ui {
         } else {
             self.overlay.show(look, position);
         }
-        unsafe {
-            if look == IconState::Done {
-                SetTimer(self.msg_hwnd, TIMER_DONE, DONE_MS, None);
-            }
+        if look == IconState::Done {
+            let generation = self.shared.done_generation.fetch_add(1, Ordering::AcqRel) + 1;
+            let shared = self.shared.clone();
+            self.shared.later(DONE, move |ui| {
+                if shared.done_generation.load(Ordering::Acquire) == generation && ui.overlay.look() == IconState::Done
+                {
+                    ui.overlay.set_look(IconState::Idle);
+                }
+            });
         }
     }
 
@@ -233,25 +187,26 @@ impl Ui {
             return; // no mic to speak from (hidden, or over a full-screen app)
         }
         self.overlay.show_bubble(text);
-        unsafe { SetTimer(self.msg_hwnd, TIMER_BUBBLE, BUBBLE_IDLE_MS, None) };
+        let generation = self.shared.bubble_generation.fetch_add(1, Ordering::AcqRel) + 1;
+        let shared = self.shared.clone();
+        self.shared.later(BUBBLE_IDLE, move |ui| {
+            if shared.bubble_generation.load(Ordering::Acquire) == generation {
+                ui.overlay.hide_bubble();
+            }
+        });
     }
 
     pub fn hide_bubble(&mut self) {
         self.overlay.hide_bubble();
     }
 
-    pub fn overlay_hwnd(&self) -> HWND {
-        self.overlay.hwnd()
-    }
-
-    /// Hides the mic while a full-screen app (a game, a video, a presentation) is in front.
+    /// Hides the mic while the front app covers a whole screen. `fullScreenAuxiliary` lets the
+    /// panel float over it; this is for the users who asked not to see it there.
     fn check_fullscreen(&mut self) {
         if !self.hide_on_fullscreen || !self.icon_wanted {
             return;
         }
-        let mut state: QUERY_USER_NOTIFICATION_STATE = 0;
-        let ok = unsafe { SHQueryUserNotificationState(&mut state) } >= 0;
-        let busy = ok && matches!(state, QUNS_BUSY | QUNS_RUNNING_D3D_FULL_SCREEN | QUNS_PRESENTATION_MODE);
+        let busy = super::fullscreen::front_app_covers_a_screen(&screen_frames(self.mtm));
         if busy && !self.hidden_for_fullscreen {
             self.hidden_for_fullscreen = true;
             self.overlay.hide();
@@ -260,56 +215,38 @@ impl Ui {
             self.overlay.show(self.overlay.look(), self.icon_position);
         }
     }
+
+    /// The menu bar item. AppKit wants the run loop running before it is made.
+    fn create_tray(&mut self) {
+        let mut builder = TrayIconBuilder::new()
+            .with_menu(Box::new(self.menu.clone()))
+            .with_menu_on_left_click(false)
+            .with_tooltip(tooltip());
+        if let Some(icon) = self.idle_icon.clone() {
+            builder = builder.with_icon(icon);
+        }
+        self.tray = match builder.build() {
+            Ok(t) => Some(t),
+            Err(e) => {
+                tracing::warn!(error = %e, "menu bar item failed");
+                None
+            }
+        };
+    }
 }
 
 pub fn run(shared: Arc<Shared>, events: Sender<PlatformEvent>) -> Result<(), PlatformError> {
-    unsafe {
-        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    }
-    let class = wide("vtypeMessages");
-    let msg_hwnd = unsafe {
-        let wc = WNDCLASSEXW {
-            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
-            lpfnWndProc: Some(msg_proc),
-            hInstance: GetModuleHandleW(null()),
-            lpszClassName: class.as_ptr(),
-            ..std::mem::zeroed()
-        };
-        RegisterClassExW(&wc);
-        CreateWindowExW(
-            0,
-            class.as_ptr(),
-            class.as_ptr(),
-            0,
-            0,
-            0,
-            0,
-            0,
-            HWND_MESSAGE,
-            null_mut(),
-            GetModuleHandleW(null()),
-            null(),
-        )
-    };
-    if msg_hwnd.is_null() {
-        return Err(PlatformError::Failed("could not create the message window".into()));
+    let mtm = MainThreadMarker::new().ok_or_else(|| PlatformError::Failed("not on the main thread".into()))?;
+    let app = NSApplication::sharedApplication(mtm);
+    // A menu bar app: no Dock icon, no menu bar of its own, never the active app by itself.
+    app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+    // Asks once for the permission to type (macOS shows its own dialog, only when not allowed).
+    if !super::ax::trusted(true) {
+        tracing::info!("Accessibility is not allowed yet; asked the user");
     }
 
     let (menu, checks) = build_menu(&shared.menu_actions);
     let (idle_icon, recording_icon) = tray_icons();
-    let mut builder =
-        TrayIconBuilder::new().with_menu(Box::new(menu.clone())).with_menu_on_left_click(false).with_tooltip(tooltip());
-    if let Some(icon) = idle_icon.clone() {
-        builder = builder.with_icon(icon);
-    }
-    let tray = match builder.build() {
-        Ok(t) => Some(t),
-        Err(e) => {
-            tracing::warn!(error = %e, "tray icon failed");
-            None
-        }
-    };
-
     {
         let events = events.clone();
         TrayIconEvent::set_event_handler(Some(move |e: TrayIconEvent| {
@@ -338,12 +275,12 @@ pub fn run(shared: Arc<Shared>, events: Sender<PlatformEvent>) -> Result<(), Pla
         }));
     }
 
-    let overlay = Overlay::new(events, msg_hwnd);
+    let overlay = Overlay::new(events, mtm, menu.clone());
     UI.with(|slot| {
         *slot.borrow_mut() = Some(Ui {
             shared: shared.clone(),
-            msg_hwnd,
-            tray,
+            mtm,
+            tray: None,
             menu,
             checks,
             idle_icon,
@@ -358,21 +295,51 @@ pub fn run(shared: Arc<Shared>, events: Sender<PlatformEvent>) -> Result<(), Pla
             recording: false,
         });
     });
-    shared.msg_hwnd.store(msg_hwnd as isize, Ordering::Release);
-    drain(&shared);
-    unsafe {
-        SetTimer(msg_hwnd, TIMER_FULLSCREEN, 1000, None);
-        let mut msg: MSG = std::mem::zeroed();
-        while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
+
+    // First job once the loop runs: the menu bar item, then whatever queued up before.
+    {
+        let mut q = shared.queue.lock().unwrap_or_else(|e| e.into_inner());
+        q.insert(0, Box::new(|ui: &mut Ui| ui.create_tray()));
     }
-    shared.msg_hwnd.store(0, Ordering::Release);
+    shared.running.store(true, Ordering::Release);
+    {
+        let shared = shared.clone();
+        DispatchQueue::main().exec_async(move || drain(&shared));
+    }
+    {
+        let shared = shared.clone();
+        thread::spawn(move || {
+            while shared.running.load(Ordering::Acquire) {
+                thread::sleep(FULLSCREEN_CHECK);
+                shared.run(|ui| ui.check_fullscreen());
+            }
+        });
+    }
+
+    app.run();
+
+    shared.running.store(false, Ordering::Release);
     UI.with(|slot| slot.borrow_mut().take());
     Ok(())
 }
 
+/// Ends `app.run()`. `stop` takes effect after the next event, so post one.
 pub fn quit() {
-    unsafe { PostQuitMessage(0) };
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    let app = NSApplication::sharedApplication(mtm);
+    app.stop(None);
+    let wake = NSEvent::otherEventWithType_location_modifierFlags_timestamp_windowNumber_context_subtype_data1_data2(
+        NSEventType::ApplicationDefined,
+        NSPoint::new(0.0, 0.0),
+        NSEventModifierFlags::empty(),
+        0.0,
+        0,
+        None,
+        0,
+        0,
+        0,
+    );
+    if let Some(wake) = wake {
+        app.postEvent_atStart(&wake, true);
+    }
 }

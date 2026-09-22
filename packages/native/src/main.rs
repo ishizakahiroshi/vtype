@@ -15,6 +15,7 @@ mod i18n;
 mod icon_draw;
 mod install;
 mod ipc;
+mod launch_agent;
 mod log;
 mod menu;
 mod nm_frame;
@@ -23,6 +24,7 @@ mod paths;
 mod platform;
 mod protocol;
 mod report;
+mod text_chunks;
 #[cfg(windows)]
 mod win_registry;
 

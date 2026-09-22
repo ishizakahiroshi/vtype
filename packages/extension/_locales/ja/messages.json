@@ -301,6 +301,10 @@
     "message": "パスワード欄が前面にあるため、入力しませんでした。",
     "description": "Desktop app: notification when recognized text was not typed because a password field is in front"
   },
+  "native_notifyAccessibility": {
+    "message": "文字を入力するには、システム設定 → プライバシーとセキュリティ → アクセシビリティ で vtype を許可してください。",
+    "description": "Desktop app (macOS): notification when vtype may not send keystrokes yet"
+  },
   "optionsModeLegend": {
     "message": "入力モード",
     "description": "Options page: title of the input mode choice"
