@@ -7,12 +7,24 @@ name: native release
 # A `native-v*` tag attaches all of it to a *draft* GitHub Release; publishing that draft, the
 # Store submission, npm and the Homebrew tap stay manual steps (see packages/native/README.md).
 # Running it by hand (workflow_dispatch) is a dry run: the files end up as workflow artifacts and
-# no release is made.
+# no release is made. GitHub only offers the manual run once this file is on the default branch,
+# so a push to develop that touches the release files is a dry run as well (path filters do not
+# apply to tag pushes, so the tag trigger is unaffected).
 
 on:
   push:
     tags:
       - 'native-v*'
+    branches:
+      - develop
+    paths:
+      - '.github/workflows/native-release.yml'
+      - 'scripts/release/**'
+      - 'packages/native/packaging/**'
+      - 'packages/native/npm/**'
+      - 'packages/native/about.*'
+      - 'packages/native/Cargo.toml'
+      - 'packages/native/RELEASE_NOTES.md'
   workflow_dispatch:
 
 permissions:
