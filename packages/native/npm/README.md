@@ -37,6 +37,7 @@ These folders are not part of the pnpm workspace (`pnpm-workspace.yaml` lists on
 4. Check: `npx @ishizakahiroshi/vtype --version` prints the version.
 5. Empty the `bin/` folders of the platform packages again.
 
-After installing (`npm i -g @ishizakahiroshi/vtype`), users run `vtype install` once to connect it
-to the Chrome extension. Because the registration points at the binary inside `node_modules`, run
-`vtype install` again after moving or reinstalling Node.
+After installing (`npm i -g @ishizakahiroshi/vtype`), users run `vtype install` once to start it
+with the OS (and, on GNOME, to add the shortcut). Google Chrome must be installed; vtype starts it
+for the speech recognition. Because the autostart entry points at the binary inside
+`node_modules`, run `vtype install` again after moving or reinstalling Node.

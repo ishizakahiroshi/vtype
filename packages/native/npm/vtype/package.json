@@ -1,7 +1,7 @@
 {
   "name": "@ishizakahiroshi/vtype",
   "version": "0.1.0",
-  "description": "vtype desktop: voice input into any app, with the vtype Chrome extension's speech recognition",
+  "description": "vtype desktop: voice input into any app, with Google Chrome's speech recognition",
   "license": "MIT",
   "author": "ishizakahiroshi <ishizakahiroshi.dev@gmail.com>",
   "homepage": "https://github.com/ishizakahiroshi/vtype#desktop",

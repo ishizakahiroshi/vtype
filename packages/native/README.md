@@ -1,7 +1,8 @@
 # vtype desktop (`packages/native`)
 
-One Rust program, `vtype`, for Windows, macOS and Linux. It types what the vtype Chrome extension
-recognises into the app in front. What it does for users is in the repository's
+One Rust program, `vtype`, for Windows, macOS and Linux. It starts Google Chrome in a profile of
+its own on a speech page it serves on 127.0.0.1, and types what Chrome recognises into the app in
+front. It does not use the browser extension. What it does for users is in the repository's
 [README](../../README.md#desktop); this file is for building and releasing it.
 
 This crate is not part of the pnpm workspace. The strings users read come from the extension's
@@ -15,7 +16,9 @@ time.
 | `src/daemon.rs` | The resident app's decisions (start, stop, type, notify), with no system calls. Tested with a fake platform |
 | `src/platform/` | The `Platform` trait and one folder per system (`windows/`, `macos/`, `linux/`) |
 | `src/cli.rs` | The subcommands (`daemon`, `toggle`, `mode`, `install`, …) |
-| `src/speech_host.rs`, `src/chrome_launch.rs` | The speech page on 127.0.0.1 and the Chrome (a profile of vtype's own) that runs it |
+| `src/speech_host.rs`, `src/chrome_launch.rs` | The speech and settings pages on 127.0.0.1 (`api/config` included) and the Chrome (a profile of vtype's own) that runs them |
+| `src/speech_assets.rs` | The pages built by the extension package into `packages/extension/dist-desktop/`, compiled in by `build.rs` |
+| `src/protocol.rs` | The JSON the command line, the daemon and the speech page exchange (`tests/fixtures/nm-messages.json` is shared with the TypeScript side) |
 | `src/ipc.rs` | The local socket / pipe between the command line and the daemon |
 | `src/install.rs` | `vtype install` / `uninstall`: starting with the OS |
 | `packaging/msix/` | The MSIX manifest (Microsoft Store). Built by `scripts/release/build-msix.ps1` |

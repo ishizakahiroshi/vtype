@@ -17,7 +17,12 @@ from it. Releasing turns `## [Unreleased]` into `## [X.Y.Z] - YYYY-MM-DD` and op
   also across restarts. A replacement table ("write B for A") applies after recognition. The
   conversion lives in `vtype-core`, so the extension and the desktop app share it.
 - vtype desktop (`packages/native`, 0.1.0, not published yet): one Rust program for Windows,
-  macOS and Linux that types what the extension recognises into any app. A global shortcut
+  macOS and Linux for voice input into any app, without the extension. It starts Google Chrome
+  (which must be installed) in a profile of its own, off screen, on a speech page it serves on
+  127.0.0.1, and types what Chrome recognises into the app in front. Before the first recording it
+  asks for consent in a small Chrome window, then allows the microphone in that profile itself.
+  Its own settings page (`vtype settings`) edits the shortcut, the input mode, the replacement
+  table and how text is typed. A global shortcut
   (Ctrl+Alt+Space; Control+Option+V on macOS), a tray or menu bar icon, a floating mic icon, the
   in-progress text above it, commands (`vtype toggle` / `start` / `stop` / `mode` / `status`) for
   launchers and AutoHotkey, no typing into password fields, and an experimental mic beside the
@@ -36,8 +41,9 @@ from it. Releasing turns `## [Unreleased]` into `## [X.Y.Z] - YYYY-MM-DD` and op
 
 ### Changed
 
-- The privacy policy and the store texts describe the desktop app, the new settings and the
-  `nativeMessaging` permission. The store listing itself is updated only with v0.2.0.
+- The privacy policy and the store texts describe the desktop app (its own Chrome profile, the
+  consent before the first recording) and the new settings. The store listing itself is updated
+  only with v0.2.0.
 - The packaging check accepts `fetch(chrome.runtime.getURL(...))`, which can only read files
   inside the package (the katakana dictionary); every other network call still fails it.
 

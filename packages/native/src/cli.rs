@@ -34,7 +34,7 @@ pub enum Command {
         #[arg(value_enum)]
         mode: InputMode,
     },
-    /// Show whether the extension is connected and dictation is running.
+    /// Show whether the speech page is connected and dictation is running.
     Status,
     /// Open the settings page in Chrome.
     Settings,

@@ -48,12 +48,13 @@ has no offscreen documents, so it needs a recognition engine of its own.
 
 vtype desktop (Windows, macOS, Linux) takes the same recognition out of the browser: press a
 shortcut in any app (a text editor, a chat client, a terminal) and what you say is typed there.
-Chrome still does the recognition; the desktop app receives the text from the extension over
-Chrome's Native Messaging and types it into the app in front. It is a separate program, and the
-extension works without it.
+It does not need the extension. It starts Google Chrome in the background, in a Chrome profile of
+its own (never your usual one), and uses Chrome's speech recognition; the text is typed into the
+app in front. **Google Chrome must be installed.** The extension and the desktop app are separate
+programs, and each works without the other.
 
 - A shortcut from anywhere: Ctrl+Alt+Space on Windows and Linux, Control+Option+V on macOS
-  (change it on the extension's settings page)
+  (change it with `vtype settings`)
 - A small mic icon near the bottom right, and a tray / menu bar icon with the same controls
 - Three input modes that stay until you change them: normal, English, katakana
 - Nothing is typed into password fields (on Linux, wherever the desktop's accessibility service
@@ -65,13 +66,17 @@ on macOS (`brew install ishizakahiroshi/tap/vtype`), a `.deb` on GitHub Releases
 npm everywhere (`npm i -g @ishizakahiroshi/vtype`). How the packages are made is in
 [`packages/native/README.md`](packages/native/README.md).
 
-### Connecting it to the extension
+### The first time
 
-1. On the extension's settings page, press **Turn on the desktop link** and allow the permission
-   Chrome asks for (`nativeMessaging`; nothing changes until you do).
-2. Run `vtype install` once. It tells Chrome where the desktop app is and starts it with the OS.
-   The Store and `.deb` packages do this for you; with Homebrew or npm, run it yourself.
+1. Start vtype and press the shortcut (or the mic icon). A small Chrome window opens once: read
+   what vtype sends where, press **Agree and start**, and allow the microphone. The window then
+   closes itself, and from then on Chrome runs off screen.
+2. To start vtype with the OS, run `vtype install` once (on GNOME it also adds the shortcut). The
+   Store and `.deb` packages do this for you; with Homebrew or npm, run it yourself.
    `vtype uninstall` undoes it.
+
+`vtype settings` (or **Open settings** in the tray menu) opens vtype's own settings page in that
+Chrome: the shortcut, the input mode, the replacement table, and how text is typed.
 
 ### Commands
 
@@ -80,7 +85,8 @@ vtype toggle          # start dictation, or stop it if it is running
 vtype start           # start
 vtype stop            # stop
 vtype mode kana       # normal | en | kana
-vtype status          # is the extension connected, is dictation running
+vtype status          # is the speech page connected, is dictation running
+vtype settings        # open the settings page
 vtype diag            # diagnostic information (never any words you said)
 ```
 
@@ -122,7 +128,9 @@ says it above the button that grants the permission.
 Nothing else leaves your browser. vtype sends nothing to its developer, and has no server to send
 it to. It collects no personal information, no browsing history, no page content and no
 analytics, and it keeps no transcript history. The desktop app sends nothing over the network
-either: it only talks to Chrome on your own computer. The full text is in [PRIVACY.md](PRIVACY.md).
+either: it asks for your consent before the first recording, then uses Chrome's recognition in
+the same way (so what you say reaches Google through Chrome), and it talks only to that Chrome on
+your own computer. The full text is in [PRIVACY.md](PRIVACY.md).
 
 ## Repository layout
 
