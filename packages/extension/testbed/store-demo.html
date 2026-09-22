@@ -1,0 +1,108 @@
+<!doctype html>
+<!--
+  Chrome Web Store screenshots are taken on this page, not on real sites: a store image must not
+  show another company's product. The 1280x800 stage sits inside a magenta frame so that
+  scripts/store-screenshot.ps1 can find it in a plain screen capture and cut it out at exactly
+  1280x800, whatever the display scaling. ?lang=en switches the text to English.
+    node packages/extension/testbed/serve.mjs   ->   http://127.0.0.1:8787/store-demo.html
+-->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>vtype demo</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
+    background: #1e1b2e;
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif;
+    color: #0f172a;
+  }
+  /* The crop marker: pure magenta, nothing else on the page uses it. */
+  #frame { border: 8px solid #ff00ff; flex: none; }
+  #stage {
+    position: relative; width: 1280px; height: 800px; overflow: hidden;
+    display: grid; grid-template-columns: 400px 1fr; gap: 48px; align-items: center; padding: 0 64px;
+    background: linear-gradient(135deg, #eef2ff 0%, #f5f3ff 55%, #fdf4ff 100%);
+  }
+  .pitch h1 { margin: 0 0 20px; font-size: 44px; line-height: 1.25; letter-spacing: -0.01em; }
+  .pitch h1 em { font-style: normal; color: #4f46e5; }
+  .pitch p { margin: 0 0 14px; font-size: 18px; color: #334155; }
+  .pitch ul { margin: 24px 0 0; padding: 0; list-style: none; }
+  .pitch li { margin: 0 0 10px; padding-left: 28px; position: relative; font-size: 16px; color: #334155; }
+  .pitch li::before { content: ""; position: absolute; left: 4px; top: 9px; width: 10px; height: 10px; border-radius: 50%; background: #4f46e5; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 28px; font-weight: 700; font-size: 20px; color: #4f46e5; }
+  .brand img { width: 36px; height: 36px; }
+
+  /* The right side is a made-up help desk: fields of three kinds, and room on the right for the
+     mic and the panel. In a wide window the panel opens to the right of the mic (about 240px), so
+     the card ends near x=980 to keep the open panel inside the 1280px stage. */
+  .app { width: 470px; background: #fff; border-radius: 16px; box-shadow: 0 20px 50px rgba(30, 27, 75, 0.14); overflow: hidden; }
+  .app header { display: flex; align-items: center; gap: 12px; padding: 16px 24px; background: #312e81; color: #fff; }
+  .app header .dot { width: 12px; height: 12px; border-radius: 50%; background: #a5b4fc; }
+  .app header b { font-size: 16px; }
+  .app .body { padding: 24px; }
+  .app label { display: block; margin: 0 0 6px; font-size: 14px; font-weight: 600; color: #334155; }
+  .app input, .app textarea {
+    display: block; width: 100%; margin: 0 0 18px; padding: 10px 14px; font: inherit; color: inherit;
+    border: 1px solid #cbd5e1; border-radius: 10px; background: #fff;
+  }
+  .app input[type="search"] { border-radius: 999px; padding-left: 18px; }
+  .app textarea { height: 180px; resize: none; margin-bottom: 20px; }
+  .app .actions { display: flex; justify-content: flex-end; }
+  .app button { font: inherit; font-weight: 600; padding: 10px 22px; border: none; border-radius: 10px; background: #4f46e5; color: #fff; }
+</style>
+</head>
+<body>
+<div id="frame">
+  <div id="stage">
+    <section class="pitch">
+      <div class="brand"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect width='36' height='36' rx='9' fill='%234f46e5'/%3E%3Crect x='14' y='7' width='8' height='15' rx='4' fill='%23fff'/%3E%3Cpath d='M10 17a8 8 0 0 0 16 0M18 25v5' stroke='%23fff' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E" alt="">vtype</div>
+      <h1 data-t="headline">どの入力欄にも、<br><em>話すだけ</em>で文字を。</h1>
+      <p data-t="lead">入力欄の横に出るマイクを押して話すと、その欄に文字が入ります。</p>
+      <ul>
+        <li data-t="point1">ブラウザ内蔵の音声認識。API キーも登録も不要</li>
+        <li data-t="point2">利用回数や時間の上限なし</li>
+        <li data-t="point3">パスワード欄では動きません</li>
+      </ul>
+    </section>
+    <section class="app" aria-label="demo form">
+      <header><span class="dot"></span><b data-t="appName">サンプル問い合わせ窓口</b></header>
+      <div class="body">
+        <label for="q" data-t="searchLabel">よくある質問を検索</label>
+        <input id="q" type="search" data-p="searchPlaceholder" placeholder="キーワードを入力">
+        <label for="subject" data-t="subjectLabel">件名</label>
+        <input id="subject" type="text" data-p="subjectPlaceholder" placeholder="例: 注文内容の変更について">
+        <label for="message" data-t="messageLabel">お問い合わせ内容</label>
+        <textarea id="message" data-p="messagePlaceholder" placeholder="できるだけ詳しくお書きください"></textarea>
+        <div class="actions"><button type="button" data-t="send">送信する</button></div>
+      </div>
+    </section>
+  </div>
+</div>
+<script>
+  // English for the English listing: http://127.0.0.1:8787/store-demo.html?lang=en
+  const en = {
+    headline: "Type into any field<br>just by <em>speaking</em>.",
+    lead: "Press the mic next to a text field and speak. The words go into that field.",
+    point1: "Your browser's built-in speech recognition. No API key, no sign-up",
+    point2: "No daily limit, no time limit",
+    point3: "Never runs in password fields",
+    appName: "Sample Help Desk",
+    searchLabel: "Search the FAQ",
+    searchPlaceholder: "Enter a keyword",
+    subjectLabel: "Subject",
+    subjectPlaceholder: "e.g. Changing my order",
+    messageLabel: "Your message",
+    messagePlaceholder: "Tell us as much as you can",
+    send: "Send",
+  };
+  if (new URLSearchParams(location.search).get("lang") === "en") {
+    document.documentElement.lang = "en";
+    for (const el of document.querySelectorAll("[data-t]")) el.innerHTML = en[el.dataset.t];
+    for (const el of document.querySelectorAll("[data-p]")) el.placeholder = en[el.dataset.p];
+  }
+</script>
+</body>
+</html>
