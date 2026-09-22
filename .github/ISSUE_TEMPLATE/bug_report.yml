@@ -1,0 +1,73 @@
+name: Bug report / 不具合の報告
+description: Something in vtype does not work as expected. / vtype が期待どおりに動かない
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting. Please do not paste passwords or anything you would not want to be public.
+        報告ありがとうございます。パスワードなど、公開されて困るものは貼らないでください。
+
+  # The ids below (surface / version / os / browser) are filled from the URL by vtype's
+  # "Report a problem" (packages/extension/src/shared/report.ts, packages/native/src/report.rs).
+  # A test reads this file, so renaming an id or an option breaks the build rather than the form.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: What are you using? / 使っているもの
+      options:
+        - Chrome extension / Chrome 拡張
+        - Desktop app / デスクトップ版
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / 版
+      placeholder: "0.1.0"
+
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "Windows 11 / macOS 15 / Ubuntu 24.04 (Wayland)"
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser / ブラウザ
+      placeholder: "Google Chrome 140"
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened / 起きたこと
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce / 手順
+      placeholder: |
+        1. Open ...
+        2. Press ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected / 期待した動き
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic info (optional) / 診断情報（任意）
+      description: |
+        "Copy diagnostic info" in vtype's settings or tray menu. It holds no audio and no transcript.
+        vtype の設定かトレイのメニューの「診断情報をコピー」。音声と文字起こしの本文は含まれません。
+      render: text

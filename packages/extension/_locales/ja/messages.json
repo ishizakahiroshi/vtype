@@ -300,5 +300,81 @@
   "native_notifyPasswordField": {
     "message": "パスワード欄が前面にあるため、入力しませんでした。",
     "description": "Desktop app: notification when recognized text was not typed because a password field is in front"
+  },
+  "optionsModeLegend": {
+    "message": "入力モード",
+    "description": "Options page: title of the input mode choice"
+  },
+  "optionsModeLead": {
+    "message": "変えるまでそのままです。デスクトップ版のトレイのメニューからも同じ設定を切り替えられます。",
+    "description": "Options page: under the input mode title"
+  },
+  "optionsModeNormalLabel": {
+    "message": "通常",
+    "description": "Options page: input mode that recognizes the browser's language"
+  },
+  "optionsModeNormalHint": {
+    "message": "ブラウザの言語で認識します（今までどおり）。",
+    "description": "Options page: explanation of the normal input mode"
+  },
+  "optionsModeEnLabel": {
+    "message": "英語",
+    "description": "Options page: input mode that recognizes English"
+  },
+  "optionsModeEnHint": {
+    "message": "ブラウザの言語に関係なく、英語（en-US）で認識します。",
+    "description": "Options page: explanation of the English input mode"
+  },
+  "optionsModeKanaLabel": {
+    "message": "カタカナ",
+    "description": "Options page: input mode that types katakana"
+  },
+  "optionsModeKanaHint": {
+    "message": "日本語で認識し、結果を全角カタカナにして入れます。",
+    "description": "Options page: explanation of the katakana input mode"
+  },
+  "optionsReplTitle": {
+    "message": "置き換え表",
+    "description": "Options page: title of the replacement table"
+  },
+  "optionsReplLead": {
+    "message": "1 行に 1 件、「認識結果 => 入れたい形」で書きます。英字の大文字小文字は区別しません。200 件まで。置き換えた語はカタカナのモードでも書いたとおりに入ります。",
+    "description": "Options page: how to write the replacement table. Keep the => arrow as it is"
+  },
+  "optionsReplPlaceholder": {
+    "message": "ぶいたいぷ => vtype",
+    "description": "Options page: example shown in the empty replacement table"
+  },
+  "optionsReplSave": {
+    "message": "置き換え表を保存",
+    "description": "Options page: button that saves the replacement table"
+  },
+  "optionsReplCount": {
+    "message": "{count} 件を保存済み",
+    "description": "Options page: how many replacements are stored. {count} is a number"
+  },
+  "optionsReplBadLines": {
+    "message": "保存しなかった行（=> が無い、または左側が空）: {lines} 行目",
+    "description": "Options page: replacement lines that could not be read. {lines} is a list of line numbers"
+  },
+  "optionsReplTruncated": {
+    "message": "先頭の 200 件を保存しました。残りは保存していません。",
+    "description": "Options page: status when more than 200 replacements were written"
+  },
+  "optionsDiagReportNote": {
+    "message": "不具合の報告に貼ると原因を追いやすくなります。音声と文字起こしの本文は含まれません。",
+    "description": "Options page: next to 'copy the log', says the log helps a bug report and holds no speech"
+  },
+  "optionsReportTitle": {
+    "message": "不具合を報告",
+    "description": "Options page: title of the bug report section"
+  },
+  "optionsReportLead": {
+    "message": "GitHub の報告フォームを、版・OS・ブラウザを埋めた状態で開きます。自分で送信するまで、何も送られません。",
+    "description": "Options page: explains that the button opens the GitHub form and sends nothing"
+  },
+  "optionsReportOpen": {
+    "message": "報告フォームを開く",
+    "description": "Options page: button that opens the GitHub issue form"
   }
 }

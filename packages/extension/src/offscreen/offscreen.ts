@@ -20,7 +20,25 @@
 //   the session's first one are dropped, and a late error of an old instance that ends the
 //   current recording is treated like a normal end (the cycle restarts).
 
-import { createSpeechRecognizer, type SpeechRecognizer, type SpeechRecognizerError } from "vtype-core";
+//
+// Input modes (native plan C2): each session carries a mode and a replacement table from the
+// background. The mode picks the recognition language (recognitionLangFor), and every result is
+// shaped before it is sent: interim results synchronously, final ones through the optional
+// ReadingProvider (kanji -> katakana), which is asynchronous. Every event of a session is sent
+// through one promise chain, so a final that waits for the dictionary is never overtaken by the
+// `ended` that follows it.
+
+import {
+  createSpeechRecognizer,
+  recognitionLangFor,
+  transformTranscript,
+  transformTranscriptSync,
+  type InputMode,
+  type ReadingProvider,
+  type ReplacementRule,
+  type SpeechRecognizer,
+  type SpeechRecognizerError,
+} from "vtype-core";
 import {
   isBackgroundToOffscreen,
   type EndReason,
@@ -28,6 +46,7 @@ import {
   type Owner,
   type SessionEvent,
 } from "../shared/messages";
+import { createReadingProvider } from "./reading";
 
 export const SILENT_CYCLE_LIMIT = 3;
 export const STOP_GRACE_MS = 1500;
@@ -45,6 +64,10 @@ interface OffscreenChrome {
 interface Session {
   readonly id: string;
   readonly owner: Owner;
+  readonly mode: InputMode;
+  readonly rules: readonly ReplacementRule[];
+  /** Every message of this session goes out through this chain, in order. */
+  outbox: Promise<void>;
   /** Results from recognition instances before this one belong to an earlier session. */
   firstRecognitionId: number;
   currentRecognitionId: number;
@@ -68,16 +91,25 @@ export interface Offscreen {
 
 export interface OffscreenOptions {
   chrome: OffscreenChrome;
+  /** A ready recognizer (its language is then its own), or a factory given the mode-aware language. */
   recognizer?: SpeechRecognizer;
+  createRecognizer?: (lang: () => string) => SpeechRecognizer;
+  /** Normal mode's language. Default: this document's navigator.language. */
+  baseLang?: () => string;
+  /** Kanji -> katakana reading for kana mode. Without it kana mode converts kana only. */
+  reading?: ReadingProvider;
 }
 
 export function createOffscreen(options: OffscreenOptions): Offscreen {
   const chrome = options.chrome;
-  const recognizer =
-    options.recognizer ?? createSpeechRecognizer({ lang: () => globalThis.navigator?.language || "en-US" });
+  const baseLang = options.baseLang ?? (() => globalThis.navigator?.language || "en-US");
   let session: Session | null = null;
+  const lang = (): string => recognitionLangFor(session?.mode ?? "normal", baseLang());
+  const recognizer =
+    options.recognizer ?? (options.createRecognizer ?? ((l) => createSpeechRecognizer({ lang: l })))(lang);
+  const reading = options.reading;
 
-  function post(s: Session, event: SessionEvent): void {
+  function send(s: Session, event: SessionEvent): void {
     const message: OffscreenToBackground = {
       target: "background",
       type: "session-event",
@@ -86,6 +118,29 @@ export function createOffscreen(options: OffscreenOptions): Offscreen {
       event,
     };
     void chrome.runtime.sendMessage(message).catch(() => undefined);
+  }
+
+  function post(s: Session, event: SessionEvent): void {
+    s.outbox = s.outbox.then(() => send(s, event));
+  }
+
+  /** A result, shaped for the session's mode. The final one may wait for the dictionary. */
+  function postResult(s: Session, event: Extract<SessionEvent, { kind: "result" }>): void {
+    const options = { mode: s.mode, rules: s.rules };
+    if (!event.isFinal || reading === undefined || s.mode !== "kana") {
+      post(s, { ...event, transcript: transformTranscriptSync(event.transcript, options) });
+      return;
+    }
+    s.outbox = s.outbox.then(async () => {
+      let transcript: string;
+      try {
+        transcript = await transformTranscript(event.transcript, { ...options, reading });
+      } catch {
+        // The dictionary failed to load: kana-only conversion is still better than nothing.
+        transcript = transformTranscriptSync(event.transcript, options);
+      }
+      send(s, { ...event, transcript });
+    });
   }
 
   function end(s: Session, reason: EndReason, code?: string): void {
@@ -135,7 +190,7 @@ export function createOffscreen(options: OffscreenOptions): Offscreen {
     } else if (r.transcript !== "") {
       s.pendingInterimId = r.recognitionId;
     }
-    post(s, {
+    postResult(s, {
       kind: "result",
       recognitionId: r.recognitionId,
       isCurrent: r.isCurrent,
@@ -187,7 +242,7 @@ export function createOffscreen(options: OffscreenOptions): Offscreen {
     cycleEnded(s, s.currentRecognitionId);
   });
 
-  function onStart(sessionId: string, owner: Owner): void {
+  function onStart(sessionId: string, owner: Owner, mode: InputMode, rules: readonly ReplacementRule[]): void {
     const old = session;
     if (old !== null) {
       if (old.id === sessionId) return; // duplicate start
@@ -197,6 +252,9 @@ export function createOffscreen(options: OffscreenOptions): Offscreen {
     const s: Session = {
       id: sessionId,
       owner,
+      mode,
+      rules,
+      outbox: Promise.resolve(),
       firstRecognitionId: recognizer.getRecognitionId(),
       currentRecognitionId: recognizer.getRecognitionId(),
       started: false,
@@ -261,7 +319,7 @@ export function createOffscreen(options: OffscreenOptions): Offscreen {
     if (message.type === "start") {
       owners.set(message.sessionId, message.owner);
       if (owners.size > 32) owners.delete(owners.keys().next().value as string);
-      onStart(message.sessionId, message.owner);
+      onStart(message.sessionId, message.owner, message.mode, message.rules);
     } else if (message.type === "stop") {
       onStop(message.sessionId, owners.get(message.sessionId) ?? null);
     } else {
@@ -278,4 +336,6 @@ export function createOffscreen(options: OffscreenOptions): Offscreen {
 }
 
 const extensionChrome = (globalThis as { chrome?: OffscreenChrome & { runtime: { id?: string } } }).chrome;
-if (extensionChrome?.runtime?.id !== undefined) createOffscreen({ chrome: extensionChrome });
+if (extensionChrome?.runtime?.id !== undefined) {
+  createOffscreen({ chrome: extensionChrome, reading: createReadingProvider() });
+}

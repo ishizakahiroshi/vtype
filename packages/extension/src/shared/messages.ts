@@ -14,6 +14,8 @@
 // including the owner (tab + frame) it reports back to, so the background service worker can be
 // restarted by Chrome at any time without losing track of where results go.
 
+import { isInputMode, type InputMode, type ReplacementRule } from "vtype-core";
+
 export type EndReason =
   /** The user pressed the mic again: insert the text. */
   | "user"
@@ -54,7 +56,15 @@ export type ContentToBackground =
 // ---- background -> offscreen -------------------------------------------------------------
 
 export type BackgroundToOffscreen =
-  | { readonly target: "offscreen"; readonly type: "start"; readonly sessionId: string; readonly owner: Owner }
+  | {
+      readonly target: "offscreen";
+      readonly type: "start";
+      readonly sessionId: string;
+      readonly owner: Owner;
+      /** Input mode and replacement table for this session (the background reads them from storage). */
+      readonly mode: InputMode;
+      readonly rules: readonly ReplacementRule[];
+    }
   | { readonly target: "offscreen"; readonly type: "stop"; readonly sessionId: string }
   | {
       readonly target: "offscreen";
@@ -150,7 +160,9 @@ export function isOffscreenToBackground(m: unknown): m is OffscreenToBackground 
 export function isBackgroundToOffscreen(m: unknown): m is BackgroundToOffscreen {
   const r = record(m);
   if (r === null || r.target !== "offscreen") return false;
-  if (r.type === "start") return typeof r.sessionId === "string" && isOwner(r.owner);
+  if (r.type === "start") {
+    return typeof r.sessionId === "string" && isOwner(r.owner) && isInputMode(r.mode) && Array.isArray(r.rules);
+  }
   if (r.type === "stop") return typeof r.sessionId === "string";
   return r.type === "abort";
 }

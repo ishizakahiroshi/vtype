@@ -153,6 +153,13 @@ $expectedFiles = @(
 # One more language is one more file, here and in the package: nothing else in this script
 # names a locale.
 foreach ($code in $localeCodes) { $expectedFiles += "_locales/$code/messages.json" }
+# Kana mode's kanji reading: kuromoji's IPADIC dictionary (12 gzip files) and the licenses it
+# ships under. The dictionary's own terms require NOTICE.md to travel with every copy.
+foreach ($name in @('base', 'cc', 'check', 'tid', 'tid_map', 'tid_pos', 'unk', 'unk_char', 'unk_compat', 'unk_invoke', 'unk_map', 'unk_pos')) {
+  $expectedFiles += "dict/$name.dat.gz"
+}
+$expectedFiles += 'dict/LICENSE-kuromoji.txt'
+$expectedFiles += 'dict/NOTICE.md'
 
 $actualFiles = Get-ChildItem -LiteralPath $distDir -Recurse -File |
   ForEach-Object { $_.FullName.Substring($distDir.Length).TrimStart('\', '/').Replace('\', '/') } |
@@ -231,7 +238,10 @@ foreach ($script in $distScripts) {
       Add-ValidationError "$script contains the Whisper path ('$needle'). It must not ship: it would send recorded audio to a server and contradict the store's data disclosure."
     }
   }
-  foreach ($pattern in @('\bfetch\s*\(', '\bXMLHttpRequest\b', '\bnew\s+WebSocket\b', '\bnavigator\.sendBeacon\b')) {
+  # One fetch form is allowed: fetch(chrome.runtime.getURL(...)), which can only ever address a
+  # file inside this extension's own package (kana mode reads its dictionary that way; see
+  # src/offscreen/packaged-dictionary-loader.cjs). Any other fetch, and XHR at all, still fails.
+  foreach ($pattern in @('\bfetch\s*\((?!\s*chrome\.runtime\.getURL\()', '\bXMLHttpRequest\b', '\bnew\s+WebSocket\b', '\bnavigator\.sendBeacon\b')) {
     if ($source -match $pattern) {
       Add-ValidationError "$script makes a network call (matched /$pattern/). vtype sends nothing of its own; if this is intended, the privacy policy and the store data disclosure have to be rewritten first."
     }

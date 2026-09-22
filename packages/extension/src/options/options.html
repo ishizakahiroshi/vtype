@@ -28,6 +28,11 @@
   #diag-actions button:hover { background: #f1f5f9; }
   #diag-log { margin: 12px 0 0; padding: 12px; max-height: 320px; overflow: auto; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.5; white-space: pre; }
   #diag-empty { color: #475569; }
+  .lead-hint { margin: 4px 0 0; color: #475569; }
+  #repl-text { box-sizing: border-box; width: 100%; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: inherit; }
+  .row-actions { display: flex; align-items: center; gap: 12px; margin: 8px 0 0; }
+  #repl-count { color: #475569; }
+  #repl-bad { color: #dc2626; }
   #status { margin-top: 16px; font-weight: 600; min-height: 1.6em; }
   #status.ok { color: #16a34a; }
   #status.err { color: #dc2626; }
@@ -44,6 +49,9 @@
     #diag-log { background: #16181d; border-color: #334155; }
     #diag-empty { color: #94a3b8; }
     #site-empty { color: #94a3b8; }
+    .lead-hint, #repl-count { color: #94a3b8; }
+    #repl-text { background: #16181d; border-color: #334155; }
+    #repl-bad { color: #f87171; }
   }
 </style>
 </head>
@@ -72,6 +80,27 @@
   <p class="hint" id="display-hover-hint"></p>
 </div>
 </fieldset>
+<fieldset>
+<legend id="mode-legend"></legend>
+<p class="lead-hint" id="mode-lead"></p>
+<div class="choice">
+  <label for="mode-normal"><input type="radio" id="mode-normal" name="inputMode" value="normal"> <span id="mode-normal-label"></span></label>
+  <p class="hint" id="mode-normal-hint"></p>
+</div>
+<div class="choice">
+  <label for="mode-en"><input type="radio" id="mode-en" name="inputMode" value="en"> <span id="mode-en-label"></span></label>
+  <p class="hint" id="mode-en-hint"></p>
+</div>
+<div class="choice">
+  <label for="mode-kana"><input type="radio" id="mode-kana" name="inputMode" value="kana"> <span id="mode-kana-label"></span></label>
+  <p class="hint" id="mode-kana-hint"></p>
+</div>
+</fieldset>
+<h2 id="repl-title"></h2>
+<p id="repl-lead"></p>
+<textarea id="repl-text" rows="6" spellcheck="false" autocomplete="off"></textarea>
+<div class="row-actions"><button id="repl-save" type="button"></button> <span id="repl-count"></span></div>
+<p id="repl-bad" hidden></p>
 <h2 id="sites-title"></h2>
 <p id="sites-lead"></p>
 <form id="site-form">
@@ -91,8 +120,13 @@
   <button id="diag-copy" type="button"></button>
   <button id="diag-clear" type="button"></button>
 </div>
+<p class="lead-hint" id="diag-report-note"></p>
 <p id="diag-empty"></p>
 <pre id="diag-log" hidden></pre>
+
+<h2 id="report-title"></h2>
+<p id="report-lead"></p>
+<p><button id="report-open" type="button"></button></p>
 
 <h2 id="positions-title"></h2>
 <p id="positions-lead"></p>

@@ -8,6 +8,8 @@
 // by policy, and rejects when the sync quota is exhausted; none of that may stop voice input
 // from working, so every failure falls back to the default (`click`).
 
+import { isInputMode, normalizeReplacementRules, type InputMode, type ReplacementRule } from "vtype-core";
+
 /** What starts a recording (C7e). */
 export type TriggerMode =
   /** Press the thin mic beside the field. Hovering only opens the panel. */
@@ -304,6 +306,73 @@ function watchKey(
       // Nothing to undo: the extension context is gone, and so is the listener.
     }
   };
+}
+
+// ---- input modes (native plan C2) ------------------------------------------------------
+//
+// The mode stays until it is changed, and follows the profile (sync). The replacement table
+// lives in `local`: sync allows 8 KB per item, which 200 rules can pass.
+
+export const INPUT_MODE_KEY = "inputMode";
+export const REPLACEMENTS_KEY = "replacements";
+export const DEFAULT_INPUT_MODE: InputMode = "normal";
+
+/** The stored mode, or `normal` when it is unset, unreadable or unknown. */
+export async function readInputMode(storage: StorageView | null): Promise<InputMode> {
+  const area = storage?.sync;
+  if (area === undefined) return DEFAULT_INPUT_MODE;
+  try {
+    const stored = await area.get([INPUT_MODE_KEY]);
+    const value = stored?.[INPUT_MODE_KEY];
+    return isInputMode(value) ? value : DEFAULT_INPUT_MODE;
+  } catch {
+    return DEFAULT_INPUT_MODE;
+  }
+}
+
+export async function writeInputMode(storage: StorageView | null, mode: InputMode): Promise<boolean> {
+  const area = storage?.sync;
+  if (area === undefined) return false;
+  try {
+    await area.set({ [INPUT_MODE_KEY]: mode });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function watchInputMode(storage: StorageView | null, onChange: (mode: InputMode) => void): () => void {
+  return watchKey(storage, INPUT_MODE_KEY, (value) => onChange(isInputMode(value) ? value : DEFAULT_INPUT_MODE));
+}
+
+/** The stored table, cleaned (normalizeReplacementRules); empty when nothing can be read. */
+export async function readReplacements(storage: StorageView | null): Promise<ReplacementRule[]> {
+  const area = storage?.local;
+  if (area === undefined) return [];
+  try {
+    const stored = await area.get([REPLACEMENTS_KEY]);
+    return normalizeReplacementRules(stored?.[REPLACEMENTS_KEY]);
+  } catch {
+    return [];
+  }
+}
+
+export async function writeReplacements(storage: StorageView | null, rules: readonly ReplacementRule[]): Promise<boolean> {
+  const area = storage?.local;
+  if (area === undefined) return false;
+  try {
+    await area.set({ [REPLACEMENTS_KEY]: normalizeReplacementRules(rules) });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function watchReplacements(
+  storage: StorageView | null,
+  onChange: (rules: ReplacementRule[]) => void,
+): () => void {
+  return watchKey(storage, REPLACEMENTS_KEY, (value) => onChange(normalizeReplacementRules(value)), ["local"]);
 }
 
 // ---- C9: sites vtype stays off on -------------------------------------------------------

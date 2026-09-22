@@ -10,7 +10,7 @@
 //   frames of the tab when frameId is omitted); it rejects when nobody listens;
 // - delivery is asynchronous.
 
-import { createSpeechRecognizer } from "vtype-core";
+import { createSpeechRecognizer, type ReadingProvider } from "vtype-core";
 import { createBackground, type Background, type BackgroundChrome } from "../src/background/index";
 import { createOffscreen, type Offscreen } from "../src/offscreen/offscreen";
 import type { ContentRuntime } from "../src/content/controller";
@@ -104,6 +104,8 @@ export class FakeChromeHub {
   withGetContexts = true;
   /** Hold createDocument until release() (for concurrency tests). */
   holdCreate = false;
+  /** Kanji reading handed to the offscreen document (input-mode tests). */
+  reading: ReadingProvider | undefined = undefined;
   private releaseCreate: (() => void) | null = null;
 
   private deliver(listeners: Listener[], message: unknown, sender: Parameters<Listener>[1]): Promise<unknown> {
@@ -187,11 +189,15 @@ export class FakeChromeHub {
           onMessage: { addListener: (l) => hub.offscreenListeners.push(l) },
         },
       },
-      recognizer: createSpeechRecognizer({
-        lang: "ja-JP",
-        SpeechRecognition: FakeSpeechRecognition as never,
-        isChromium: true,
-      }),
+      // The language comes from the offscreen document (mode-aware); normal mode is ja-JP here.
+      createRecognizer: (lang) =>
+        createSpeechRecognizer({
+          lang,
+          SpeechRecognition: FakeSpeechRecognition as never,
+          isChromium: true,
+        }),
+      baseLang: () => "ja-JP",
+      ...(this.reading === undefined ? {} : { reading: this.reading }),
     });
   }
 

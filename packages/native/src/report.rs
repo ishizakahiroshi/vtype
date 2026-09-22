@@ -62,6 +62,30 @@ pub fn encode_uri_component(s: &str) -> String {
 mod tests {
     use super::*;
 
+    /// Shared with packages/extension/tests/report.test.ts.
+    #[test]
+    fn builds_the_same_url_as_the_extension() {
+        let cases: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/report-url.json")).unwrap();
+        let cases = cases.as_array().unwrap();
+        assert!(!cases.is_empty());
+        for case in cases {
+            let input = &case["input"];
+            let surface = match input["surface"].as_str().unwrap() {
+                "extension" => Surface::Extension,
+                "desktop" => Surface::Desktop,
+                other => panic!("unknown surface {other}"),
+            };
+            let url = bug_report_url(&ReportInfo {
+                surface,
+                version: input["version"].as_str().unwrap(),
+                os: input["os"].as_str().unwrap(),
+                browser: input["browser"].as_str().unwrap(),
+            });
+            assert_eq!(url, case["url"].as_str().unwrap());
+        }
+    }
+
     #[test]
     fn encodes_like_javascript() {
         assert_eq!(encode_uri_component("a b&c=d/é"), "a%20b%26c%3Dd%2F%C3%A9");

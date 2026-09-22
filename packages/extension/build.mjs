@@ -15,6 +15,7 @@
 
 import { build } from "esbuild";
 import { copyFile, mkdir, readFile, readdir, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -43,6 +44,29 @@ const rawImports = {
   },
 };
 
+/**
+ * kuromoji (kana mode's kanji reading, src/offscreen/reading.ts) in a browser bundle:
+ * - its dictionary loader is replaced by src/offscreen/packaged-dictionary-loader.cjs, which can
+ *   only read files inside the extension (kuromoji's own browser loader uses XMLHttpRequest on
+ *   any URL, which validate-extension.ps1 refuses to ship);
+ * - the one Node module it needs, `path`, is given a `join` that is enough for "dict/" + name.
+ */
+const kuromojiForBrowser = {
+  name: "kuromoji-for-browser",
+  setup(b) {
+    b.onResolve({ filter: /NodeDictionaryLoader(\.js)?$/ }, () => ({
+      path: join(here, "src/offscreen/packaged-dictionary-loader.cjs"),
+    }));
+    b.onResolve({ filter: /^path$/ }, () => ({ path: "path-join", namespace: "shim" }));
+    b.onLoad({ filter: /.*/, namespace: "shim" }, () => ({
+      contents: `module.exports = { join: function () { return Array.prototype.join.call(arguments, "/").replace(/\\/+/g, "/"); } };`,
+      loader: "js",
+    }));
+  },
+};
+
+const kuromojiDir = dirname(createRequire(import.meta.url).resolve("kuromoji/package.json"));
+
 // Throws on a locale whose keys differ from the default one's: a missing key would show an
 // English sentence inside an otherwise translated page, which nobody reports as a bug.
 const locales = readLocales();
@@ -57,7 +81,7 @@ const scripts = [
 
 for (const [entry, out] of scripts) {
   await build({
-    plugins: [rawImports, esbuildLocales()],
+    plugins: [rawImports, esbuildLocales(), kuromojiForBrowser],
     entryPoints: [join(here, entry)],
     outfile: join(dist, out),
     bundle: true,
@@ -90,6 +114,16 @@ for (const code of Object.keys(locales)) {
   await mkdir(join(dist, "_locales", code), { recursive: true });
   await copyFile(join(here, "_locales", code, "messages.json"), join(dist, "_locales", code, "messages.json"));
 }
+
+// The IPADIC dictionary for kana mode, with the licenses it ships under (Apache-2.0 for
+// kuromoji; NOTICE.md carries the dictionary's own terms, which require the notice to travel
+// with every copy).
+await mkdir(join(dist, "dict"), { recursive: true });
+const dictFiles = (await readdir(join(kuromojiDir, "dict"))).filter((name) => name.endsWith(".dat.gz"));
+if (dictFiles.length === 0) throw new Error(`no dictionary files in ${join(kuromojiDir, "dict")}`);
+for (const name of dictFiles) await copyFile(join(kuromojiDir, "dict", name), join(dist, "dict", name));
+await copyFile(join(kuromojiDir, "LICENSE-2.0.txt"), join(dist, "dict", "LICENSE-kuromoji.txt"));
+await copyFile(join(kuromojiDir, "NOTICE.md"), join(dist, "dict", "NOTICE.md"));
 
 await copyFile(join(here, "manifest.json"), join(dist, "manifest.json"));
 await copyFile(join(here, "src/offscreen/offscreen.html"), join(dist, "offscreen.html"));

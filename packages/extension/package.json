@@ -12,10 +12,11 @@
     "build": "node build.mjs"
   },
   "devDependencies": {
-    "vtype-core": "workspace:*",
     "esbuild": "^0.28.2",
     "happy-dom": "^20.14.5",
+    "kuromoji": "0.1.2",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "vtype-core": "workspace:*"
   }
 }

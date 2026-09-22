@@ -300,5 +300,81 @@
   "native_notifyPasswordField": {
     "message": "A password field is in front, so vtype did not type anything.",
     "description": "Desktop app: notification when recognized text was not typed because a password field is in front"
+  },
+  "optionsModeLegend": {
+    "message": "Input mode",
+    "description": "Options page: title of the input mode choice"
+  },
+  "optionsModeLead": {
+    "message": "It stays as chosen until you change it. The desktop app's tray menu switches the same setting.",
+    "description": "Options page: under the input mode title"
+  },
+  "optionsModeNormalLabel": {
+    "message": "Normal",
+    "description": "Options page: input mode that recognizes the browser's language"
+  },
+  "optionsModeNormalHint": {
+    "message": "Recognizes the browser's language, as before.",
+    "description": "Options page: explanation of the normal input mode"
+  },
+  "optionsModeEnLabel": {
+    "message": "English",
+    "description": "Options page: input mode that recognizes English"
+  },
+  "optionsModeEnHint": {
+    "message": "Recognizes English (en-US), whatever the browser's language.",
+    "description": "Options page: explanation of the English input mode"
+  },
+  "optionsModeKanaLabel": {
+    "message": "Katakana",
+    "description": "Options page: input mode that types katakana"
+  },
+  "optionsModeKanaHint": {
+    "message": "Recognizes Japanese and types the result in full-width katakana.",
+    "description": "Options page: explanation of the katakana input mode"
+  },
+  "optionsReplTitle": {
+    "message": "Replacements",
+    "description": "Options page: title of the replacement table"
+  },
+  "optionsReplLead": {
+    "message": "One per line: what was recognized => what to type. Letters match regardless of case. Up to 200. Replaced words are kept as written, also in katakana mode.",
+    "description": "Options page: how to write the replacement table. Keep the => arrow as it is"
+  },
+  "optionsReplPlaceholder": {
+    "message": "vee type => vtype",
+    "description": "Options page: example shown in the empty replacement table"
+  },
+  "optionsReplSave": {
+    "message": "Save replacements",
+    "description": "Options page: button that saves the replacement table"
+  },
+  "optionsReplCount": {
+    "message": "{count} saved",
+    "description": "Options page: how many replacements are stored. {count} is a number"
+  },
+  "optionsReplBadLines": {
+    "message": "Not saved (no => or nothing on its left): line {lines}",
+    "description": "Options page: replacement lines that could not be read. {lines} is a list of line numbers"
+  },
+  "optionsReplTruncated": {
+    "message": "Saved the first 200. The rest were not saved.",
+    "description": "Options page: status when more than 200 replacements were written"
+  },
+  "optionsDiagReportNote": {
+    "message": "Pasting this into a bug report makes the cause easier to find. It holds no audio and no transcript.",
+    "description": "Options page: next to 'copy the log', says the log helps a bug report and holds no speech"
+  },
+  "optionsReportTitle": {
+    "message": "Report a problem",
+    "description": "Options page: title of the bug report section"
+  },
+  "optionsReportLead": {
+    "message": "Opens the report form on GitHub with the version, OS and browser filled in. Nothing is sent until you submit it yourself.",
+    "description": "Options page: explains that the button opens the GitHub form and sends nothing"
+  },
+  "optionsReportOpen": {
+    "message": "Open the report form",
+    "description": "Options page: button that opens the GitHub issue form"
   }
 }

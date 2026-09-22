@@ -18,7 +18,17 @@
 // is written here because this is the single context every session event passes through.
 
 import { appendDiag, describeSessionEvent } from "../shared/diagnostics";
-import { readDiagnostics, watchDiagnostics, type StorageView } from "../shared/settings";
+import type { InputMode, ReplacementRule } from "vtype-core";
+import {
+  DEFAULT_INPUT_MODE,
+  readDiagnostics,
+  readInputMode,
+  readReplacements,
+  watchDiagnostics,
+  watchInputMode,
+  watchReplacements,
+  type StorageView,
+} from "../shared/settings";
 import {
   OFFSCREEN_PATH,
   PERMISSION_PATH,
@@ -146,6 +156,32 @@ export function createBackground(chrome: BackgroundChrome): Background {
     void appendDiag(storage, line);
   }
 
+  // Input mode and replacement table (native plan C2): the offscreen document can only use
+  // chrome.runtime, so the background reads them and hands them over with every start. They are
+  // followed like the diagnostic flag; a start waits for the first read, so a worker that Chrome
+  // just restarted does not start in the wrong mode.
+  // A change that arrives while the first read is still out is newer than what that read returns.
+  let inputMode: InputMode = DEFAULT_INPUT_MODE;
+  let rules: ReplacementRule[] = [];
+  let modeChanged = false;
+  let rulesChanged = false;
+  const inputSettingsRead = Promise.all([
+    readInputMode(storage).then((mode) => {
+      if (!modeChanged) inputMode = mode;
+    }),
+    readReplacements(storage).then((next) => {
+      if (!rulesChanged) rules = next;
+    }),
+  ]);
+  watchInputMode(storage, (mode) => {
+    modeChanged = true;
+    inputMode = mode;
+  });
+  watchReplacements(storage, (next) => {
+    rulesChanged = true;
+    rules = next;
+  });
+
   function toOffscreen(message: BackgroundToOffscreen): Promise<unknown> {
     return chrome.runtime.sendMessage(message);
   }
@@ -163,7 +199,8 @@ export function createBackground(chrome: BackgroundChrome): Background {
     diag(`start requested tab=${owner.tabId} frame=${owner.frameId}`);
     try {
       await ensureOffscreen();
-      await toOffscreen({ target: "offscreen", type: "start", sessionId, owner });
+      await inputSettingsRead;
+      await toOffscreen({ target: "offscreen", type: "start", sessionId, owner, mode: inputMode, rules });
     } catch {
       await toContent(owner, sessionId, { kind: "ended", reason: "error", code: "offscreen-unavailable" }).catch(
         () => undefined,

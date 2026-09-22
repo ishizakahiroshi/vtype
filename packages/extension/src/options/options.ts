@@ -13,9 +13,12 @@
 // page with empty elements, and the text filled in here from the browser's language.
 // The text itself lives in `_locales/` (one file per language) and is read through shared/i18n.
 
+import { isInputMode, MAX_REPLACEMENT_RULES, type InputMode, type ReplacementRule } from "vtype-core";
 import { translator } from "../shared/i18n";
+import { bugReportUrl, describeBrowser, describeOs } from "../shared/report";
 import { clearDiagLog, formatDiagLog, readDiagLog, watchDiagLog, type DiagEntry } from "../shared/diagnostics";
 import {
+  DEFAULT_INPUT_MODE,
   DEFAULT_MIC_DISPLAY,
   DEFAULT_TRIGGER,
   clearOffsets,
@@ -25,14 +28,19 @@ import {
   normalizeExclusion,
   readDiagnostics,
   readExcludedSites,
+  readInputMode,
   readMicDisplay,
+  readReplacements,
   readTrigger,
   watchExcludedSites,
+  watchInputMode,
   withExcluded,
   withoutExclusionEntry,
   writeDiagnostics,
   writeExcludedSites,
+  writeInputMode,
   writeMicDisplay,
+  writeReplacements,
   writeTrigger,
   type ExcludedSites,
   type MicDisplay,
@@ -45,6 +53,54 @@ export interface OptionsPageOptions {
   /** chrome.storage by default; null shows the default and cannot save. */
   storage?: StorageView | null;
   language?: string;
+  /** Opens a web page in a new tab. Default: window.open. */
+  openUrl?: (url: string) => void;
+  /** The extension's version. Default: the manifest's. */
+  version?: string;
+}
+
+function manifestVersion(): string {
+  const runtime = (globalThis as { chrome?: { runtime?: { getManifest?: () => { version?: string } } } }).chrome
+    ?.runtime;
+  return runtime?.getManifest?.().version ?? "";
+}
+
+/** The separator between what was recognized and what to type, one rule per line. */
+export const REPLACEMENT_ARROW = "=>";
+
+export interface ParsedReplacements {
+  readonly rules: ReplacementRule[];
+  /** 1-based numbers of the lines that could not be read. Blank lines are not counted. */
+  readonly badLines: number[];
+  /** More rules were written than MAX_REPLACEMENT_RULES; the rest were dropped. */
+  readonly truncated: boolean;
+}
+
+/** `認識結果 => 入れたい形`, one per line. Spaces around the arrow are ignored. */
+export function parseReplacementText(text: string): ParsedReplacements {
+  const rules: ReplacementRule[] = [];
+  const badLines: number[] = [];
+  let truncated = false;
+  text.split(/\r?\n/).forEach((line, index) => {
+    if (line.trim() === "") return;
+    const at = line.indexOf(REPLACEMENT_ARROW);
+    const from = at < 0 ? "" : line.slice(0, at).trim();
+    if (from === "") {
+      badLines.push(index + 1);
+      return;
+    }
+    if (rules.some((r) => r.from.toLowerCase() === from.toLowerCase())) return;
+    if (rules.length >= MAX_REPLACEMENT_RULES) {
+      truncated = true;
+      return;
+    }
+    rules.push({ from, to: line.slice(at + REPLACEMENT_ARROW.length).trim() });
+  });
+  return { rules, badLines, truncated };
+}
+
+export function formatReplacementText(rules: readonly ReplacementRule[]): string {
+  return rules.map((r) => `${r.from} ${REPLACEMENT_ARROW} ${r.to}`).join("\n");
 }
 
 function setText(doc: Document, id: string, text: string, className?: string): void {
@@ -127,6 +183,61 @@ export function initOptionsPage(options: OptionsPageOptions = {}): void {
     readMicDisplay,
     writeMicDisplay,
   );
+
+  // ---- input mode and replacement table (native plan C2) ---------------------------------
+
+  setText(doc, "mode-legend", t("optionsModeLegend"));
+  setText(doc, "mode-lead", t("optionsModeLead"));
+  setText(doc, "mode-normal-label", t("optionsModeNormalLabel"));
+  setText(doc, "mode-normal-hint", t("optionsModeNormalHint"));
+  setText(doc, "mode-en-label", t("optionsModeEnLabel"));
+  setText(doc, "mode-en-hint", t("optionsModeEnHint"));
+  setText(doc, "mode-kana-label", t("optionsModeKanaLabel"));
+  setText(doc, "mode-kana-hint", t("optionsModeKanaHint"));
+  setText(doc, "repl-title", t("optionsReplTitle"));
+  setText(doc, "repl-lead", t("optionsReplLead"));
+  setText(doc, "repl-save", t("optionsReplSave"));
+
+  const modeIds = ["mode-normal", "mode-en", "mode-kana"];
+  wireChoice<InputMode>(modeIds, DEFAULT_INPUT_MODE, isInputMode, readInputMode, writeInputMode);
+  // The desktop app's tray switches the same setting; follow it while the page is open.
+  watchInputMode(storage, (mode) => {
+    for (const radio of radioGroup(modeIds)) radio.checked = radio.value === mode;
+  });
+
+  const replText = doc.getElementById("repl-text");
+  const replBad = doc.getElementById("repl-bad");
+
+  function showRuleCount(count: number): void {
+    setText(doc, "repl-count", t("optionsReplCount", { count }));
+  }
+
+  function showBadLines(lines: readonly number[]): void {
+    if (replBad === null) return;
+    replBad.textContent = lines.length === 0 ? "" : t("optionsReplBadLines", { lines: lines.join(", ") });
+    replBad.hidden = lines.length === 0;
+  }
+
+  if (replText instanceof HTMLTextAreaElement) {
+    replText.placeholder = t("optionsReplPlaceholder");
+    showRuleCount(0);
+    void readReplacements(storage).then((rules) => {
+      replText.value = formatReplacementText(rules);
+      showRuleCount(rules.length);
+    });
+    doc.getElementById("repl-save")?.addEventListener("click", () => {
+      const parsed = parseReplacementText(replText.value);
+      showBadLines(parsed.badLines);
+      void writeReplacements(storage, parsed.rules).then((ok) => {
+        if (!ok) {
+          setText(doc, "status", t("optionsFailed"), "err");
+          return;
+        }
+        showRuleCount(parsed.rules.length);
+        setText(doc, "status", parsed.truncated ? t("optionsReplTruncated") : t("optionsSaved"), "ok");
+      });
+    });
+  }
 
   // ---- C9: the sites vtype stays off on --------------------------------------------------
 
@@ -254,6 +365,27 @@ export function initOptionsPage(options: OptionsPageOptions = {}): void {
       renderDiag([]);
       setText(doc, "status", t("optionsDiagCleared"), "ok");
     });
+  });
+
+  // ---- report a problem (native plan C2) ------------------------------------------------
+  //
+  // Opens GitHub's issue form with the version, OS and browser filled in. Nothing is sent: the
+  // user sees the form and decides.
+
+  setText(doc, "diag-report-note", t("optionsDiagReportNote"));
+  setText(doc, "report-title", t("optionsReportTitle"));
+  setText(doc, "report-lead", t("optionsReportLead"));
+  setText(doc, "report-open", t("optionsReportOpen"));
+  doc.getElementById("report-open")?.addEventListener("click", () => {
+    const nav = doc.defaultView?.navigator as Parameters<typeof describeOs>[0];
+    const url = bugReportUrl({
+      surface: "extension",
+      version: options.version ?? manifestVersion(),
+      os: describeOs(nav),
+      browser: describeBrowser(nav),
+    });
+    const open = options.openUrl ?? ((u: string) => void doc.defaultView?.open(u, "_blank", "noopener"));
+    open(url);
   });
 
   // C7f: forget every dragged mic position. Open pages hear about it through
