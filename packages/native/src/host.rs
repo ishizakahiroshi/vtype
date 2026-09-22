@@ -23,11 +23,11 @@ pub fn run(origin: String) -> Result<()> {
 
     thread::spawn(move || {
         let mut reader = BufReader::new(recv);
-        let mut out = io::stdout().lock();
         while let Ok(Some(reply)) = ipc::read_line::<_, Reply>(&mut reader) {
             if let Reply::ToExtension { message } = reply {
                 let body = serde_json::to_vec(&message).unwrap_or_default();
-                if let Err(e) = write_frame(&mut out, &body) {
+                // Locked per frame, never across the wait for the daemon: exiting flushes stdout.
+                if let Err(e) = write_frame(&mut io::stdout().lock(), &body) {
                     tracing::warn!(error = %e, "could not write to Chrome");
                     break;
                 }
@@ -45,5 +45,6 @@ pub fn run(origin: String) -> Result<()> {
         }
     }
     tracing::info!("Chrome closed the port");
-    Ok(())
+    // The relay thread is still waiting on the daemon; it must not keep this process alive.
+    std::process::exit(0);
 }

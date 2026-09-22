@@ -1,0 +1,54 @@
+{
+  "comment": "Every message the desktop app and the extension exchange, as JSON. Read by packages/native/src/protocol.rs and packages/extension/tests/native-messages.test.ts; both must accept every valid one unchanged and refuse every invalid one.",
+  "toExtension": [
+    { "type": "hello", "nativeVersion": "0.1.0", "os": "Windows 10.0.26200" },
+    { "type": "start" },
+    { "type": "start", "mode": "kana" },
+    { "type": "stop" },
+    { "type": "set-mode", "mode": "en" },
+    { "type": "get-state" },
+    {
+      "type": "native-config",
+      "config": {
+        "hotkey": null,
+        "icon": { "visible": true, "x": null, "y": null, "hideOnFullscreen": true },
+        "inject": "auto",
+        "besideField": { "enabled": false, "trigger": "focus" },
+        "extraExtensionIds": []
+      }
+    },
+    { "type": "open-options" }
+  ],
+  "fromExtension": [
+    { "type": "hello", "extensionVersion": "0.1.0" },
+    { "type": "hello", "extensionVersion": "0.1.0", "browser": "Google Chrome 140" },
+    { "type": "state", "mode": "normal", "recording": false },
+    { "type": "session", "event": { "kind": "started" } },
+    { "type": "session", "event": { "kind": "interim", "text": "こんに" } },
+    { "type": "session", "event": { "kind": "final", "text": "こんにちは" } },
+    { "type": "session", "event": { "kind": "ended", "reason": "user" } },
+    { "type": "session", "event": { "kind": "ended", "reason": "error", "code": "not-allowed" } },
+    {
+      "type": "set-native-config",
+      "config": {
+        "hotkey": "Ctrl+Shift+F9",
+        "icon": { "visible": false, "x": 1200, "y": -40, "hideOnFullscreen": false },
+        "inject": "paste",
+        "besideField": { "enabled": true, "trigger": "hover" },
+        "extraExtensionIds": ["abcdefghijklmnopabcdefghijklmnop"]
+      }
+    },
+    { "type": "get-native-config" },
+    { "type": "error", "code": "offscreen-unavailable" }
+  ],
+  "invalidToExtension": [
+    { "type": "set-mode", "mode": "katakana" },
+    { "type": "hello", "os": "Windows" },
+    { "type": "launch-missiles" }
+  ],
+  "invalidFromExtension": [
+    { "type": "state", "mode": "en" },
+    { "type": "session", "event": { "kind": "final" } },
+    { "type": "set-native-config" }
+  ]
+}

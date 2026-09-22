@@ -376,5 +376,117 @@
   "optionsReportOpen": {
     "message": "報告フォームを開く",
     "description": "Options page: button that opens the GitHub issue form"
+  },
+  "optionsDesktopTitle": {
+    "message": "デスクトップ連携",
+    "description": "Options page: title of the desktop link section"
+  },
+  "optionsDesktopLead": {
+    "message": "vtype のデスクトップ版（Windows・macOS・Linux）を入れると、Web ページ以外のどのアプリにも音声入力できます。認識は今までどおり Chrome の vtype が行い、デスクトップ版がカーソルのある場所へ文字を入れます。",
+    "description": "Options page: what the desktop link does"
+  },
+  "optionsDesktopEnable": {
+    "message": "デスクトップ連携を有効にする",
+    "description": "Options page: button that asks for the permission and turns the desktop link on"
+  },
+  "optionsDesktopDisable": {
+    "message": "無効にする",
+    "description": "Options page: button that turns the desktop link off"
+  },
+  "optionsDesktopRetry": {
+    "message": "再試行",
+    "description": "Options page: button that tries to reach the desktop app again"
+  },
+  "optionsDesktopInstallLink": {
+    "message": "デスクトップ版の入れ方",
+    "description": "Options page: link to the instructions for installing the desktop app"
+  },
+  "optionsDesktopOff": {
+    "message": "オフです。",
+    "description": "Options page: desktop link status, off"
+  },
+  "optionsDesktopConnecting": {
+    "message": "デスクトップ版につないでいます…",
+    "description": "Options page: desktop link status, trying to connect"
+  },
+  "optionsDesktopConnected": {
+    "message": "デスクトップ版 {version} とつながっています。",
+    "description": "Options page: desktop link status, connected. {version} is the desktop app's version"
+  },
+  "optionsDesktopNotInstalled": {
+    "message": "デスクトップ版が見つかりません。入れて「vtype install」を実行してから「再試行」を押してください。",
+    "description": "Options page: desktop link status, the desktop app is not installed"
+  },
+  "optionsDesktopError": {
+    "message": "デスクトップ版につなげませんでした（{code}）。",
+    "description": "Options page: desktop link status, it could not connect. {code} is the reason"
+  },
+  "optionsDesktopNoPermission": {
+    "message": "許可されなかったため、デスクトップ連携はオフのままです。",
+    "description": "Options page: the permission for the desktop link was not granted"
+  },
+  "optionsNativeLegend": {
+    "message": "デスクトップ版の設定",
+    "description": "Options page: title of the desktop app's settings"
+  },
+  "optionsNativeHotkey": {
+    "message": "ショートカット",
+    "description": "Options page: label of the desktop app's global shortcut"
+  },
+  "optionsNativeHotkeyHint": {
+    "message": "例: Ctrl+Alt+Space。空にすると OS ごとの既定に戻ります。",
+    "description": "Options page: how to write the shortcut"
+  },
+  "optionsNativeIconVisible": {
+    "message": "タスクバーの近くにマイクアイコンを表示する",
+    "description": "Options page: show the desktop app's floating mic"
+  },
+  "optionsNativeIconFullscreen": {
+    "message": "全画面のアプリでは隠す",
+    "description": "Options page: hide the floating mic over full-screen apps"
+  },
+  "optionsNativeInject": {
+    "message": "文字の入れ方",
+    "description": "Options page: label of how the desktop app puts text into apps"
+  },
+  "optionsNativeInjectAuto": {
+    "message": "キー入力（うまくいかなければ貼り付け）",
+    "description": "Options page: type, and paste if typing does not work"
+  },
+  "optionsNativeInjectType": {
+    "message": "常にキー入力",
+    "description": "Options page: always type the text"
+  },
+  "optionsNativeInjectPaste": {
+    "message": "常に貼り付け（クリップボードは元に戻します）",
+    "description": "Options page: always paste the text (the clipboard is restored afterwards)"
+  },
+  "optionsNativeBeside": {
+    "message": "ほかのアプリの入力欄の横にマイクを出す（実験）",
+    "description": "Options page: experimental mic beside text fields of other apps"
+  },
+  "optionsNativeBesideHint": {
+    "message": "Windows と macOS だけです。アプリによっては出ません。",
+    "description": "Options page: explains the experimental mic beside fields"
+  },
+  "optionsNativeBesideTrigger": {
+    "message": "出るとき",
+    "description": "Options page: when the experimental mic appears"
+  },
+  "optionsNativeTriggerFocus": {
+    "message": "入力欄にカーソルが入ったとき",
+    "description": "Options page: the mic appears when the caret enters a field"
+  },
+  "optionsNativeTriggerHover": {
+    "message": "入力欄にマウスを乗せたとき",
+    "description": "Options page: the mic appears when the mouse is over a field"
+  },
+  "optionsNativeSave": {
+    "message": "デスクトップ版の設定を保存",
+    "description": "Options page: button that sends the desktop app's settings"
+  },
+  "optionsNativeSent": {
+    "message": "デスクトップ版へ送りました。",
+    "description": "Options page: status after the desktop app's settings were sent"
   }
 }

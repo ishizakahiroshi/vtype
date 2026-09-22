@@ -376,5 +376,117 @@
   "optionsReportOpen": {
     "message": "Open the report form",
     "description": "Options page: button that opens the GitHub issue form"
+  },
+  "optionsDesktopTitle": {
+    "message": "Desktop app",
+    "description": "Options page: title of the desktop link section"
+  },
+  "optionsDesktopLead": {
+    "message": "With the vtype desktop app (Windows, macOS, Linux), you can dictate into any app, not only web pages. vtype in Chrome still does the recognition; the desktop app types the result where your cursor is.",
+    "description": "Options page: what the desktop link does"
+  },
+  "optionsDesktopEnable": {
+    "message": "Turn on the desktop link",
+    "description": "Options page: button that asks for the permission and turns the desktop link on"
+  },
+  "optionsDesktopDisable": {
+    "message": "Turn off",
+    "description": "Options page: button that turns the desktop link off"
+  },
+  "optionsDesktopRetry": {
+    "message": "Try again",
+    "description": "Options page: button that tries to reach the desktop app again"
+  },
+  "optionsDesktopInstallLink": {
+    "message": "How to install the desktop app",
+    "description": "Options page: link to the instructions for installing the desktop app"
+  },
+  "optionsDesktopOff": {
+    "message": "Off.",
+    "description": "Options page: desktop link status, off"
+  },
+  "optionsDesktopConnecting": {
+    "message": "Connecting to the desktop app…",
+    "description": "Options page: desktop link status, trying to connect"
+  },
+  "optionsDesktopConnected": {
+    "message": "Connected to the desktop app {version}.",
+    "description": "Options page: desktop link status, connected. {version} is the desktop app's version"
+  },
+  "optionsDesktopNotInstalled": {
+    "message": "The desktop app was not found. Install it, run \"vtype install\", then press \"Try again\".",
+    "description": "Options page: desktop link status, the desktop app is not installed"
+  },
+  "optionsDesktopError": {
+    "message": "Could not connect to the desktop app ({code}).",
+    "description": "Options page: desktop link status, it could not connect. {code} is the reason"
+  },
+  "optionsDesktopNoPermission": {
+    "message": "The permission was not granted, so the desktop link stays off.",
+    "description": "Options page: the permission for the desktop link was not granted"
+  },
+  "optionsNativeLegend": {
+    "message": "Desktop app settings",
+    "description": "Options page: title of the desktop app's settings"
+  },
+  "optionsNativeHotkey": {
+    "message": "Shortcut",
+    "description": "Options page: label of the desktop app's global shortcut"
+  },
+  "optionsNativeHotkeyHint": {
+    "message": "For example Ctrl+Alt+Space. Leave empty for the default of your system.",
+    "description": "Options page: how to write the shortcut"
+  },
+  "optionsNativeIconVisible": {
+    "message": "Show the mic icon near the taskbar",
+    "description": "Options page: show the desktop app's floating mic"
+  },
+  "optionsNativeIconFullscreen": {
+    "message": "Hide it over full-screen apps",
+    "description": "Options page: hide the floating mic over full-screen apps"
+  },
+  "optionsNativeInject": {
+    "message": "How text goes in",
+    "description": "Options page: label of how the desktop app puts text into apps"
+  },
+  "optionsNativeInjectAuto": {
+    "message": "Type it (paste if that fails)",
+    "description": "Options page: type, and paste if typing does not work"
+  },
+  "optionsNativeInjectType": {
+    "message": "Always type it",
+    "description": "Options page: always type the text"
+  },
+  "optionsNativeInjectPaste": {
+    "message": "Always paste it (the clipboard is put back)",
+    "description": "Options page: always paste the text (the clipboard is restored afterwards)"
+  },
+  "optionsNativeBeside": {
+    "message": "Mic beside text fields in other apps (experimental)",
+    "description": "Options page: experimental mic beside text fields of other apps"
+  },
+  "optionsNativeBesideHint": {
+    "message": "Windows and macOS only. It may not appear in every app.",
+    "description": "Options page: explains the experimental mic beside fields"
+  },
+  "optionsNativeBesideTrigger": {
+    "message": "It appears",
+    "description": "Options page: when the experimental mic appears"
+  },
+  "optionsNativeTriggerFocus": {
+    "message": "when the cursor enters a field",
+    "description": "Options page: the mic appears when the caret enters a field"
+  },
+  "optionsNativeTriggerHover": {
+    "message": "when the mouse is over a field",
+    "description": "Options page: the mic appears when the mouse is over a field"
+  },
+  "optionsNativeSave": {
+    "message": "Save desktop settings",
+    "description": "Options page: button that sends the desktop app's settings"
+  },
+  "optionsNativeSent": {
+    "message": "Sent to the desktop app.",
+    "description": "Options page: status after the desktop app's settings were sent"
   }
 }

@@ -79,6 +79,40 @@ export class FakeSpeechRecognition {
   }
 }
 
+// ---- Native Messaging --------------------------------------------------------------------
+
+export class FakeNativePort {
+  readonly sent: unknown[] = [];
+  disconnected = false;
+  private readonly messageListeners: Array<(m: unknown) => void> = [];
+  private readonly disconnectListeners: Array<(p: unknown) => void> = [];
+  constructor(private readonly hub: FakeChromeHub) {}
+  readonly onMessage = { addListener: (l: (m: unknown) => void) => void this.messageListeners.push(l) };
+  readonly onDisconnect = { addListener: (l: (p: unknown) => void) => void this.disconnectListeners.push(l) };
+  postMessage(message: unknown): void {
+    if (this.disconnected) throw new Error("Attempting to use a disconnected port object");
+    this.sent.push(structuredClone(message));
+  }
+  disconnect(): void {
+    this.disconnected = true;
+  }
+  /** The desktop app sends a message. */
+  receive(message: unknown): void {
+    for (const l of [...this.messageListeners]) l(structuredClone(message));
+  }
+  /** The desktop app goes away; Chrome sets runtime.lastError for the listeners. */
+  drop(lastError = "Native host has exited."): void {
+    this.disconnected = true;
+    this.hub.lastError = { message: lastError };
+    for (const l of [...this.disconnectListeners]) l(this);
+    this.hub.lastError = undefined;
+  }
+  /** Messages the extension sent, with the given type. */
+  ofType(type: string): Array<Record<string, unknown>> {
+    return this.sent.filter((m) => (m as { type?: string }).type === type) as Array<Record<string, unknown>>;
+  }
+}
+
 // ---- message bus -------------------------------------------------------------------------
 
 export interface Delivered {
@@ -106,6 +140,24 @@ export class FakeChromeHub {
   holdCreate = false;
   /** Kanji reading handed to the offscreen document (input-mode tests). */
   reading: ReadingProvider | undefined = undefined;
+  // Native Messaging (desktop link tests).
+  readonly nativePorts: FakeNativePort[] = [];
+  nativeInstalled = true;
+  nativePermission = false;
+  lastError: { message?: string } | undefined = undefined;
+  readonly permissionAdded: Array<(p: { permissions?: string[] }) => void> = [];
+  readonly permissionRemoved: Array<(p: { permissions?: string[] }) => void> = [];
+  readonly optionsPageOpened: number[] = [];
+
+  /** The user grants (true) or revokes (false) the optional permission. */
+  setNativePermission(granted: boolean): void {
+    this.nativePermission = granted;
+    for (const l of granted ? this.permissionAdded : this.permissionRemoved) l({ permissions: ["nativeMessaging"] });
+  }
+
+  get nativePort(): FakeNativePort | undefined {
+    return this.nativePorts.at(-1);
+  }
   private releaseCreate: (() => void) | null = null;
 
   private deliver(listeners: Listener[], message: unknown, sender: Parameters<Listener>[1]): Promise<unknown> {
@@ -130,6 +182,25 @@ export class FakeChromeHub {
         },
         onMessage: { addListener: (l) => hub.backgroundListeners.push(l) },
         onInstalled: { addListener: (l) => hub.installedListeners.push(l) },
+        getManifest: () => ({ version: "0.1.0" }),
+        get lastError() {
+          return hub.lastError;
+        },
+        openOptionsPage: async () => {
+          hub.optionsPageOpened.push(1);
+        },
+        connectNative: (name: string) => {
+          if (name !== "com.ishizakahiroshi.vtype") throw new Error(`unexpected host ${name}`);
+          const port = new FakeNativePort(hub);
+          hub.nativePorts.push(port);
+          if (!hub.nativeInstalled) queueMicrotask(() => port.drop("Specified native messaging host not found."));
+          return port;
+        },
+      },
+      permissions: {
+        contains: async ({ permissions }) => permissions.every((p) => p === "nativeMessaging" && hub.nativePermission),
+        onAdded: { addListener: (l) => hub.permissionAdded.push(l) },
+        onRemoved: { addListener: (l) => hub.permissionRemoved.push(l) },
       },
       tabs: {
         sendMessage: (tabId, message, options) => {

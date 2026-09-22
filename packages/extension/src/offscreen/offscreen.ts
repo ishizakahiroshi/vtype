@@ -306,7 +306,7 @@ export function createOffscreen(options: OffscreenOptions): Offscreen {
     const s = session;
     if (s === null) return;
     if (sessionId !== undefined && s.id !== sessionId) return;
-    if (sessionId === undefined && (tabId === undefined || s.owner.tabId !== tabId)) return;
+    if (sessionId === undefined && (tabId === undefined || s.owner.kind !== "tab" || s.owner.tabId !== tabId)) return;
     end(s, "aborted");
     recognizer.abort();
   }

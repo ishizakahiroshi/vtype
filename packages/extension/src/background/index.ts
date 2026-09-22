@@ -30,17 +30,21 @@ import {
   type StorageView,
 } from "../shared/settings";
 import {
+  NATIVE_OWNER,
   OFFSCREEN_PATH,
   PERMISSION_PATH,
   TOGGLE_SITE_ACK,
   isContentToBackground,
   isOffscreenToBackground,
+  isOptionsToBackground,
   type BackgroundToContent,
   type BackgroundToContentToggleSite,
   type BackgroundToOffscreen,
   type Owner,
   type SessionEvent,
+  type TabOwner,
 } from "../shared/messages";
+import { createNativeBridge, type BridgeChrome, type NativeBridge } from "./native-bridge";
 
 interface MessageSender {
   tab?: { id?: number };
@@ -61,7 +65,14 @@ export interface BackgroundChrome {
     getContexts?: (filter: { contextTypes: string[]; documentUrls?: string[] }) => Promise<unknown[]>;
     /** C9: the way to the excluded list where no content script can be reached. */
     openOptionsPage?: () => Promise<void>;
+    /** Native plan C4: the desktop link. Absent without the optional permission. */
+    connectNative?: BridgeChrome["runtime"]["connectNative"];
+    lastError?: { message?: string };
+    getManifest?: () => { version: string };
+    /** Registered so Chrome starts this worker with the browser (the desktop link connects then). */
+    onStartup?: ChromeEvent<() => void>;
   };
+  permissions?: BridgeChrome["permissions"];
   /** C9: the toolbar icon. Absent in older tests and in a browser without `action`. */
   action?: {
     onClicked: ChromeEvent<(tab: { id?: number }) => void>;
@@ -83,6 +94,7 @@ export interface Background {
   /** How the last ensureOffscreen() found the document: for tests and diagnostics. */
   readonly lastOffscreenCheck: "getContexts" | "hasDocument" | "created" | "awaited" | null;
   ensureOffscreen(): Promise<void>;
+  readonly bridge: NativeBridge;
 }
 
 export function createBackground(chrome: BackgroundChrome): Background {
@@ -177,6 +189,7 @@ export function createBackground(chrome: BackgroundChrome): Background {
     modeChanged = true;
     inputMode = mode;
   });
+  // (The bridge follows the mode itself and tells the desktop app.)
   watchReplacements(storage, (next) => {
     rulesChanged = true;
     rules = next;
@@ -186,21 +199,55 @@ export function createBackground(chrome: BackgroundChrome): Background {
     return chrome.runtime.sendMessage(message);
   }
 
-  function toContent(owner: Owner, sessionId: string, event: SessionEvent): Promise<unknown> {
+  function toTab(owner: TabOwner, sessionId: string, event: SessionEvent): Promise<unknown> {
     const message: BackgroundToContent = { target: "content", type: "session-event", sessionId, event };
     return chrome.tabs.sendMessage(owner.tabId, message, { frameId: owner.frameId });
   }
+
+  /** Deliver a session event to whoever owns the session: a tab's frame or the desktop app. */
+  function toContent(owner: Owner, sessionId: string, event: SessionEvent): Promise<unknown> {
+    if (owner.kind === "tab") return toTab(owner, sessionId, event);
+    if (sessionId === nativeSession) {
+      if (event.kind === "ended") nativeSession = null;
+      bridge.sessionEvent(event);
+    }
+    return Promise.resolve();
+  }
+
+  // ---- the desktop link (native plan C4) -------------------------------------------------
+  //
+  // At most one recording belongs to the desktop app. Starting it supersedes a tab's recording
+  // (the offscreen document ends the old session with `superseded`), and a tab starting one
+  // supersedes it the same way.
+
+  let nativeSession: string | null = null;
+  let nativeCount = 0;
+
+  const bridge = createNativeBridge(chrome, storage, {
+    startSession(mode) {
+      if (nativeSession !== null) return;
+      nativeCount += 1;
+      nativeSession = `native-${Date.now()}-${nativeCount}`;
+      void start(nativeSession, NATIVE_OWNER, mode);
+    },
+    stopSession() {
+      if (nativeSession === null) return;
+      void stop(nativeSession, NATIVE_OWNER);
+    },
+    recording: () => nativeSession !== null,
+  });
 
   function openPermissionPage(): void {
     void chrome.tabs.create({ url: chrome.runtime.getURL(PERMISSION_PATH) }).catch(() => undefined);
   }
 
-  async function start(sessionId: string, owner: Owner): Promise<void> {
-    diag(`start requested tab=${owner.tabId} frame=${owner.frameId}`);
+  async function start(sessionId: string, owner: Owner, modeOverride?: InputMode): Promise<void> {
+    diag(owner.kind === "tab" ? `start requested tab=${owner.tabId} frame=${owner.frameId}` : "start requested native");
     try {
       await ensureOffscreen();
       await inputSettingsRead;
-      await toOffscreen({ target: "offscreen", type: "start", sessionId, owner, mode: inputMode, rules });
+      const mode = modeOverride ?? inputMode;
+      await toOffscreen({ target: "offscreen", type: "start", sessionId, owner, mode, rules });
     } catch {
       await toContent(owner, sessionId, { kind: "ended", reason: "error", code: "offscreen-unavailable" }).catch(
         () => undefined,
@@ -227,7 +274,7 @@ export function createBackground(chrome: BackgroundChrome): Background {
       }
       const tabId = sender.tab?.id;
       if (tabId === undefined) return; // not from a tab's content script
-      const owner: Owner = { tabId, frameId: sender.frameId ?? 0 };
+      const owner: Owner = { kind: "tab", tabId, frameId: sender.frameId ?? 0 };
       if (message.type === "start") void start(message.sessionId, owner);
       else void stop(message.sessionId, owner);
       return;
@@ -239,8 +286,17 @@ export function createBackground(chrome: BackgroundChrome): Background {
         // The tab navigated away or its frame is gone: nobody will ever stop this session.
         if (event.kind !== "ended") void toOffscreen({ target: "offscreen", type: "abort", sessionId }).catch(() => undefined);
       });
+      return;
+    }
+    if (isOptionsToBackground(message)) {
+      if (message.type === "native-retry") bridge.retry();
+      else bridge.setConfig(message.config);
     }
   });
+
+  // Chrome starts an MV3 worker at browser start only for a listener of this event; the desktop
+  // link needs that, so a Chrome that the desktop app started connects without a page opening.
+  chrome.runtime.onStartup?.addListener(() => undefined);
 
   /**
    * C9: the toolbar icon switches vtype off on the site in the tab, and on again. Sent to the
@@ -287,6 +343,7 @@ export function createBackground(chrome: BackgroundChrome): Background {
       return lastOffscreenCheck;
     },
     ensureOffscreen,
+    bridge,
   };
 }
 

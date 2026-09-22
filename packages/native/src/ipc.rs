@@ -102,6 +102,7 @@ pub fn ensure_daemon(endpoint: &str) -> Result<()> {
 }
 
 pub fn spawn_daemon() -> io::Result<()> {
+    keep_std_handles_to_ourselves();
     let exe = std::env::current_exe()?;
     let mut cmd = Command::new(exe);
     cmd.arg("daemon")
@@ -137,6 +138,32 @@ const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 #[cfg(windows)]
 const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+
+/// Windows starts children with every inheritable handle of the parent. When the host (whose
+/// stdin/stdout are Chrome's pipes) starts the daemon, the daemon would keep those pipes open for
+/// its whole life, and Chrome would never see the host's end of the port close. So the std handles
+/// are made non-inheritable first; the daemon gets its own (null) ones from `Stdio::null`.
+#[cfg(windows)]
+fn keep_std_handles_to_ourselves() {
+    use windows_sys::Win32::Foundation::{
+        SetHandleInformation, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE,
+    };
+    use windows_sys::Win32::System::Console::{
+        GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    };
+    for which in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+        unsafe {
+            let handle = GetStdHandle(which);
+            if !handle.is_null() && handle != INVALID_HANDLE_VALUE {
+                SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
+            }
+        }
+    }
+}
+
+/// On Unix, `Stdio::null` replaces the child's fds 0–2 and the rest are close-on-exec.
+#[cfg(not(windows))]
+fn keep_std_handles_to_ourselves() {}
 
 #[cfg(windows)]
 fn detach(cmd: &mut Command) {

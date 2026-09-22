@@ -11,6 +11,7 @@ mod daemon;
 mod diag;
 mod host;
 mod i18n;
+mod install;
 mod ipc;
 mod log;
 mod menu;
@@ -19,6 +20,8 @@ mod paths;
 mod platform;
 mod protocol;
 mod report;
+#[cfg(windows)]
+mod win_registry;
 
 use std::process::ExitCode;
 
@@ -35,9 +38,8 @@ fn main() -> ExitCode {
         match cli.command {
             Command::Daemon => daemon::run(),
             Command::Host { origin } => host::run(origin.unwrap_or_default()),
-            Command::Install { .. } | Command::Uninstall => {
-                Err(anyhow::anyhow!("install is not available yet"))
-            }
+            Command::Install { extension_ids } => install::install(&extension_ids),
+            Command::Uninstall => install::uninstall(),
             other => {
                 crate::log::init_stderr();
                 cli::run_client(other)

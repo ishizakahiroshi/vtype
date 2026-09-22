@@ -80,6 +80,8 @@ pub struct Core {
     errors: ErrorLog,
     notes: Vec<(String, String)>,
     now: Box<dyn Fn() -> Instant + Send>,
+    /// Last character typed in this recording (to space English finals apart).
+    last_char: Option<char>,
 }
 
 impl Core {
@@ -100,6 +102,7 @@ impl Core {
             errors: ErrorLog::default(),
             notes: Vec::new(),
             now: Box::new(Instant::now),
+            last_char: None,
         }
     }
 
@@ -421,6 +424,7 @@ impl Core {
         match event {
             SessionEvent::Started => {
                 self.recording = true;
+                self.last_char = None;
                 self.show_icon(IconState::Recording);
                 self.update_tray();
             }
@@ -449,6 +453,15 @@ impl Core {
         if text.trim().is_empty() {
             return;
         }
+        // Chrome ends a recognition after each utterance, so one recording yields several finals.
+        // English words would run together ("helloworld"); Japanese needs no space.
+        let text = match (self.last_char, text.chars().next()) {
+            (Some(a), Some(b)) if a.is_ascii_alphanumeric() && b.is_ascii_alphanumeric() => {
+                format!(" {text}")
+            }
+            _ => text.to_string(),
+        };
+        let text = text.as_str();
         let field = self.platform.focused_field();
         if field.is_password == Some(true) {
             tracing::info!(
@@ -462,6 +475,7 @@ impl Core {
         match self.platform.inject_text(text, self.config.inject) {
             Ok(InjectOutcome::Typed) | Ok(InjectOutcome::Pasted) => {
                 tracing::info!(len = text.chars().count(), "inserted");
+                self.last_char = text.chars().last();
                 self.show_icon(IconState::Done);
             }
             Ok(InjectOutcome::CopiedOnly) => {
@@ -964,6 +978,38 @@ pub mod tests {
         assert!(calls.contains(&"bubble hel".to_string()));
         assert!(calls.contains(&"icon Done".to_string()));
         assert!(!h.core.recording);
+    }
+
+    #[test]
+    fn spaces_english_finals_apart_but_not_japanese() {
+        let mut h = Harness::new();
+        h.connect();
+        let final_text = |h: &mut Harness, t: &str| {
+            h.ext(json!({"type":"session","event":{"kind":"final","text": t}}));
+        };
+        h.ext(json!({"type":"session","event":{"kind":"started"}}));
+        final_text(&mut h, "hello");
+        final_text(&mut h, "world");
+        final_text(&mut h, "こんにちは");
+        final_text(&mut h, "です");
+        h.ext(json!({"type":"session","event":{"kind":"started"}}));
+        final_text(&mut h, "again");
+        let injected: Vec<String> = h
+            .fake
+            .take()
+            .into_iter()
+            .filter(|c| c.starts_with("inject "))
+            .collect();
+        assert_eq!(
+            injected,
+            vec![
+                "inject hello Auto",
+                "inject  world Auto",
+                "inject こんにちは Auto",
+                "inject です Auto",
+                "inject again Auto"
+            ]
+        );
     }
 
     #[test]

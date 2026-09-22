@@ -29,6 +29,11 @@
   #diag-log { margin: 12px 0 0; padding: 12px; max-height: 320px; overflow: auto; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.5; white-space: pre; }
   #diag-empty { color: #475569; }
   .lead-hint { margin: 4px 0 0; color: #475569; }
+  button.secondary { background: transparent; color: inherit; border: 1px solid #cbd5e1; }
+  button.secondary:hover { background: #f1f5f9; }
+  #desktop-config .field { margin: 10px 0; }
+  #desktop-config .hint { margin: 2px 0 0; color: #475569; }
+  #desktop-config input[type="text"], #desktop-config select { font: inherit; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: inherit; }
   #repl-text { box-sizing: border-box; width: 100%; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: inherit; }
   .row-actions { display: flex; align-items: center; gap: 12px; margin: 8px 0 0; }
   #repl-count { color: #475569; }
@@ -49,7 +54,10 @@
     #diag-log { background: #16181d; border-color: #334155; }
     #diag-empty { color: #94a3b8; }
     #site-empty { color: #94a3b8; }
-    .lead-hint, #repl-count { color: #94a3b8; }
+    .lead-hint, #repl-count, #desktop-config .hint { color: #94a3b8; }
+    button.secondary { border-color: #334155; }
+    button.secondary:hover { background: #1e293b; }
+    #desktop-config input[type="text"], #desktop-config select { background: #16181d; border-color: #334155; }
     #repl-text { background: #16181d; border-color: #334155; }
     #repl-bad { color: #f87171; }
   }
@@ -101,6 +109,27 @@
 <textarea id="repl-text" rows="6" spellcheck="false" autocomplete="off"></textarea>
 <div class="row-actions"><button id="repl-save" type="button"></button> <span id="repl-count"></span></div>
 <p id="repl-bad" hidden></p>
+<h2 id="desktop" class="desktop-title"><span id="desktop-title"></span></h2>
+<p id="desktop-lead"></p>
+<p id="desktop-status"></p>
+<div class="row-actions">
+  <button id="desktop-enable" type="button"></button>
+  <button id="desktop-disable" type="button" class="secondary" hidden></button>
+  <button id="desktop-retry" type="button" class="secondary" hidden></button>
+</div>
+<p id="desktop-install" hidden><a id="desktop-install-link" target="_blank" rel="noopener"></a></p>
+<form id="desktop-config" hidden>
+  <fieldset>
+  <legend id="nc-legend"></legend>
+  <div class="field"><label for="nc-hotkey" id="nc-hotkey-label"></label> <input id="nc-hotkey" type="text" autocomplete="off" spellcheck="false"><p class="hint" id="nc-hotkey-hint"></p></div>
+  <div class="field"><label for="nc-icon-visible"><input type="checkbox" id="nc-icon-visible"> <span id="nc-icon-visible-label"></span></label></div>
+  <div class="field"><label for="nc-icon-fullscreen"><input type="checkbox" id="nc-icon-fullscreen"> <span id="nc-icon-fullscreen-label"></span></label></div>
+  <div class="field"><label for="nc-inject" id="nc-inject-label"></label> <select id="nc-inject"><option value="auto" id="nc-inject-auto"></option><option value="type" id="nc-inject-type"></option><option value="paste" id="nc-inject-paste"></option></select></div>
+  <div class="field"><label for="nc-beside"><input type="checkbox" id="nc-beside"> <span id="nc-beside-label"></span></label><p class="hint" id="nc-beside-hint"></p></div>
+  <div class="field"><label for="nc-beside-trigger" id="nc-beside-trigger-label"></label> <select id="nc-beside-trigger"><option value="focus" id="nc-trigger-focus"></option><option value="hover" id="nc-trigger-hover"></option></select></div>
+  <button id="nc-save" type="submit"></button>
+  </fieldset>
+</form>
 <h2 id="sites-title"></h2>
 <p id="sites-lead"></p>
 <form id="site-form">

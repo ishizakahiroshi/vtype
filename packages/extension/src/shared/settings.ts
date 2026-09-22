@@ -79,6 +79,8 @@ export type StorageChangeListener = (changes: Record<string, StorageChange>, are
 /** The part of `chrome.storage` this extension touches, typed narrowly. */
 export interface StorageView {
   sync?: StorageAreaView;
+  /** chrome.storage.session: the desktop link's live status, which must not outlive the browser. */
+  session?: StorageAreaView;
   /**
    * Only the excluded sites use this one, and only as a fallback: see EXCLUDED_AREAS. The
    * other settings are sync-only, because losing them costs the user a click, not a promise.
@@ -373,6 +375,69 @@ export function watchReplacements(
   onChange: (rules: ReplacementRule[]) => void,
 ): () => void {
   return watchKey(storage, REPLACEMENTS_KEY, (value) => onChange(normalizeReplacementRules(value)), ["local"]);
+}
+
+// ---- the desktop link (native plan C4) ---------------------------------------------------
+//
+// Off by default, and only ever on after the user granted the optional `nativeMessaging`
+// permission from the options page. The live status (connected or not, the desktop app's
+// version and settings) is kept in `session`, which the options page follows.
+
+export const DESKTOP_BRIDGE_KEY = "desktopBridge";
+export const BRIDGE_STATUS_KEY = "desktopBridgeStatus";
+export const NATIVE_CONFIG_KEY = "nativeConfig";
+
+export async function readDesktopBridge(storage: StorageView | null): Promise<boolean> {
+  const area = storage?.sync;
+  if (area === undefined) return false;
+  try {
+    const stored = await area.get([DESKTOP_BRIDGE_KEY]);
+    return stored?.[DESKTOP_BRIDGE_KEY] === true;
+  } catch {
+    return false;
+  }
+}
+
+export async function writeDesktopBridge(storage: StorageView | null, on: boolean): Promise<boolean> {
+  const area = storage?.sync;
+  if (area === undefined) return false;
+  try {
+    await area.set({ [DESKTOP_BRIDGE_KEY]: on });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function watchDesktopBridge(storage: StorageView | null, onChange: (on: boolean) => void): () => void {
+  return watchKey(storage, DESKTOP_BRIDGE_KEY, (value) => onChange(value === true));
+}
+
+/** Read one key of chrome.storage.session; undefined when absent or unreadable. */
+export async function readSessionValue(storage: StorageView | null, key: string): Promise<unknown> {
+  const area = storage?.session;
+  if (area === undefined) return undefined;
+  try {
+    return (await area.get([key]))?.[key];
+  } catch {
+    return undefined;
+  }
+}
+
+export async function writeSessionValue(storage: StorageView | null, key: string, value: unknown): Promise<void> {
+  try {
+    await storage?.session?.set({ [key]: value });
+  } catch {
+    // The status is advisory; the link works without it.
+  }
+}
+
+export function watchSessionValue(
+  storage: StorageView | null,
+  key: string,
+  onChange: (value: unknown) => void,
+): () => void {
+  return watchKey(storage, key, onChange, ["session"]);
 }
 
 // ---- C9: sites vtype stays off on -------------------------------------------------------

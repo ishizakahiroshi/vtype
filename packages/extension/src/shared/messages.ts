@@ -28,10 +28,23 @@ export type EndReason =
   /** Stopped because the owning tab closed or could no longer be reached. */
   | "aborted";
 
-export interface Owner {
+/**
+ * Who a session reports to: a frame of a tab (the mic beside a web field), or the desktop app
+ * over Native Messaging (native plan C4), which has no tab at all.
+ */
+export type Owner = TabOwner | NativeOwner;
+
+export interface TabOwner {
+  readonly kind: "tab";
   readonly tabId: number;
   readonly frameId: number;
 }
+
+export interface NativeOwner {
+  readonly kind: "native";
+}
+
+export const NATIVE_OWNER: NativeOwner = { kind: "native" };
 
 export type SessionEvent =
   | { readonly kind: "started"; readonly recognitionId: number }
@@ -118,7 +131,9 @@ function record(m: unknown): Record<string, unknown> | null {
 
 function isOwner(o: unknown): o is Owner {
   const r = record(o);
-  return r !== null && typeof r.tabId === "number" && typeof r.frameId === "number";
+  if (r === null) return false;
+  if (r.kind === "native") return true;
+  return r.kind === "tab" && typeof r.tabId === "number" && typeof r.frameId === "number";
 }
 
 function isSessionEvent(e: unknown): e is SessionEvent {
@@ -181,6 +196,20 @@ export function isBackgroundToContent(m: unknown): m is BackgroundToContent {
 export function isToggleSite(m: unknown): m is BackgroundToContentToggleSite {
   const r = record(m);
   return r !== null && r.target === "content" && r.type === "toggle-site";
+}
+
+// ---- options page -> background (native plan C4) -------------------------------------------
+
+export type OptionsToBackground =
+  /** Try the desktop link again (after installing the desktop app). */
+  | { readonly target: "background"; readonly type: "native-retry" }
+  /** Change the desktop app's settings. */
+  | { readonly target: "background"; readonly type: "native-config-set"; readonly config: unknown };
+
+export function isOptionsToBackground(m: unknown): m is OptionsToBackground {
+  const r = record(m);
+  if (r === null || r.target !== "background") return false;
+  return r.type === "native-retry" || (r.type === "native-config-set" && "config" in r);
 }
 
 export const OFFSCREEN_PATH = "offscreen.html";

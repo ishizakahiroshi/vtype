@@ -247,6 +247,35 @@ mod tests {
         }
     }
 
+    /// Shared with packages/extension/tests/native-messages.test.ts.
+    #[test]
+    fn the_shared_fixture_round_trips() {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/nm-messages.json")).unwrap();
+        for m in fixture["toExtension"].as_array().unwrap() {
+            let parsed: ToExtension =
+                serde_json::from_value(m.clone()).unwrap_or_else(|e| panic!("{m}: {e}"));
+            assert_eq!(&serde_json::to_value(&parsed).unwrap(), m);
+        }
+        for m in fixture["fromExtension"].as_array().unwrap() {
+            let parsed: FromExtension =
+                serde_json::from_value(m.clone()).unwrap_or_else(|e| panic!("{m}: {e}"));
+            assert_eq!(&serde_json::to_value(&parsed).unwrap(), m);
+        }
+        for m in fixture["invalidToExtension"].as_array().unwrap() {
+            assert!(
+                serde_json::from_value::<ToExtension>(m.clone()).is_err(),
+                "{m}"
+            );
+        }
+        for m in fixture["invalidFromExtension"].as_array().unwrap() {
+            assert!(
+                serde_json::from_value::<FromExtension>(m.clone()).is_err(),
+                "{m}"
+            );
+        }
+    }
+
     #[test]
     fn a_missing_mode_reads_as_none() {
         let req: Request = serde_json::from_str(r#"{"type":"toggle"}"#).unwrap();
