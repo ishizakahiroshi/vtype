@@ -186,6 +186,12 @@ pub fn uninstall() -> Result<()> {
             Err(e) => eprintln!("could not remove {}: {e}", file.display()),
         }
     }
+    // On Windows the file sits in a folder of vtype's own (`%LOCALAPPDATA%\vtype`); take it out
+    // too once it is empty. Elsewhere the folders are Chrome's and stay.
+    #[cfg(windows)]
+    if let Some(dir) = locations.manifest_files.first().and_then(|f| f.parent()) {
+        let _ = fs::remove_dir(dir);
+    }
     unregister(&locations)?;
     let platform = crate::platform::current();
     match platform.set_autostart(false) {
