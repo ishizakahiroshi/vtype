@@ -23,9 +23,8 @@ from it. Releasing turns `## [Unreleased]` into `## [X.Y.Z] - YYYY-MM-DD` and op
   launchers and AutoHotkey, no typing into password fields, and an experimental mic beside the
   text field in use (Windows and macOS, off by default). On Linux: X11 through XTest, Wayland
   through the remote desktop portal, then `ydotool`, then the clipboard.
-- The desktop link on the settings page, through the optional `nativeMessaging` permission. It
-  is off and the permission is not held until the user turns it on; the desktop app's settings
-  (shortcut, typing or pasting, the icons) are edited on the same page.
+- The settings page has one line and a link about the desktop app, which is a separate app: the
+  extension does not talk to it and asks for no new permission.
 - "Report a problem" on the settings page and in the desktop app's menu: opens GitHub's issue
   form with the version, OS and browser filled in, and sends nothing itself. A bug report issue
   template goes with it. "Copy diagnostic info" in the desktop app's menu never includes audio or

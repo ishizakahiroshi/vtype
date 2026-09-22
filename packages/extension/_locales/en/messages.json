@@ -355,7 +355,7 @@
     "description": "Options page: title of the input mode choice"
   },
   "optionsModeLead": {
-    "message": "It stays as chosen until you change it. The desktop app's tray menu switches the same setting.",
+    "message": "It stays as chosen until you change it.",
     "description": "Options page: under the input mode title"
   },
   "optionsModeNormalLabel": {
@@ -428,51 +428,15 @@
   },
   "optionsDesktopTitle": {
     "message": "Desktop app",
-    "description": "Options page: title of the desktop link section"
+    "description": "Options page: title of the section about the desktop app"
   },
   "optionsDesktopLead": {
-    "message": "With the vtype desktop app (Windows, macOS, Linux), you can dictate into any app, not only web pages. vtype in Chrome still does the recognition; the desktop app types the result where your cursor is.",
-    "description": "Options page: what the desktop link does"
-  },
-  "optionsDesktopEnable": {
-    "message": "Turn on the desktop link",
-    "description": "Options page: button that asks for the permission and turns the desktop link on"
-  },
-  "optionsDesktopDisable": {
-    "message": "Turn off",
-    "description": "Options page: button that turns the desktop link off"
-  },
-  "optionsDesktopRetry": {
-    "message": "Try again",
-    "description": "Options page: button that tries to reach the desktop app again"
+    "message": "The vtype desktop app (Windows, macOS, Linux) is a separate app. It dictates into any app, not only web pages, and does not need this extension.",
+    "description": "Options page: says the desktop app is a separate app that does not need the extension"
   },
   "optionsDesktopInstallLink": {
     "message": "How to install the desktop app",
     "description": "Options page: link to the instructions for installing the desktop app"
-  },
-  "optionsDesktopOff": {
-    "message": "Off.",
-    "description": "Options page: desktop link status, off"
-  },
-  "optionsDesktopConnecting": {
-    "message": "Connecting to the desktop app…",
-    "description": "Options page: desktop link status, trying to connect"
-  },
-  "optionsDesktopConnected": {
-    "message": "Connected to the desktop app {version}.",
-    "description": "Options page: desktop link status, connected. {version} is the desktop app's version"
-  },
-  "optionsDesktopNotInstalled": {
-    "message": "The desktop app was not found. Install it, run \"vtype install\", then press \"Try again\".",
-    "description": "Options page: desktop link status, the desktop app is not installed"
-  },
-  "optionsDesktopError": {
-    "message": "Could not connect to the desktop app ({code}).",
-    "description": "Options page: desktop link status, it could not connect. {code} is the reason"
-  },
-  "optionsDesktopNoPermission": {
-    "message": "The permission was not granted, so the desktop link stays off.",
-    "description": "Options page: the permission for the desktop link was not granted"
   },
   "optionsNativeLegend": {
     "message": "Desktop app settings",
@@ -534,12 +498,12 @@
     "message": "Save desktop settings",
     "description": "Options page: button that sends the desktop app's settings"
   },
-  "optionsNativeSent": {
-    "message": "Sent to the desktop app.",
-    "description": "Options page: status after the desktop app's settings were sent"
-  },
   "settings_failed": {
     "message": "Could not reach vtype. Check that it is running, then reopen this page from its tray icon.",
     "description": "Desktop app settings page: the settings could not be read or saved"
+  },
+  "settings_modeLead": {
+    "message": "It stays as chosen until you change it. The tray menu switches it too.",
+    "description": "Desktop app settings page: under the input mode title. The desktop app keeps the mode until changed; its tray menu switches it too"
   }
 }

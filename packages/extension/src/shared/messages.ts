@@ -29,8 +29,8 @@ export type EndReason =
   | "aborted";
 
 /**
- * Who a session reports to: a frame of a tab (the mic beside a web field), or the desktop app
- * over Native Messaging (native plan C4), which has no tab at all.
+ * Who a session reports to: a frame of a tab (the mic beside a web field), or the desktop app's
+ * own speech page (src/speech/, standalone plan C2), which has no tab at all.
  */
 export type Owner = TabOwner | NativeOwner;
 
@@ -196,20 +196,6 @@ export function isBackgroundToContent(m: unknown): m is BackgroundToContent {
 export function isToggleSite(m: unknown): m is BackgroundToContentToggleSite {
   const r = record(m);
   return r !== null && r.target === "content" && r.type === "toggle-site";
-}
-
-// ---- options page -> background (native plan C4) -------------------------------------------
-
-export type OptionsToBackground =
-  /** Try the desktop link again (after installing the desktop app). */
-  | { readonly target: "background"; readonly type: "native-retry" }
-  /** Change the desktop app's settings. */
-  | { readonly target: "background"; readonly type: "native-config-set"; readonly config: unknown };
-
-export function isOptionsToBackground(m: unknown): m is OptionsToBackground {
-  const r = record(m);
-  if (r === null || r.target !== "background") return false;
-  return r.type === "native-retry" || (r.type === "native-config-set" && "config" in r);
 }
 
 export const OFFSCREEN_PATH = "offscreen.html";

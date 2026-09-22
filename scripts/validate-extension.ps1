@@ -117,16 +117,10 @@ foreach ($permission in $permissions) {
     Add-ValidationError "Unexpected permission '$permission'. Every added permission needs a justification in docs/store/listing.*.md and in the submission notes."
   }
 }
-# The desktop link's permission is optional: asked for from the options page, never at install,
-# so that adding it does not disable the extension for everyone who already has it.
-$optionalPermissions = @($manifest.optional_permissions | Where-Object { $_ })
-foreach ($permission in $optionalPermissions) {
-  if ($permission -ne 'nativeMessaging') {
-    Add-ValidationError "Unexpected optional permission '$permission'. Only nativeMessaging (the desktop link) is expected."
-  }
-}
-if ($permissions -contains 'nativeMessaging') {
-  Add-ValidationError 'nativeMessaging must stay in optional_permissions: as a required permission, the update would disable vtype for every existing user until they accept it.'
+# No optional permissions either: the desktop app is a separate app that runs its own Chrome
+# (standalone plan C6), so the extension never talks to it.
+if (@($manifest.optional_permissions | Where-Object { $_ }).Count -gt 0) {
+  Add-ValidationError "optional_permissions must stay empty (found: $(@($manifest.optional_permissions) -join ', ')). Every added permission needs a justification in docs/store/listing.*.md and in the submission notes."
 }
 if ($manifest.host_permissions) {
   Add-ValidationError 'host_permissions must stay empty: vtype reaches pages through the content script only.'

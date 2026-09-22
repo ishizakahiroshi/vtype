@@ -12,7 +12,6 @@
     "128": "icons/icon128.png"
   },
   "permissions": ["offscreen", "storage"],
-  "optional_permissions": ["nativeMessaging"],
   "action": {
     "default_title": "__MSG_actionTitle__"
   },

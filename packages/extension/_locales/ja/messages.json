@@ -355,7 +355,7 @@
     "description": "Options page: title of the input mode choice"
   },
   "optionsModeLead": {
-    "message": "変えるまでそのままです。デスクトップ版のトレイのメニューからも同じ設定を切り替えられます。",
+    "message": "変えるまでそのままです。",
     "description": "Options page: under the input mode title"
   },
   "optionsModeNormalLabel": {
@@ -427,52 +427,16 @@
     "description": "Options page: button that opens the GitHub issue form"
   },
   "optionsDesktopTitle": {
-    "message": "デスクトップ連携",
-    "description": "Options page: title of the desktop link section"
+    "message": "デスクトップ版",
+    "description": "Options page: title of the section about the desktop app"
   },
   "optionsDesktopLead": {
-    "message": "vtype のデスクトップ版（Windows・macOS・Linux）を入れると、Web ページ以外のどのアプリにも音声入力できます。認識は今までどおり Chrome の vtype が行い、デスクトップ版がカーソルのある場所へ文字を入れます。",
-    "description": "Options page: what the desktop link does"
-  },
-  "optionsDesktopEnable": {
-    "message": "デスクトップ連携を有効にする",
-    "description": "Options page: button that asks for the permission and turns the desktop link on"
-  },
-  "optionsDesktopDisable": {
-    "message": "無効にする",
-    "description": "Options page: button that turns the desktop link off"
-  },
-  "optionsDesktopRetry": {
-    "message": "再試行",
-    "description": "Options page: button that tries to reach the desktop app again"
+    "message": "デスクトップ版（Windows・macOS・Linux）は別のアプリです。この拡張がなくても、Web ページ以外のどのアプリにも音声入力できます。",
+    "description": "Options page: says the desktop app is a separate app that does not need the extension"
   },
   "optionsDesktopInstallLink": {
     "message": "デスクトップ版の入れ方",
     "description": "Options page: link to the instructions for installing the desktop app"
-  },
-  "optionsDesktopOff": {
-    "message": "オフです。",
-    "description": "Options page: desktop link status, off"
-  },
-  "optionsDesktopConnecting": {
-    "message": "デスクトップ版につないでいます…",
-    "description": "Options page: desktop link status, trying to connect"
-  },
-  "optionsDesktopConnected": {
-    "message": "デスクトップ版 {version} とつながっています。",
-    "description": "Options page: desktop link status, connected. {version} is the desktop app's version"
-  },
-  "optionsDesktopNotInstalled": {
-    "message": "デスクトップ版が見つかりません。入れて「vtype install」を実行してから「再試行」を押してください。",
-    "description": "Options page: desktop link status, the desktop app is not installed"
-  },
-  "optionsDesktopError": {
-    "message": "デスクトップ版につなげませんでした（{code}）。",
-    "description": "Options page: desktop link status, it could not connect. {code} is the reason"
-  },
-  "optionsDesktopNoPermission": {
-    "message": "許可されなかったため、デスクトップ連携はオフのままです。",
-    "description": "Options page: the permission for the desktop link was not granted"
   },
   "optionsNativeLegend": {
     "message": "デスクトップ版の設定",
@@ -534,12 +498,12 @@
     "message": "デスクトップ版の設定を保存",
     "description": "Options page: button that sends the desktop app's settings"
   },
-  "optionsNativeSent": {
-    "message": "デスクトップ版へ送りました。",
-    "description": "Options page: status after the desktop app's settings were sent"
-  },
   "settings_failed": {
     "message": "vtype につながりませんでした。vtype が動いているか確かめてから、トレイのアイコンからこのページを開き直してください。",
     "description": "Desktop app settings page: the settings could not be read or saved"
+  },
+  "settings_modeLead": {
+    "message": "変えるまでそのままです。トレイのメニューからも切り替えられます。",
+    "description": "Desktop app settings page: under the input mode title. The desktop app keeps the mode until changed; its tray menu switches it too"
   }
 }

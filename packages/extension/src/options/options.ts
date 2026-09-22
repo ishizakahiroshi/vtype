@@ -16,18 +16,8 @@
 import { isInputMode, type InputMode } from "vtype-core";
 import { translator } from "../shared/i18n";
 import { bugReportUrl, describeBrowser, describeOs } from "../shared/report";
-import type { OptionsToBackground } from "../shared/messages";
-import { isNativeConfig, type NativeConfig } from "../shared/native-messages";
-import type { BridgeStatus } from "../background/native-bridge";
 import { clearDiagLog, formatDiagLog, readDiagLog, watchDiagLog, type DiagEntry } from "../shared/diagnostics";
 import {
-  BRIDGE_STATUS_KEY,
-  NATIVE_CONFIG_KEY,
-  readDesktopBridge,
-  readSessionValue,
-  watchDesktopBridge,
-  watchSessionValue,
-  writeDesktopBridge,
   DEFAULT_INPUT_MODE,
   DEFAULT_MIC_DISPLAY,
   DEFAULT_TRIGGER,
@@ -67,18 +57,10 @@ export interface OptionsPageOptions {
   openUrl?: (url: string) => void;
   /** The extension's version. Default: the manifest's. */
   version?: string;
-  /** chrome.permissions (the desktop link's optional permission). */
-  permissions?: { request(query: { permissions: string[] }): Promise<boolean> } | null;
-  /** chrome.runtime.sendMessage (to the background). */
-  sendToBackground?: (message: OptionsToBackground) => Promise<unknown>;
 }
 
-/** Where the options page sends people who do not have the desktop app yet. */
+/** Where the options page points to the desktop app, which is a separate app (standalone plan C6). */
 export const DESKTOP_INSTALL_URL = "https://github.com/ishizakahiroshi/vtype#desktop";
-
-function extensionChrome(): { permissions?: OptionsPageOptions["permissions"]; runtime?: { sendMessage?(m: unknown): Promise<unknown> } } | undefined {
-  return (globalThis as { chrome?: ReturnType<typeof extensionChrome> }).chrome;
-}
 
 function manifestVersion(): string {
   const runtime = (globalThis as { chrome?: { runtime?: { getManifest?: () => { version?: string } } } }).chrome
@@ -193,7 +175,7 @@ export function initOptionsPage(options: OptionsPageOptions = {}): void {
 
   const modeIds = ["mode-normal", "mode-en", "mode-kana"];
   wireChoice<InputMode>(modeIds, DEFAULT_INPUT_MODE, isInputMode, readInputMode, writeInputMode);
-  // The desktop app's tray switches the same setting; follow it while the page is open.
+  // Another open settings page may switch it; follow it while the page is open.
   watchInputMode(storage, (mode) => {
     for (const radio of radioGroup(modeIds)) radio.checked = radio.value === mode;
   });
@@ -360,183 +342,15 @@ export function initOptionsPage(options: OptionsPageOptions = {}): void {
     });
   });
 
-  // ---- the desktop link (native plan C4) -------------------------------------------------
+  // ---- the desktop app (standalone plan C6) ------------------------------------------------
   //
-  // Asks for the optional nativeMessaging permission (only from this button, in the click
-  // itself, as Chrome requires), switches the link on and off, shows what the background
-  // reports in chrome.storage.session, and edits the desktop app's settings while it is there.
-
-  const permissions = options.permissions !== undefined ? options.permissions : (extensionChrome()?.permissions ?? null);
-  const sendToBackground =
-    options.sendToBackground ??
-    ((m: OptionsToBackground) => extensionChrome()?.runtime?.sendMessage?.(m) ?? Promise.resolve(undefined));
+  // A separate app that does not need this extension: one line and a link to how to get it.
 
   setText(doc, "desktop-title", t("optionsDesktopTitle"));
   setText(doc, "desktop-lead", t("optionsDesktopLead"));
-  setText(doc, "desktop-enable", t("optionsDesktopEnable"));
-  setText(doc, "desktop-disable", t("optionsDesktopDisable"));
-  setText(doc, "desktop-retry", t("optionsDesktopRetry"));
   setText(doc, "desktop-install-link", t("optionsDesktopInstallLink"));
-  setText(doc, "nc-legend", t("optionsNativeLegend"));
-  setText(doc, "nc-hotkey-label", t("optionsNativeHotkey"));
-  setText(doc, "nc-hotkey-hint", t("optionsNativeHotkeyHint"));
-  setText(doc, "nc-icon-visible-label", t("optionsNativeIconVisible"));
-  setText(doc, "nc-icon-fullscreen-label", t("optionsNativeIconFullscreen"));
-  setText(doc, "nc-inject-label", t("optionsNativeInject"));
-  setText(doc, "nc-inject-auto", t("optionsNativeInjectAuto"));
-  setText(doc, "nc-inject-type", t("optionsNativeInjectType"));
-  setText(doc, "nc-inject-paste", t("optionsNativeInjectPaste"));
-  setText(doc, "nc-beside-label", t("optionsNativeBeside"));
-  setText(doc, "nc-beside-hint", t("optionsNativeBesideHint"));
-  setText(doc, "nc-beside-trigger-label", t("optionsNativeBesideTrigger"));
-  setText(doc, "nc-trigger-focus", t("optionsNativeTriggerFocus"));
-  setText(doc, "nc-trigger-hover", t("optionsNativeTriggerHover"));
-  setText(doc, "nc-save", t("optionsNativeSave"));
   const installLink = doc.getElementById("desktop-install-link");
   if (installLink instanceof HTMLAnchorElement) installLink.href = DESKTOP_INSTALL_URL;
-
-  let bridgeOn = false;
-  let bridgeStatus: BridgeStatus = { state: "off" };
-  let nativeConfig: NativeConfig | null = null;
-
-  const el = <T extends HTMLElement>(id: string, type: new () => T): T | null => {
-    const found = doc.getElementById(id);
-    return found instanceof type ? found : null;
-  };
-
-  function show(id: string, visible: boolean): void {
-    const node = doc.getElementById(id);
-    if (node !== null) node.hidden = !visible;
-  }
-
-  function statusText(): string {
-    if (!bridgeOn) return t("optionsDesktopOff");
-    switch (bridgeStatus.state) {
-      case "connected":
-        return t("optionsDesktopConnected", { version: bridgeStatus.nativeVersion ?? "" });
-      case "not-installed":
-        return t("optionsDesktopNotInstalled");
-      case "error":
-        return t("optionsDesktopError", { code: bridgeStatus.error ?? "" });
-      default:
-        return t("optionsDesktopConnecting");
-    }
-  }
-
-  function renderDesktop(): void {
-    setText(doc, "desktop-status", statusText());
-    show("desktop-enable", !bridgeOn);
-    show("desktop-disable", bridgeOn);
-    const stuck = bridgeOn && (bridgeStatus.state === "not-installed" || bridgeStatus.state === "error");
-    show("desktop-retry", stuck);
-    show("desktop-install", bridgeOn && bridgeStatus.state === "not-installed");
-    const editable = bridgeOn && bridgeStatus.state === "connected" && nativeConfig !== null;
-    show("desktop-config", editable);
-    if (editable) fillNativeConfig(nativeConfig!);
-  }
-
-  function fillNativeConfig(c: NativeConfig): void {
-    const hotkey = el("nc-hotkey", HTMLInputElement);
-    if (hotkey !== null && doc.activeElement !== hotkey) hotkey.value = c.hotkey ?? "";
-    const visible = el("nc-icon-visible", HTMLInputElement);
-    if (visible !== null) visible.checked = c.icon.visible;
-    const fullscreen = el("nc-icon-fullscreen", HTMLInputElement);
-    if (fullscreen !== null) fullscreen.checked = c.icon.hideOnFullscreen;
-    const inject = el("nc-inject", HTMLSelectElement);
-    if (inject !== null) inject.value = c.inject;
-    const beside = el("nc-beside", HTMLInputElement);
-    if (beside !== null) beside.checked = c.besideField.enabled;
-    const trigger = el("nc-beside-trigger", HTMLSelectElement);
-    if (trigger !== null) trigger.value = c.besideField.trigger;
-  }
-
-  /** The form's values on top of what the desktop app sent (position and extra IDs stay). */
-  function readNativeConfig(base: NativeConfig): NativeConfig {
-    const hotkey = el("nc-hotkey", HTMLInputElement)?.value.trim() ?? "";
-    const inject = el("nc-inject", HTMLSelectElement)?.value;
-    const trigger = el("nc-beside-trigger", HTMLSelectElement)?.value;
-    return {
-      ...base,
-      hotkey: hotkey === "" ? null : hotkey,
-      icon: {
-        ...base.icon,
-        visible: el("nc-icon-visible", HTMLInputElement)?.checked ?? base.icon.visible,
-        hideOnFullscreen: el("nc-icon-fullscreen", HTMLInputElement)?.checked ?? base.icon.hideOnFullscreen,
-      },
-      inject: inject === "type" || inject === "paste" || inject === "auto" ? inject : base.inject,
-      besideField: {
-        enabled: el("nc-beside", HTMLInputElement)?.checked ?? base.besideField.enabled,
-        trigger: trigger === "hover" || trigger === "focus" ? trigger : base.besideField.trigger,
-      },
-    };
-  }
-
-  const asStatus = (v: unknown): BridgeStatus =>
-    typeof v === "object" && v !== null && typeof (v as { state?: unknown }).state === "string"
-      ? (v as BridgeStatus)
-      : { state: "off" };
-
-  renderDesktop();
-  void Promise.all([
-    readDesktopBridge(storage),
-    readSessionValue(storage, BRIDGE_STATUS_KEY),
-    readSessionValue(storage, NATIVE_CONFIG_KEY),
-  ]).then(([on, status, config]) => {
-    bridgeOn = on;
-    bridgeStatus = asStatus(status);
-    nativeConfig = isNativeConfig(config) ? config : null;
-    renderDesktop();
-  });
-  watchDesktopBridge(storage, (on) => {
-    bridgeOn = on;
-    renderDesktop();
-  });
-  watchSessionValue(storage, BRIDGE_STATUS_KEY, (v) => {
-    bridgeStatus = asStatus(v);
-    renderDesktop();
-  });
-  watchSessionValue(storage, NATIVE_CONFIG_KEY, (v) => {
-    nativeConfig = isNativeConfig(v) ? v : null;
-    renderDesktop();
-  });
-
-  doc.getElementById("desktop-enable")?.addEventListener("click", () => {
-    if (permissions === null) {
-      setText(doc, "status", t("optionsDesktopNoPermission"), "err");
-      return;
-    }
-    // Called in the click itself: Chrome grants optional permissions only from a user gesture.
-    void permissions
-      .request({ permissions: ["nativeMessaging"] })
-      .catch(() => false)
-      .then(async (granted) => {
-        if (!granted) {
-          setText(doc, "status", t("optionsDesktopNoPermission"), "err");
-          return;
-        }
-        const ok = await writeDesktopBridge(storage, true);
-        setText(doc, "status", ok ? t("optionsSaved") : t("optionsFailed"), ok ? "ok" : "err");
-      });
-  });
-
-  doc.getElementById("desktop-disable")?.addEventListener("click", () => {
-    void writeDesktopBridge(storage, false).then((ok) => {
-      setText(doc, "status", ok ? t("optionsSaved") : t("optionsFailed"), ok ? "ok" : "err");
-    });
-  });
-
-  doc.getElementById("desktop-retry")?.addEventListener("click", () => {
-    void sendToBackground({ target: "background", type: "native-retry" }).catch(() => undefined);
-  });
-
-  doc.getElementById("desktop-config")?.addEventListener("submit", (e) => {
-    e.preventDefault();
-    if (nativeConfig === null) return;
-    const config = readNativeConfig(nativeConfig);
-    void sendToBackground({ target: "background", type: "native-config-set", config })
-      .then(() => setText(doc, "status", t("optionsNativeSent"), "ok"))
-      .catch(() => setText(doc, "status", t("optionsFailed"), "err"));
-  });
 
   // ---- report a problem (native plan C2) ------------------------------------------------
   //

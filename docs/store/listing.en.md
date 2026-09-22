@@ -67,18 +67,8 @@ At the end of "What it does":
 
 - Input modes (normal / English / katakana) that stay until you change them, and a replacement
   table ("when it hears A, write B")
-- With the desktop app (Windows / macOS / Linux, distributed separately, optional), dictate into
-  apps outside the browser too
 
-At the end of "Privacy":
-
-- The desktop link is off by default. Only when you turn it on is the recognised text handed to
-  the desktop app on the same computer; it does not leave the computer
-
-At the end of "Permissions":
-
-- nativeMessaging (optional): asked for only when you turn on the desktop link, and used only to
-  hand the recognised text to the vtype desktop app on the same computer
+No permission is added since v0.1.0 ("Permissions" stays as it is).
 
 ## Category
 

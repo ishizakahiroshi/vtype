@@ -62,7 +62,7 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
   doc.title = t("optionsTitle");
   setText("title", t("optionsTitle"));
   setText("mode-legend", t("optionsModeLegend"));
-  setText("mode-lead", t("optionsModeLead"));
+  setText("mode-lead", t("settings_modeLead"));
   setText("mode-normal-label", t("optionsModeNormalLabel"));
   setText("mode-normal-hint", t("optionsModeNormalHint"));
   setText("mode-en-label", t("optionsModeEnLabel"));

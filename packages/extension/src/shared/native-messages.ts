@@ -1,17 +1,16 @@
-// What the extension and the desktop app (packages/native) say to each other over Chrome
-// Native Messaging (native plan C4). The Rust side is packages/native/src/protocol.rs
-// (`ToExtension` / `FromExtension`); both test against
+// What the desktop app (packages/native) and its speech page (src/speech/) say to each other
+// over the page's WebSocket (standalone plan C3; the messages were first the extension's Native
+// Messaging bridge, removed in standalone plan C6). The Rust side is
+// packages/native/src/protocol.rs (`ToExtension` / `FromExtension`); both test against
 // packages/native/tests/fixtures/nm-messages.json, so changing one side alone fails a test.
 //
-// The desktop app starts and stops recognition; the extension recognizes and reports back.
+// The desktop app starts and stops recognition; the page recognizes and reports back.
 // Only `final` text is typed into the foreground app; `interim` is shown in a bubble.
 
 import { isInputMode, type InputMode, type ReplacementRule } from "vtype-core";
 import type { SessionEvent } from "./messages";
 
-export const NATIVE_HOST = "com.ishizakahiroshi.vtype";
-
-/** The desktop app's own settings (its config.json), shown and edited on the options page. */
+/** The desktop app's own settings (its config.json), shown and edited on its settings page. */
 export interface NativeConfig {
   readonly hotkey: string | null;
   readonly icon: {
