@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vtype-speech</title>
+<style>
+  body { font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif; max-width: 560px; margin: 32px auto; padding: 0 16px; color: #0f172a; }
+  h1 { font-size: 20px; }
+  button { font: inherit; padding: 8px 16px; border-radius: 8px; border: none; background: #4f46e5; color: #fff; cursor: pointer; }
+  button:hover { background: #7c3aed; }
+  .err { color: #dc2626; font-weight: 600; }
+  #connection { color: #b45309; }
+  @media (prefers-color-scheme: dark) { body { background: #0e0f12; color: #e2e8f0; } }
+</style>
+</head>
+<body>
+<h1 id="title"></h1>
+<section id="consent-step" hidden>
+  <p id="consent-lead"></p>
+  <p><button id="consent-button" type="button"></button></p>
+</section>
+<section id="microphone-step" hidden>
+  <p id="microphone-lead"></p>
+  <p><button id="microphone-button" type="button"></button></p>
+  <p id="microphone-status" role="status"></p>
+</section>
+<section id="ready-step" hidden>
+  <p id="ready-lead"></p>
+</section>
+<p id="connection" role="status"></p>
+<script src="speech.js"></script>
+</body>
+</html>

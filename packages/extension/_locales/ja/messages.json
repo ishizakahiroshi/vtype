@@ -115,6 +115,32 @@
   "permissionAfter": {
     "message": "使い方: 入力欄をクリックし、横に出る小さなマイクにマウスを乗せて、パネルのマイクを押します。"
   },
+  "speech_title": {
+    "message": "vtype の音声認識",
+    "description": "Desktop app's speech page (opened by the desktop app in its own Chrome): heading"
+  },
+  "speech_consent_lead": {
+    "message": "話した声は Google Chrome の音声認識によって Google へ送られ、文字になります。vtype 自身はどこにも送りません。",
+    "description": "Desktop app's speech page: shown before the first recording; the user must agree before anything is recognised"
+  },
+  "speech_consent_button": {
+    "message": "同意して始める"
+  },
+  "speech_mic_lead": {
+    "message": "マイクを許可してください。"
+  },
+  "speech_mic_button": {
+    "message": "マイクを許可する"
+  },
+  "speech_mic_denied": {
+    "message": "マイクが許可されませんでした。Chrome でこのページのマイクを許可してから、もう一度押してください。"
+  },
+  "speech_ready": {
+    "message": "vtype は準備ができました。この窓は閉じずにそのままにしてください（vtype が隠します）。"
+  },
+  "speech_disconnected": {
+    "message": "vtype 本体とつながっていません。vtype が起動しているか確かめてください。"
+  },
   "permissionAlready": {
     "message": "マイクはすでに許可されています。このタブは閉じてかまいません。"
   },

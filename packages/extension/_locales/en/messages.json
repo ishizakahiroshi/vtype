@@ -115,6 +115,32 @@
   "permissionAfter": {
     "message": "To use vtype: focus a text field, rest the mouse on the small mic next to it, and press the mic in the panel."
   },
+  "speech_title": {
+    "message": "vtype speech recognition",
+    "description": "Desktop app's speech page (opened by the desktop app in its own Chrome): heading"
+  },
+  "speech_consent_lead": {
+    "message": "What you say is sent to Google by Google Chrome's speech recognition and comes back as text. vtype itself sends it nowhere.",
+    "description": "Desktop app's speech page: shown before the first recording; the user must agree before anything is recognised"
+  },
+  "speech_consent_button": {
+    "message": "Agree and start"
+  },
+  "speech_mic_lead": {
+    "message": "Please allow the microphone."
+  },
+  "speech_mic_button": {
+    "message": "Allow the microphone"
+  },
+  "speech_mic_denied": {
+    "message": "The microphone was not allowed. Allow it for this page in Chrome, then press the button again."
+  },
+  "speech_ready": {
+    "message": "vtype is ready. Leave this window open (vtype hides it)."
+  },
+  "speech_disconnected": {
+    "message": "Not connected to vtype. Check that vtype is running."
+  },
   "permissionAlready": {
     "message": "The microphone is already allowed. You can close this tab."
   },

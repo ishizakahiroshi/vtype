@@ -7,6 +7,7 @@
 // Only `final` text is typed into the foreground app; `interim` is shown in a bubble.
 
 import { isInputMode, type InputMode } from "vtype-core";
+import type { SessionEvent } from "./messages";
 
 export const NATIVE_HOST = "com.ishizakahiroshi.vtype";
 
@@ -45,7 +46,32 @@ export type ExtensionToNative =
   | { readonly type: "session"; readonly event: NativeSessionEvent }
   | { readonly type: "set-native-config"; readonly config: NativeConfig }
   | { readonly type: "get-native-config" }
-  | { readonly type: "error"; readonly code: string };
+  | { readonly type: "error"; readonly code: string }
+  // The desktop app's own speech page (standalone plan C2). The Rust side reads these from C4 on.
+  /** The user pressed "agree and start" on the speech page. */
+  | { readonly type: "consent" }
+  /** Where the speech page's first-run setup stands. */
+  | { readonly type: "page-state"; readonly consented: boolean; readonly micGranted: boolean };
+
+/**
+ * A recognition session's event as the desktop app hears it: the text only, final or interim.
+ * `activity` drives a web page's waveform and is not sent. Used by the extension's bridge and by
+ * the desktop app's speech page.
+ */
+export function toNativeEvent(event: SessionEvent): NativeSessionEvent | null {
+  switch (event.kind) {
+    case "started":
+      return { kind: "started" };
+    case "result":
+      return event.isFinal ? { kind: "final", text: event.transcript } : { kind: "interim", text: event.transcript };
+    case "ended":
+      return event.code === undefined
+        ? { kind: "ended", reason: event.reason }
+        : { kind: "ended", reason: event.reason, code: event.code };
+    default:
+      return null;
+  }
+}
 
 // ---- guards ------------------------------------------------------------------------------
 
@@ -119,7 +145,10 @@ export function isExtensionToNative(m: unknown): m is ExtensionToNative {
     case "set-native-config":
       return isNativeConfig(r.config);
     case "get-native-config":
+    case "consent":
       return true;
+    case "page-state":
+      return typeof r.consented === "boolean" && typeof r.micGranted === "boolean";
     case "error":
       return typeof r.code === "string";
     default:

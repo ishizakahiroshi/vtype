@@ -20,6 +20,7 @@ const sources = [
   "src/content/controller.ts",
   "src/options/options.ts",
   "src/permission/permission.ts",
+  "src/speech/speech.ts",
   "src/ui/toolbar.ts",
 ].map((path) => readFileSync(join(extensionRoot, path), "utf8"));
 

@@ -51,19 +51,18 @@ const rawImports = {
  *   any URL, which validate-extension.ps1 refuses to ship);
  * - the one Node module it needs, `path`, is given a `join` that is enough for "dict/" + name.
  */
-const kuromojiForBrowser = {
+const kuromojiWith = (loader) => ({
   name: "kuromoji-for-browser",
   setup(b) {
-    b.onResolve({ filter: /NodeDictionaryLoader(\.js)?$/ }, () => ({
-      path: join(here, "src/offscreen/packaged-dictionary-loader.cjs"),
-    }));
+    b.onResolve({ filter: /NodeDictionaryLoader(\.js)?$/ }, () => ({ path: join(here, loader) }));
     b.onResolve({ filter: /^path$/ }, () => ({ path: "path-join", namespace: "shim" }));
     b.onLoad({ filter: /.*/, namespace: "shim" }, () => ({
       contents: `module.exports = { join: function () { return Array.prototype.join.call(arguments, "/").replace(/\\/+/g, "/"); } };`,
       loader: "js",
     }));
   },
-};
+});
+const kuromojiForBrowser = kuromojiWith("src/offscreen/packaged-dictionary-loader.cjs");
 
 const kuromojiDir = dirname(createRequire(import.meta.url).resolve("kuromoji/package.json"));
 
@@ -79,11 +78,11 @@ const scripts = [
   ["src/options/options.ts", "options.js"],
 ];
 
-for (const [entry, out] of scripts) {
-  await build({
-    plugins: [rawImports, esbuildLocales(), kuromojiForBrowser],
+const bundle = (entry, outfile, kuromoji) =>
+  build({
+    plugins: [rawImports, esbuildLocales(), kuromoji],
     entryPoints: [join(here, entry)],
-    outfile: join(dist, out),
+    outfile,
     bundle: true,
     format: "iife",
     platform: "browser",
@@ -94,7 +93,8 @@ for (const [entry, out] of scripts) {
     legalComments: "none",
     logLevel: "info",
   });
-}
+
+for (const [entry, out] of scripts) await bundle(entry, join(dist, out), kuromojiForBrowser);
 
 // The extension's icons, baked from the one SVG source (assets/icon.svg) by the icon pipeline.
 // Chrome's own names are used in dist/ so the manifest reads like any other extension's.
@@ -118,12 +118,15 @@ for (const code of Object.keys(locales)) {
 // The IPADIC dictionary for kana mode, with the licenses it ships under (Apache-2.0 for
 // kuromoji; NOTICE.md carries the dictionary's own terms, which require the notice to travel
 // with every copy).
-await mkdir(join(dist, "dict"), { recursive: true });
 const dictFiles = (await readdir(join(kuromojiDir, "dict"))).filter((name) => name.endsWith(".dat.gz"));
 if (dictFiles.length === 0) throw new Error(`no dictionary files in ${join(kuromojiDir, "dict")}`);
-for (const name of dictFiles) await copyFile(join(kuromojiDir, "dict", name), join(dist, "dict", name));
-await copyFile(join(kuromojiDir, "LICENSE-2.0.txt"), join(dist, "dict", "LICENSE-kuromoji.txt"));
-await copyFile(join(kuromojiDir, "NOTICE.md"), join(dist, "dict", "NOTICE.md"));
+async function copyDictionary(to) {
+  await mkdir(join(to, "dict"), { recursive: true });
+  for (const name of dictFiles) await copyFile(join(kuromojiDir, "dict", name), join(to, "dict", name));
+  await copyFile(join(kuromojiDir, "LICENSE-2.0.txt"), join(to, "dict", "LICENSE-kuromoji.txt"));
+  await copyFile(join(kuromojiDir, "NOTICE.md"), join(to, "dict", "NOTICE.md"));
+}
+await copyDictionary(dist);
 
 await copyFile(join(here, "manifest.json"), join(dist, "manifest.json"));
 await copyFile(join(here, "src/offscreen/offscreen.html"), join(dist, "offscreen.html"));
@@ -178,4 +181,24 @@ if (actionTitle && !(actionTitle[1] in locales[DEFAULT_LOCALE])) {
 }
 
 console.log(`built ${dist}: ${(await readdir(dist)).sort().join(", ")}`);
+
+// The desktop app's speech page (standalone plan C2): served by packages/native on 127.0.0.1 and
+// embedded in its executable by build.rs. Not part of the extension, so it goes to its own
+// dist-desktop/ (gitignored) and never into the store zip. It reads the dictionary from its own
+// origin (src/speech/desktop-dictionary-loader.cjs) because it has no chrome.runtime.
+const distDesktop = join(here, "dist-desktop");
+await rm(distDesktop, { recursive: true, force: true });
+await mkdir(distDesktop, { recursive: true });
+await bundle("src/speech/speech.ts", join(distDesktop, "speech.js"), kuromojiWith("src/speech/desktop-dictionary-loader.cjs"));
+await copyFile(join(here, "src/speech/speech.html"), join(distDesktop, "speech.html"));
+await copyDictionary(distDesktop);
+{
+  const code = await readFile(join(distDesktop, "speech.js"), "utf8");
+  const moduleSyntax = code.match(/^\s*(import|export)\b.*$/m);
+  if (moduleSyntax !== null) throw new Error(`dist-desktop/speech.js contains module syntax: ${moduleSyntax[0]}`);
+  if (code.includes("chrome.runtime.getURL")) throw new Error("dist-desktop/speech.js uses the extension's dictionary loader");
+  const html = await readFile(join(distDesktop, "speech.html"), "utf8");
+  for (const m of html.matchAll(/<script[^>]*\bsrc="([^"]+)"/g)) await readFile(join(distDesktop, m[1]));
+}
+console.log(`built ${distDesktop}: ${(await readdir(distDesktop)).sort().join(", ")}`);
 console.log(`locales: ${Object.keys(locales).join(", ")} (${Object.keys(locales[DEFAULT_LOCALE]).length} messages each)`);

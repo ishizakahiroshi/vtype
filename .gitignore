@@ -1,6 +1,7 @@
 # === ブラウザ拡張（Chrome / Firefox） ===
 node_modules/
 dist/
+dist-desktop/
 build/
 # ストア提出用の成果物
 *.zip

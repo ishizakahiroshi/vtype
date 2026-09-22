@@ -32,8 +32,8 @@ import {
   NATIVE_HOST,
   isNativeConfig,
   isNativeToExtension,
+  toNativeEvent,
   type ExtensionToNative,
-  type NativeSessionEvent,
   type NativeToExtension,
 } from "../shared/native-messages";
 
@@ -234,21 +234,6 @@ export function createNativeBridge(
       case "open-options":
         void chrome.runtime.openOptionsPage?.().catch(() => undefined);
         break;
-    }
-  }
-
-  function toNativeEvent(event: SessionEvent): NativeSessionEvent | null {
-    switch (event.kind) {
-      case "started":
-        return { kind: "started" };
-      case "result":
-        return event.isFinal ? { kind: "final", text: event.transcript } : { kind: "interim", text: event.transcript };
-      case "ended":
-        return event.code === undefined
-          ? { kind: "ended", reason: event.reason }
-          : { kind: "ended", reason: event.reason, code: event.code };
-      default:
-        return null; // activity drives the web page's waveform only
     }
   }
 
