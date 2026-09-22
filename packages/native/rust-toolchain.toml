@@ -1,0 +1,5 @@
+# The same compiler here and in CI: a newer stable brings new clippy lints, and CI runs clippy
+# with -D warnings. Raise it on purpose, together with the fixes it asks for.
+[toolchain]
+channel = "1.98"
+components = ["clippy", "rustfmt"]

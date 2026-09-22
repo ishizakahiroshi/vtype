@@ -126,8 +126,8 @@ pub fn to_straight_rgba(pm: &Pixmap) -> Vec<u8> {
 /// Premultiplied RGBA → premultiplied BGRA (what Windows' layered windows take).
 pub fn to_premultiplied_bgra(pm: &Pixmap) -> Vec<u8> {
     let mut out = Vec::with_capacity(pm.data().len());
-    for px in pm.data().chunks_exact(4) {
-        out.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
+    for &[r, g, b, a] in pm.data().as_chunks::<4>().0 {
+        out.extend_from_slice(&[b, g, r, a]);
     }
     out
 }

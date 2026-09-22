@@ -389,7 +389,7 @@ impl Overlay {
 
             let height = text_height + pad * 2;
             let panel = draw_rounded_panel(width as u32, height as u32, 10.0 * scale, (255, 255, 255, 250));
-            let alpha: Vec<u8> = panel.data().chunks_exact(4).map(|p| p[3]).collect();
+            let alpha: Vec<u8> = panel.data().as_chunks::<4>().0.iter().map(|p| p[3]).collect();
             let (ix, iy) = self.icon.pos.get();
             let size = self.icon.size.get();
             let (areas, primary) = work_areas();
