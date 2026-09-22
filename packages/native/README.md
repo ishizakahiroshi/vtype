@@ -14,9 +14,10 @@ time.
 |---|---|
 | `src/daemon.rs` | The resident app's decisions (start, stop, type, notify), with no system calls. Tested with a fake platform |
 | `src/platform/` | The `Platform` trait and one folder per system (`windows/`, `macos/`, `linux/`) |
-| `src/cli.rs` | The subcommands (`daemon`, `host`, `toggle`, `mode`, `install`, …) |
-| `src/host.rs`, `src/ipc.rs` | The Native Messaging host Chrome starts, and the local socket / pipe to the daemon |
-| `src/install.rs` | `vtype install` / `uninstall`: Chrome's registration and starting with the OS |
+| `src/cli.rs` | The subcommands (`daemon`, `toggle`, `mode`, `install`, …) |
+| `src/speech_host.rs`, `src/chrome_launch.rs` | The speech page on 127.0.0.1 and the Chrome (a profile of vtype's own) that runs it |
+| `src/ipc.rs` | The local socket / pipe between the command line and the daemon |
+| `src/install.rs` | `vtype install` / `uninstall`: starting with the OS |
 | `packaging/msix/` | The MSIX manifest (Microsoft Store). Built by `scripts/release/build-msix.ps1` |
 | `packaging/deb/` | Files the `.deb` installs (see `[package.metadata.deb]` in `Cargo.toml`) |
 | `packaging/homebrew/` | The Homebrew formula template and how to set up the tap |
@@ -39,9 +40,6 @@ cargo fmt --check
 CI (the `rust` job in `.github/workflows/ci.yml`) runs these on Windows, macOS and Linux. Linux needs
 `libgtk-3-dev libxdo-dev libayatana-appindicator3-dev libxkbcommon-dev`.
 
-To connect a development build to an unpacked extension, run
-`cargo run -- install --extension-id <the ID chrome://extensions shows>`.
-
 ## Releasing
 
 Nothing is published automatically. The steps, in order:
@@ -62,9 +60,7 @@ Nothing is published automatically. The steps, in order:
      -Publisher <Package/Identity/Publisher> -PublisherDisplayName <Publisher display name>
    ```
 
-   The Store signs it. The package declares the restricted capability `unvirtualizedResources`;
-   the reason to give in the submission is in `docs/store/msstore-restricted-capability.en.md`
-   (`.ja.md` in Japanese).
+   The Store signs it. The only restricted capability is `runFullTrust` (a desktop program).
 5. Homebrew: see `packaging/homebrew/README.md`.
 6. npm: see `npm/README.md`.
 

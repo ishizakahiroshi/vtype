@@ -1,13 +1,13 @@
-//! The few registry operations vtype needs on Windows (Native Messaging registration, the Run
-//! key for starting with Windows, and finding chrome.exe).
+//! The few registry operations vtype needs on Windows (the Run key for starting with Windows, and
+//! finding chrome.exe).
 
 use std::io;
 use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
 use windows_sys::Win32::System::Registry::{
-    RegCloseKey, RegCreateKeyExW, RegDeleteKeyValueW, RegDeleteKeyW, RegDeleteTreeW, RegGetValueW, RegSetValueExW,
-    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ, RRF_RT_REG_SZ,
+    RegCloseKey, RegCreateKeyExW, RegDeleteKeyValueW, RegGetValueW, RegSetValueExW, HKEY, HKEY_CURRENT_USER,
+    HKEY_LOCAL_MACHINE, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ, RRF_RT_REG_SZ,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -93,24 +93,6 @@ pub fn get_string(hive: Hive, subkey: &str, name: Option<&str>) -> io::Result<Op
         ))?;
         let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
         Ok(Some(String::from_utf16_lossy(&buf[..len])))
-    }
-}
-
-/// Deletes a key and everything under it. Missing is fine.
-pub fn delete_tree(hive: Hive, subkey: &str) -> io::Result<()> {
-    let subkey_w = wide(subkey);
-    let code = unsafe { RegDeleteTreeW(hive.key(), subkey_w.as_ptr()) };
-    if code == ERROR_FILE_NOT_FOUND {
-        return Ok(());
-    }
-    check(code)?;
-    // Whether RegDeleteTreeW also removes the (now empty) key itself has differed between
-    // Windows versions; delete it explicitly so nothing is left behind either way.
-    let code = unsafe { RegDeleteKeyW(hive.key(), subkey_w.as_ptr()) };
-    if code == ERROR_FILE_NOT_FOUND {
-        Ok(())
-    } else {
-        check(code)
     }
 }
 

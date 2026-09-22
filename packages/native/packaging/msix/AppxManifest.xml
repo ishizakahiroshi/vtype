@@ -12,22 +12,19 @@
 
   Why each extra is here:
     runFullTrust               a Win32 program (the Store requires it for desktop apps)
-    unvirtualizedResources     with RegistryWriteVirtualization / FileSystemWriteVirtualization off,
-                               the Native Messaging registration goes to the real HKCU and LocalAppData,
-                               where Chrome reads it (parent plan Q6; the Store needs a reason:
-                               docs/store/msstore-restricted-capability.*.md)
     StartupTask                starts with Windows (parent plan D12); run without arguments, and vtype
                                without arguments inside the package runs the daemon
-    AppExecutionAlias          `vtype` on the command line, and a path for Chrome that survives updates
+    AppExecutionAlias          `vtype` on the command line
+  Nothing is registered with Chrome: vtype starts a Chrome of its own for speech recognition, so
+  the package needs no restricted capability besides runFullTrust (standalone plan C4).
 -->
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
   xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
   xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
-  xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap uap5 desktop desktop6 rescap">
+  IgnorableNamespaces="uap uap5 desktop rescap">
 
   <Identity
     Name="{{IDENTITY_NAME}}"
@@ -39,12 +36,10 @@
     <DisplayName>vtype</DisplayName>
     <PublisherDisplayName>{{PUBLISHER_DISPLAY_NAME}}</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
-    <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
-    <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
   </Properties>
 
   <Dependencies>
-    <!-- Windows 10 2004 or later (the desktop6 write-virtualization switches need 1903+). -->
+    <!-- Windows 10 2004 or later. -->
     <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
   </Dependencies>
 
@@ -57,7 +52,7 @@
     <Application Id="App" Executable="vtype.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
         DisplayName="vtype"
-        Description="Voice input into any app, with the vtype Chrome extension's speech recognition"
+        Description="Voice input into any app, with Google Chrome's speech recognition"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">
@@ -78,6 +73,5 @@
 
   <Capabilities>
     <rescap:Capability Name="runFullTrust" />
-    <rescap:Capability Name="unvirtualizedResources" />
   </Capabilities>
 </Package>

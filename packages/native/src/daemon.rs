@@ -1,6 +1,6 @@
 //! The resident process. It owns the tray and the floating mic, listens on the IPC endpoint for
-//! the command line and for the Native Messaging host, and turns what the extension recognizes
-//! into text in the foreground app.
+//! the command line, starts its own Chrome on the speech page (speech_host.rs, chrome_launch.rs),
+//! and turns what the page recognizes into text in the foreground app.
 //!
 //! All decisions live in `Core`, which runs on one worker thread and reaches the OS only through
 //! `Platform`; the main thread runs the platform's event loop.
@@ -809,7 +809,6 @@ pub fn run() -> Result<()> {
     let platform: Arc<dyn Platform> = Arc::from(crate::platform::current());
     crate::i18n::init(&platform.ui_language());
 
-    crate::install::register_if_packaged();
     let config_path = crate::paths::config_file();
     let (cfg, outcome) = config::load(&config_path);
     tracing::info!(?outcome, "config");

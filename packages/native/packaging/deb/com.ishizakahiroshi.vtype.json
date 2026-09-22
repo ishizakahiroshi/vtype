@@ -1,9 +1,0 @@
-{
-  "name": "com.ishizakahiroshi.vtype",
-  "description": "vtype desktop: types what the vtype extension recognizes into any app",
-  "path": "/usr/bin/vtype",
-  "type": "stdio",
-  "allowed_origins": [
-    "chrome-extension://nngfilimeplngdjdmgkddlhbdjpmikgn/"
-  ]
-}

@@ -1,8 +1,7 @@
 //! The daemon's own speech page server (standalone plan C3): a small HTTP and WebSocket server on
 //! 127.0.0.1 that serves the speech page compiled in by build.rs (speech_assets.rs) to the Chrome
-//! the daemon starts, and relays the page's WebSocket to `Core` exactly like the Native Messaging
-//! host (host.rs) relays the extension: `HostHello`, then `FromExtension` for every message, and
-//! `Reply::ToExtension` back.
+//! the daemon starts, and relays the page's WebSocket to `Core`: `HostHello`, then
+//! `FromExtension` for every message, and `Reply::ToExtension` back.
 //!
 //! Safety (parent plan S6):
 //! - it listens on 127.0.0.1 only, never on every interface;
@@ -217,7 +216,7 @@ fn serve_socket(mut stream: TcpStream, head: Head, origin: &str, tx: Sender<Even
     Ok(())
 }
 
-/// One page connection, the way daemon.rs serves the Native Messaging host: `HostHello` first,
+/// One page connection: `HostHello` first,
 /// then the page's messages in and `ToExtension` replies out, until either side goes away.
 fn relay(ws: &mut WebSocket<TcpStream>, origin: &str, tx: Sender<Event>) {
     let conn = NEXT_CONN.fetch_add(1, Ordering::Relaxed);

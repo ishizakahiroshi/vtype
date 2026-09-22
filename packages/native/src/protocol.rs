@@ -1,8 +1,8 @@
 //! Messages on the local IPC channel: one JSON object per line (parent plan D14).
 //!
-//! Two kinds of peers talk to the daemon over the same endpoint: the command line (`vtype toggle`
-//! and friends, one request and one reply) and the Native Messaging host, which introduces itself
-//! with `host-hello` and then relays the extension's messages in both directions.
+//! The command line talks to the daemon over this endpoint (`vtype toggle` and friends, one request
+//! and one reply). The speech page's WebSocket (speech_host.rs) is turned into the same
+//! `host-hello` / `from-extension` requests, so the daemon has one way to hear a recognizer.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -27,7 +27,7 @@ impl InputMode {
     }
 }
 
-/// Client (CLI or host) to daemon.
+/// Client (the command line, or speech_host.rs for the page) to daemon.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Request {
@@ -47,11 +47,11 @@ pub enum Request {
     OpenSettings,
     Diagnostics,
     Quit,
-    /// First line from the Native Messaging host. `origin` is `chrome-extension://<id>/`.
+    /// A recognizer connected: the speech page, with `origin` `http://127.0.0.1:<port>`.
     HostHello {
         origin: String,
     },
-    /// A message the extension sent, relayed unchanged by the host.
+    /// A message the speech page sent, relayed unchanged.
     FromExtension {
         message: Value,
     },
@@ -75,7 +75,7 @@ pub enum Reply {
     Diagnostics {
         report: Value,
     },
-    /// A message for the extension; the host writes it to Chrome unchanged.
+    /// A message for the speech page; speech_host.rs sends it unchanged.
     ToExtension {
         message: Value,
     },
@@ -88,7 +88,8 @@ impl Reply {
 }
 
 // ---------------------------------------------------------------------------
-// Native Messaging: what the desktop app and the extension say to each other. The TypeScript
+// What the desktop app and the speech page say to each other (the vocabulary of the extension's
+// former Native Messaging link, kept so both sides stay small). The TypeScript
 // side is packages/extension/src/shared/native-messages.ts; both are tested against
 // tests/fixtures/nm-messages.json.
 // ---------------------------------------------------------------------------

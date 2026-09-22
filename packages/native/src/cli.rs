@@ -17,11 +17,6 @@ pub struct Cli {
 pub enum Command {
     /// Run the resident app (tray, shortcut, mic icon).
     Daemon,
-    /// Native Messaging host (Chrome starts this itself).
-    Host {
-        /// chrome-extension://<id>/ of the calling extension.
-        origin: Option<String>,
-    },
     /// Start dictation, or stop it if it is running.
     Toggle {
         #[arg(long, value_enum)]
@@ -45,12 +40,8 @@ pub enum Command {
     Settings,
     /// End the resident app.
     Quit,
-    /// Register the Native Messaging host with Chrome and start with the OS.
-    Install {
-        /// Also allow this extension ID (a development build). Repeatable.
-        #[arg(long = "extension-id")]
-        extension_ids: Vec<String>,
-    },
+    /// Start with the OS (and, on GNOME, register the global shortcut).
+    Install,
     /// Undo `install`.
     Uninstall,
     /// Print diagnostic information (no transcripts).
@@ -79,12 +70,6 @@ pub enum Command {
     /// (Checks on a real desktop, Windows) click the floating mic and report the foreground window.
     #[command(hide = true)]
     DebugClickIcon,
-}
-
-/// Chrome starts the host with `chrome-extension://<id>/` as the first argument (and, on
-/// Windows, `--parent-window=<n>` after it), not with a subcommand.
-pub fn host_origin(args: &[String]) -> Option<String> {
-    args.get(1).filter(|a| a.starts_with("chrome-extension://")).cloned()
 }
 
 fn endpoint() -> String {
@@ -168,7 +153,7 @@ pub fn run_client(command: Command) -> Result<()> {
             println!("{}", debug::debug_click_icon());
             Ok(())
         }
-        Command::Daemon | Command::Host { .. } | Command::Install { .. } | Command::Uninstall => {
+        Command::Daemon | Command::Install | Command::Uninstall => {
             unreachable!("handled in main")
         }
     }
@@ -214,20 +199,6 @@ fn offline_diagnostics() -> serde_json::Value {
 mod tests {
     use super::*;
 
-    fn args(list: &[&str]) -> Vec<String> {
-        list.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn chrome_style_arguments_mean_host() {
-        assert_eq!(
-            host_origin(&args(&["vtype.exe", "chrome-extension://abc/", "--parent-window=123"])).as_deref(),
-            Some("chrome-extension://abc/")
-        );
-        assert_eq!(host_origin(&args(&["vtype", "status"])), None);
-        assert_eq!(host_origin(&args(&["vtype"])), None);
-    }
-
     #[test]
     fn parses_the_subcommands() {
         let parse = |list: &[&str]| Cli::try_parse_from(list).map(|c| c.command);
@@ -237,10 +208,10 @@ mod tests {
             Command::Start { mode: Some(InputMode::Kana) }
         );
         assert_eq!(parse(&["vtype", "mode", "en"]).unwrap(), Command::Mode { mode: InputMode::En });
-        assert_eq!(
-            parse(&["vtype", "install", "--extension-id", "a", "--extension-id", "b"]).unwrap(),
-            Command::Install { extension_ids: vec!["a".into(), "b".into()] }
-        );
+        assert_eq!(parse(&["vtype", "install"]).unwrap(), Command::Install);
+        // The Native Messaging host is gone (standalone plan C4): Chrome no longer starts vtype.
+        assert!(parse(&["vtype", "host"]).is_err());
+        assert!(parse(&["vtype", "install", "--extension-id", "a"]).is_err());
         assert!(parse(&["vtype", "mode", "katakana"]).is_err());
     }
 }

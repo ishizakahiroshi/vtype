@@ -59,7 +59,6 @@ function Assert-Manifest {
   $ns.AddNamespace("f", "http://schemas.microsoft.com/appx/manifest/foundation/windows10")
   $ns.AddNamespace("uap5", "http://schemas.microsoft.com/appx/manifest/uap/windows10/5")
   $ns.AddNamespace("desktop", "http://schemas.microsoft.com/appx/manifest/desktop/windows10")
-  $ns.AddNamespace("desktop6", "http://schemas.microsoft.com/appx/manifest/desktop/windows10/6")
   $ns.AddNamespace("rescap", "http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities")
   $checks = [ordered]@{
     "Identity Version $Version"             = "/f:Package/f:Identity[@Version='$Version']"
@@ -67,14 +66,14 @@ function Assert-Manifest {
     "StartupTask"                           = "//desktop:Extension[@Category='windows.startupTask']/desktop:StartupTask"
     "execution alias vtype.exe"             = "//uap5:ExecutionAlias[@Alias='vtype.exe']"
     "runFullTrust"                          = "/f:Package/f:Capabilities/rescap:Capability[@Name='runFullTrust']"
-    "unvirtualizedResources"                = "/f:Package/f:Capabilities/rescap:Capability[@Name='unvirtualizedResources']"
-    "registry writes not virtualized"       = "/f:Package/f:Properties/desktop6:RegistryWriteVirtualization[text()='disabled']"
-    "file system writes not virtualized"    = "/f:Package/f:Properties/desktop6:FileSystemWriteVirtualization[text()='disabled']"
   }
   foreach ($name in $checks.Keys) {
     if (-not $doc.SelectSingleNode($checks[$name], $ns)) { throw "Manifest check failed ($name): $Path" }
   }
   if ((Get-Content -Raw -LiteralPath $Path) -match "\{\{") { throw "Manifest still has {{…}} fields: $Path" }
+  # Nothing registers with Chrome any more, so no restricted capability besides runFullTrust.
+  $restricted = @($doc.SelectNodes("/f:Package/f:Capabilities/rescap:Capability[@Name!='runFullTrust']", $ns))
+  if ($restricted.Count -gt 0) { throw "Unexpected restricted capability ($($restricted.Name -join ', ')): $Path" }
 }
 
 function Save-Resized {

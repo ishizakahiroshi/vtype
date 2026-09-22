@@ -206,19 +206,19 @@ jobs:
         working-directory: packages/native
         run: cargo build --release --locked
 
-      # The .deb carries the Native Messaging registration for every user and the autostart
-      # entry, so it needs no `vtype install`. Its contents are listed so the log shows them.
+      # The .deb carries the autostart entry, so it needs no `vtype install`. Its contents are
+      # listed so the log shows them; nothing is registered with Chrome (standalone plan C4).
       - name: Debian package
         working-directory: packages/native
         run: |
           cargo deb --no-build --locked --output "../../out/vtype_${VERSION}_amd64.deb"
           dpkg-deb --contents "../../out/vtype_${VERSION}_amd64.deb" | tee ../../out/deb-contents.txt
-          for f in ./usr/bin/vtype \
-                   ./etc/opt/chrome/native-messaging-hosts/com.ishizakahiroshi.vtype.json \
-                   ./etc/chromium/native-messaging-hosts/com.ishizakahiroshi.vtype.json \
-                   ./etc/xdg/autostart/vtype.desktop; do
+          for f in ./usr/bin/vtype ./etc/xdg/autostart/vtype.desktop; do
             grep -q " $f\$" ../../out/deb-contents.txt || { echo "::error::$f is missing from the .deb"; exit 1; }
           done
+          if grep -q native-messaging-hosts ../../out/deb-contents.txt; then
+            echo "::error::the .deb still registers with Chrome"; exit 1
+          fi
 
       # The plain binary as well, for the npm package and for other distributions.
       - name: Archive
