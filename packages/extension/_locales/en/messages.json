@@ -343,6 +343,18 @@
     "message": "Edit templates…",
     "description": "Desktop app templates menu: opens the settings page to edit the templates"
   },
+  "native_menuTemplateEdit": {
+    "message": "Edit",
+    "description": "Desktop app templates menu: submenu listing the templates; choosing one opens it in the settings page"
+  },
+  "native_menuTemplateDelete": {
+    "message": "Delete",
+    "description": "Desktop app templates menu: submenu listing the templates; choosing one deletes it at once"
+  },
+  "native_menuTemplateUndoDelete": {
+    "message": "Undo deleting \"{template}\"",
+    "description": "Desktop app templates menu: puts back the template deleted last. {template} is its first line"
+  },
   "native_bubbleTemplateAdded": {
     "message": "Saved as a template.",
     "description": "Desktop app: the selected text was saved as a template"
@@ -358,6 +370,14 @@
   "native_bubbleNoSelection": {
     "message": "Nothing was selected. Select some text and try again.",
     "description": "Desktop app: nothing was selected in the front app to save as a template"
+  },
+  "native_bubbleTemplateDeleted": {
+    "message": "Template deleted. To undo, open the templates menu.",
+    "description": "Desktop app: a template was deleted from the templates menu"
+  },
+  "native_bubbleTemplateRestored": {
+    "message": "Template put back.",
+    "description": "Desktop app: the template deleted last was put back"
   },
   "native_bubbleClearNotField": {
     "message": "The cursor is not in a text field, so nothing was cleared.",

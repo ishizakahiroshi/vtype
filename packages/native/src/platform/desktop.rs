@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
-use tray_icon::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
+use tray_icon::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tray_icon::Icon;
 
 use crate::hotkey::{HotkeySpec, Key};
@@ -106,10 +106,11 @@ pub fn build_menu(actions: &Mutex<HashMap<String, MenuAction>>) -> (Menu, Vec<(M
     (menu, checks)
 }
 
-/// The floating mic's templates menu. `previous` are the ids of the last one, dropped from
-/// `actions` so that the map does not grow each time; the new ids are returned for next time.
+/// The floating mic's templates menu (`crate::menu::template_menu`). `previous` are the ids of
+/// the last one, dropped from `actions` so that the map does not grow each time; the new ids are
+/// returned for next time.
 pub fn build_template_menu(
-    templates: &[String],
+    items: Vec<Item>,
     actions: &Mutex<HashMap<String, MenuAction>>,
     previous: &[String],
 ) -> (Menu, Vec<String>) {
@@ -119,7 +120,7 @@ pub fn build_template_menu(
             map.remove(id);
         }
     }
-    let (menu, _, ids) = build_items(crate::menu::template_menu(templates), actions);
+    let (menu, _, ids) = build_items(items, actions);
     (menu, ids)
 }
 
@@ -127,30 +128,63 @@ type Built = (Menu, Vec<(MenuAction, CheckMenuItem)>, Vec<String>);
 
 fn build_items(items: Vec<Item>, actions: &Mutex<HashMap<String, MenuAction>>) -> Built {
     let menu = Menu::new();
-    let mut checks = Vec::new();
-    let mut ids = Vec::new();
+    let mut built = Entries { checks: Vec::new(), ids: Vec::new() };
     let mut actions = actions.lock().unwrap_or_else(|e| e.into_inner());
     for item in items {
-        match item {
-            Item::Check { action, label, checked } | Item::Radio { action, label, checked } => {
-                let entry = CheckMenuItem::new(label, true, checked, None);
-                actions.insert(entry.id().0.clone(), action);
-                ids.push(entry.id().0.clone());
-                let _ = menu.append(&entry);
-                checks.push((action, entry));
-            }
-            Item::Action { action, label } => {
-                let entry = MenuItem::new(label, true, None);
-                actions.insert(entry.id().0.clone(), action);
-                ids.push(entry.id().0.clone());
-                let _ = menu.append(&entry);
-            }
-            Item::Separator => {
-                let _ = menu.append(&PredefinedMenuItem::separator());
-            }
-        }
+        append_item(
+            &|entry| {
+                let _ = menu.append(entry);
+            },
+            item,
+            &mut actions,
+            &mut built,
+        );
     }
-    (menu, checks, ids)
+    (menu, built.checks, built.ids)
+}
+
+struct Entries {
+    checks: Vec<(MenuAction, CheckMenuItem)>,
+    ids: Vec<String>,
+}
+
+/// Builds `item` (a submenu with its items) and hands it to `append`.
+fn append_item(
+    append: &dyn Fn(&dyn IsMenuItem),
+    item: Item,
+    actions: &mut HashMap<String, MenuAction>,
+    built: &mut Entries,
+) {
+    match item {
+        Item::Check { action, label, checked } | Item::Radio { action, label, checked } => {
+            let entry = CheckMenuItem::new(label, true, checked, None);
+            actions.insert(entry.id().0.clone(), action);
+            built.ids.push(entry.id().0.clone());
+            append(&entry);
+            built.checks.push((action, entry));
+        }
+        Item::Action { action, label } => {
+            let entry = MenuItem::new(label, true, None);
+            actions.insert(entry.id().0.clone(), action);
+            built.ids.push(entry.id().0.clone());
+            append(&entry);
+        }
+        Item::Submenu { label, items } => {
+            let sub = Submenu::new(label, true);
+            for child in items {
+                append_item(
+                    &|entry| {
+                        let _ = sub.append(entry);
+                    },
+                    child,
+                    actions,
+                    built,
+                );
+            }
+            append(&sub);
+        }
+        Item::Separator => append(&PredefinedMenuItem::separator()),
+    }
 }
 
 /// Copies the foreground app's selection with `press_copy` (Ctrl+C / Cmd+C) and puts the

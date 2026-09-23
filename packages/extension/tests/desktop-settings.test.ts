@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
-import { apiUrl, initSettingsPage } from "../src/desktop-settings/settings";
+import { apiUrl, initSettingsPage, templateFromHref } from "../src/desktop-settings/settings";
 import { translate } from "../src/shared/i18n";
 
 const PAGE = "http://127.0.0.1:47213/t/0123456789abcdef0123456789abcdef/settings";
@@ -140,6 +140,21 @@ describe("the desktop settings page", () => {
     send.dispatchEvent(new Event("change"));
     await flush();
     expect(last().templateSendImmediate).toBe(true);
+  });
+
+  it("opens the template the templates menu's Edit chose, ready to type in", async () => {
+    expect(templateFromHref(`${PAGE}#template-1`)).toBe(1);
+    expect(templateFromHref(PAGE)).toBeNull();
+    const app = fakeApp({ ...CONFIG, templates: ["one", "two"] });
+    await initSettingsPage({ href: `${PAGE}#template-1`, fetch: app.fetch, language: "en" }).loaded;
+    expect(apiUrl(`${PAGE}#template-1`)).toBe(API);
+    const area = document.querySelector<HTMLTextAreaElement>("#tpl-list .tpl-edit");
+    expect(area?.value).toBe("two");
+    expect(document.activeElement).toBe(area);
+    // A template that is gone by now: the list as usual.
+    mount();
+    await initSettingsPage({ href: `${PAGE}#template-5`, fetch: fakeApp({ ...CONFIG, templates: ["one"] }).fetch }).loaded;
+    expect(document.querySelector("#tpl-list .tpl-edit")).toBeNull();
   });
 
   it("says so when there are no templates yet", async () => {

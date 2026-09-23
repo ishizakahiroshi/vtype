@@ -91,9 +91,9 @@ impl Platform for MacPlatform {
         super::desktop::copy_selection_with(inject::press_copy)
     }
 
-    fn show_templates(&self, templates: &[String]) {
-        let templates = templates.to_vec();
-        self.shared.run(move |ui| ui.show_templates(templates));
+    fn show_templates(&self, items: &[crate::menu::MenuItem]) {
+        let items = items.to_vec();
+        self.shared.run(move |ui| ui.show_templates(items));
     }
 
     fn focused_field(&self) -> FieldInfo {

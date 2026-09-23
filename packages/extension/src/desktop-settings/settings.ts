@@ -57,6 +57,15 @@ export function apiUrl(href: string): string {
   return url.toString();
 }
 
+/**
+ * The template to open for editing: the desktop app opens `…/settings#template-<index>` when the
+ * user chose "Edit" in the floating mic's templates menu.
+ */
+export function templateFromHref(href: string): number | null {
+  const m = /#template-(\d+)$/.exec(href);
+  return m === null ? null : Number(m[1]);
+}
+
 /** The floating mic's size in percent: same limits as the desktop app's overlay_logic.rs. */
 export const ICON_SCALE_MIN = 50;
 export const ICON_SCALE_MAX = 200;
@@ -72,7 +81,8 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
   const doc = options.doc ?? document;
   const t = translator(options.language ?? globalThis.navigator?.language);
   const fetchJson: Fetch = options.fetch ?? ((url, init) => globalThis.fetch(url, init));
-  const url = apiUrl(options.href ?? globalThis.location?.href ?? "http://127.0.0.1/settings");
+  const href = options.href ?? globalThis.location?.href ?? "http://127.0.0.1/settings";
+  const url = apiUrl(href);
   let config: NativeConfig | null = null;
 
   const setText = (id: string, text: string, className?: string): void => {
@@ -389,7 +399,14 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
       const got = res.ok ? await res.json() : null;
       if (!isNativeConfig(got)) throw new Error("unreadable");
       config = got;
+      const target = templateFromHref(href);
+      if (target !== null && target < (got.templates ?? []).length) editing = target;
       fill(got);
+      if (editing !== null) {
+        const area = doc.querySelector<HTMLTextAreaElement>("#tpl-list textarea.tpl-edit");
+        area?.scrollIntoView?.({ block: "center" });
+        area?.focus();
+      }
     } catch {
       setText("status", t("settings_failed"), "err");
     }

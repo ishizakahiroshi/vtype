@@ -1,7 +1,7 @@
 //! The tray menu as data. Every OS builds its native menu from this list, so the items, their
 //! order and their strings are the same everywhere.
 
-use crate::i18n::t;
+use crate::i18n::{t, t_with};
 use crate::platform::{MenuAction, TrayState};
 use crate::protocol::InputMode;
 
@@ -10,6 +10,7 @@ pub enum MenuItem {
     Check { action: MenuAction, label: String, checked: bool },
     Radio { action: MenuAction, label: String, checked: bool },
     Action { action: MenuAction, label: String },
+    Submenu { label: String, items: Vec<MenuItem> },
     Separator,
 }
 
@@ -74,17 +75,32 @@ pub fn template_label(text: &str) -> String {
     label.replace('&', "&&")
 }
 
-/// The floating mic's templates menu: the templates, then adding the selection and editing.
-pub fn template_menu(templates: &[String]) -> Vec<MenuItem> {
-    let mut items: Vec<MenuItem> = templates
-        .iter()
-        .enumerate()
-        .map(|(i, text)| MenuItem::Action { action: MenuAction::InsertTemplate(i), label: template_label(text) })
-        .collect();
+/// The floating mic's templates menu: the templates, then adding the selection, editing or
+/// deleting one of them (a submenu each, so that putting one in stays a single click), putting
+/// back the one `deleted` last, and the settings page.
+pub fn template_menu(templates: &[String], deleted: Option<&str>) -> Vec<MenuItem> {
+    let each = |action: fn(usize) -> MenuAction| -> Vec<MenuItem> {
+        templates
+            .iter()
+            .enumerate()
+            .map(|(i, text)| MenuItem::Action { action: action(i), label: template_label(text) })
+            .collect()
+    };
+    let mut items = each(MenuAction::InsertTemplate);
     if !items.is_empty() {
         items.push(MenuItem::Separator);
     }
     items.push(MenuItem::Action { action: MenuAction::AddSelectionAsTemplate, label: t("native_menuAddSelection") });
+    if !templates.is_empty() {
+        items.push(MenuItem::Submenu { label: t("native_menuTemplateEdit"), items: each(MenuAction::EditTemplate) });
+        items
+            .push(MenuItem::Submenu { label: t("native_menuTemplateDelete"), items: each(MenuAction::DeleteTemplate) });
+    }
+    if let Some(text) = deleted {
+        // The label is already escaped for the menu.
+        let label = t_with("native_menuTemplateUndoDelete", &[("template", &template_label(text))]);
+        items.push(MenuItem::Action { action: MenuAction::UndoDeleteTemplate, label });
+    }
     items.push(MenuItem::Action { action: MenuAction::OpenSettings, label: t("native_menuEditTemplates") });
     items
 }
@@ -93,18 +109,22 @@ pub fn template_menu(templates: &[String]) -> Vec<MenuItem> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn the_templates_menu_lists_them_then_adding_and_editing() {
-        let menu = template_menu(&["お世話になっております。".into(), "A & B\nsecond line".into()]);
-        let actions: Vec<_> = menu
+    fn actions(items: &[MenuItem]) -> Vec<MenuAction> {
+        items
             .iter()
             .filter_map(|i| match i {
                 MenuItem::Action { action, .. } => Some(*action),
                 _ => None,
             })
-            .collect();
+            .collect()
+    }
+
+    #[test]
+    fn the_templates_menu_lists_them_then_adding_editing_and_deleting() {
+        let templates = ["お世話になっております。".to_string(), "A & B\nsecond line".to_string()];
+        let menu = template_menu(&templates, None);
         assert_eq!(
-            actions,
+            actions(&menu),
             vec![
                 MenuAction::InsertTemplate(0),
                 MenuAction::InsertTemplate(1),
@@ -113,8 +133,29 @@ mod tests {
             ]
         );
         assert!(matches!(&menu[1], MenuItem::Action { label, .. } if label == "A && B…"));
-        // Nothing saved yet: only adding and editing.
-        assert_eq!(template_menu(&[]).len(), 2);
+        let subs: Vec<_> = menu
+            .iter()
+            .filter_map(|i| match i {
+                MenuItem::Submenu { items, .. } => Some(actions(items)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            subs,
+            vec![
+                vec![MenuAction::EditTemplate(0), MenuAction::EditTemplate(1)],
+                vec![MenuAction::DeleteTemplate(0), MenuAction::DeleteTemplate(1)],
+            ]
+        );
+        // Nothing saved yet: only adding and the settings page.
+        assert_eq!(template_menu(&[], None).len(), 2);
+        // The one deleted last can be put back, even when it was the only one.
+        let undo = template_menu(&[], Some("A & B"));
+        assert_eq!(
+            actions(&undo),
+            vec![MenuAction::AddSelectionAsTemplate, MenuAction::UndoDeleteTemplate, MenuAction::OpenSettings]
+        );
+        assert!(matches!(&undo[1], MenuItem::Action { label, .. } if label.contains("A && B")));
         let long = "x".repeat(40);
         assert_eq!(template_label(&long), format!("{}…", "x".repeat(TEMPLATE_LABEL_CHARS)));
         assert_eq!(template_label("  short  "), "short");

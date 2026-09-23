@@ -23,6 +23,7 @@ use crate::config::{self, NativeConfig};
 use crate::diag::{self, ErrorLog};
 use crate::i18n::{t, t_with};
 use crate::ipc;
+use crate::menu;
 use crate::overlay_logic;
 use crate::platform::{
     EditKeys, FieldProbe, IconState, InjectOutcome, MenuAction, MicButton, Platform, PlatformError, PlatformEvent,
@@ -90,6 +91,9 @@ pub struct Core {
     /// The send button was pressed while recording: the recording stops, and the send key is
     /// pressed once the last text went in (when the session ends).
     send_after_stop: bool,
+    /// The template deleted last from the templates menu, and where it was, so that the menu can
+    /// put it back (there is no confirmation before deleting).
+    deleted_template: Option<(usize, String)>,
     /// The mic beside the field is up (child plan C8).
     beside_shown: bool,
     /// The daemon's own speech page (speech_host.rs), when it could listen.
@@ -128,6 +132,7 @@ impl Core {
             now: Box::new(Instant::now),
             last_char: None,
             send_after_stop: false,
+            deleted_template: None,
             beside_shown: false,
             speech_page: None,
             profile_dir: chrome_launch::profile_dir(),
@@ -377,7 +382,10 @@ impl Core {
     /// The small buttons around the floating mic.
     fn mic_button(&mut self, button: MicButton) {
         match button {
-            MicButton::Templates => self.platform.show_templates(&self.config.templates),
+            MicButton::Templates => {
+                let deleted = self.deleted_template.as_ref().map(|(_, text)| text.as_str());
+                self.platform.show_templates(&menu::template_menu(&self.config.templates, deleted));
+            }
             MicButton::Mode => {
                 let next = match self.mode {
                     InputMode::Normal => InputMode::En,
@@ -441,6 +449,34 @@ impl Core {
                 self.save_config();
                 t("native_bubbleTemplateAdded")
             }
+        };
+        self.platform.tell(&message, MESSAGE_HOLD, false);
+    }
+
+    /// Deletes a template from the templates menu at once (a menu cannot ask first); the menu
+    /// offers to put it back until the next deletion.
+    fn delete_template(&mut self, index: usize) {
+        if index >= self.config.templates.len() {
+            return;
+        }
+        let text = self.config.templates.remove(index);
+        self.save_config();
+        self.deleted_template = Some((index, text));
+        self.platform.tell(&t("native_bubbleTemplateDeleted"), MESSAGE_HOLD, false);
+    }
+
+    /// Puts the template deleted last back where it was (or last, when the list got shorter).
+    fn undo_delete_template(&mut self) {
+        let Some((index, text)) = self.deleted_template.take() else { return };
+        let message = if self.config.templates.contains(&text) {
+            t("native_bubbleTemplateDuplicate")
+        } else if self.config.templates.len() >= config::MAX_TEMPLATES {
+            t("native_bubbleTemplateFull")
+        } else {
+            let at = index.min(self.config.templates.len());
+            self.config.templates.insert(at, text);
+            self.save_config();
+            t("native_bubbleTemplateRestored")
         };
         self.platform.tell(&message, MESSAGE_HOLD, false);
     }
@@ -545,10 +581,19 @@ impl Core {
 
     /// The daemon's own settings page (standalone plan C5), in its own Chrome profile.
     fn open_settings(&mut self) -> Reply {
+        self.open_settings_at(None)
+    }
+
+    /// The settings page, with the template at `template` open for editing when there is one.
+    fn open_settings_at(&mut self, template: Option<usize>) -> Reply {
         let Some(page) = self.speech_page.as_deref() else {
             return Reply::error("speech_page_unavailable", "the settings page is not being served");
         };
-        let args = chrome_launch::settings_args(&self.profile_dir, &chrome_launch::settings_url(page));
+        let mut url = chrome_launch::settings_url(page);
+        if let Some(i) = template {
+            url.push_str(&format!("#template-{i}"));
+        }
+        let args = chrome_launch::settings_args(&self.profile_dir, &url);
         match self.platform.launch_chrome(&args) {
             Ok(()) => Reply::Ok,
             Err(e) => Reply::error("chrome_launch_failed", e.to_string()),
@@ -867,6 +912,11 @@ impl Core {
                     let _ = self.open_settings();
                 }
                 MenuAction::InsertTemplate(index) => self.insert_template(index),
+                MenuAction::EditTemplate(index) => {
+                    let _ = self.open_settings_at(Some(index));
+                }
+                MenuAction::DeleteTemplate(index) => self.delete_template(index),
+                MenuAction::UndoDeleteTemplate => self.undo_delete_template(),
                 MenuAction::AddSelectionAsTemplate => self.add_selection_as_template(),
                 MenuAction::ReportBug => {
                     let os = self.platform.os_description();
@@ -1080,8 +1130,12 @@ pub mod tests {
             self.log("copy selection".into());
             Ok(self.selection.lock().unwrap().clone())
         }
-        fn show_templates(&self, templates: &[String]) {
-            self.log(format!("templates {}", templates.len()));
+        fn show_templates(&self, items: &[menu::MenuItem]) {
+            let has = |f: fn(&MenuAction) -> bool| {
+                items.iter().filter(|i| matches!(i, menu::MenuItem::Action { action, .. } if f(action))).count()
+            };
+            let undo = if has(|a| *a == MenuAction::UndoDeleteTemplate) > 0 { " undo" } else { "" };
+            self.log(format!("templates {}{undo}", has(|a| matches!(a, MenuAction::InsertTemplate(_)))));
         }
         fn show_icon(&self, state: IconState, _position: Option<(i32, i32)>) {
             self.log(format!("icon {state:?}"));
@@ -1518,6 +1572,49 @@ pub mod tests {
         assert!(!h.fake.take().iter().any(|c| c.starts_with("inject") || c.starts_with("keys")));
         // An index that is gone does nothing.
         h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::InsertTemplate(9))));
+    }
+
+    #[test]
+    fn a_template_deleted_from_the_menu_can_be_put_back_where_it_was() {
+        let mut h = Harness::new();
+        h.connect();
+        h.core.config.templates = vec!["a".into(), "b".into(), "c".into()];
+        h.fake.take();
+        let told = |calls: &[String], key: &str| calls.iter().any(|c| c.contains(&t(key)));
+        h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::DeleteTemplate(1))));
+        assert!(told(&h.fake.take(), "native_bubbleTemplateDeleted"));
+        assert_eq!(h.core.config.templates, vec!["a".to_string(), "c".to_string()]);
+        // The next menu offers to put it back.
+        h.core.handle(Event::Platform(PlatformEvent::MicButton(MicButton::Templates)));
+        assert_eq!(h.fake.take(), vec!["templates 2 undo"]);
+        h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::UndoDeleteTemplate)));
+        assert!(told(&h.fake.take(), "native_bubbleTemplateRestored"));
+        assert_eq!(h.core.config.templates, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+        // Once only.
+        h.core.handle(Event::Platform(PlatformEvent::MicButton(MicButton::Templates)));
+        assert_eq!(h.fake.take(), vec!["templates 3"]);
+        // Put back last when the list got shorter meanwhile; not twice when it came back already.
+        h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::DeleteTemplate(2))));
+        h.core.config.templates = vec!["x".into()];
+        h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::UndoDeleteTemplate)));
+        assert_eq!(h.core.config.templates, vec!["x".to_string(), "c".to_string()]);
+        h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::DeleteTemplate(1))));
+        h.core.config.templates.push("c".into());
+        h.fake.take();
+        h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::UndoDeleteTemplate)));
+        assert!(told(&h.fake.take(), "native_bubbleTemplateDuplicate"));
+        assert_eq!(h.core.config.templates, vec!["x".to_string(), "c".to_string()]);
+        // An index that is gone does nothing.
+        h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::DeleteTemplate(9))));
+        assert!(h.fake.take().is_empty());
+    }
+
+    #[test]
+    fn editing_a_template_opens_the_settings_page_at_it() {
+        let mut h = Harness::new();
+        h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::EditTemplate(2))));
+        let calls = h.fake.take();
+        assert!(calls.iter().any(|c| c.starts_with("chrome ") && c.contains("/settings#template-2")), "{calls:?}");
     }
 
     #[test]

@@ -77,6 +77,11 @@ pub enum MenuAction {
     SetMode(InputMode),
     /// Put the template at this index (of the config's list) into the foreground app.
     InsertTemplate(usize),
+    /// Open the settings page with the template at this index being edited.
+    EditTemplate(usize),
+    DeleteTemplate(usize),
+    /// Put back the template deleted last.
+    UndoDeleteTemplate,
     /// Copy what is selected in the foreground app and keep it as a template.
     AddSelectionAsTemplate,
     OpenSettings,
@@ -170,7 +175,7 @@ pub trait Platform: Send + Sync {
     }
     /// Opens the templates menu (`crate::menu::template_menu`) at the floating mic. The focus
     /// goes back to the foreground app when it closes.
-    fn show_templates(&self, _templates: &[String]) {}
+    fn show_templates(&self, _items: &[crate::menu::MenuItem]) {}
     fn focused_field(&self) -> FieldInfo;
     fn show_icon(&self, state: IconState, position: Option<(i32, i32)>);
     fn hide_icon(&self);

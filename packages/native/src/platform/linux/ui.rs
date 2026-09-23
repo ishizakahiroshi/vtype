@@ -192,9 +192,9 @@ impl Ui {
     }
 
     /// Builds the templates menu and opens it at the mic from GTK's loop (not inside this job).
-    pub fn show_templates(&mut self, templates: Vec<String>) {
+    pub fn show_templates(&mut self, items: Vec<crate::menu::MenuItem>) {
         let Some(overlay) = &mut self.overlay else { return };
-        let (menu, ids) = build_template_menu(&templates, &self.shared.menu_actions, &self.template_ids);
+        let (menu, ids) = build_template_menu(items, &self.shared.menu_actions, &self.template_ids);
         self.template_ids = ids;
         overlay.set_templates_menu(menu);
         glib::idle_add_local_once(super::overlay::show_templates_menu);

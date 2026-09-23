@@ -343,6 +343,18 @@
     "message": "テンプレートを編集…",
     "description": "Desktop app templates menu: opens the settings page to edit the templates"
   },
+  "native_menuTemplateEdit": {
+    "message": "編集",
+    "description": "Desktop app templates menu: submenu listing the templates; choosing one opens it in the settings page"
+  },
+  "native_menuTemplateDelete": {
+    "message": "削除",
+    "description": "Desktop app templates menu: submenu listing the templates; choosing one deletes it at once"
+  },
+  "native_menuTemplateUndoDelete": {
+    "message": "「{template}」の削除を取り消す",
+    "description": "Desktop app templates menu: puts back the template deleted last. {template} is its first line"
+  },
   "native_bubbleTemplateAdded": {
     "message": "テンプレートに登録しました。",
     "description": "Desktop app: the selected text was saved as a template"
@@ -358,6 +370,14 @@
   "native_bubbleNoSelection": {
     "message": "選択された文字がありませんでした。文字を選んでから、もう一度どうぞ。",
     "description": "Desktop app: nothing was selected in the front app to save as a template"
+  },
+  "native_bubbleTemplateDeleted": {
+    "message": "テンプレートを削除しました。取り消すときはテンプレートの一覧から。",
+    "description": "Desktop app: a template was deleted from the templates menu"
+  },
+  "native_bubbleTemplateRestored": {
+    "message": "テンプレートを元に戻しました。",
+    "description": "Desktop app: the template deleted last was put back"
   },
   "native_bubbleClearNotField": {
     "message": "文字の入力欄にカーソルがないので、消しませんでした。",

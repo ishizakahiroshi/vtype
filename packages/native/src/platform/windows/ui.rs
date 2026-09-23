@@ -263,8 +263,8 @@ impl Ui {
     }
 
     /// Builds the templates menu and opens it at the mic, outside this borrow (it is modal).
-    pub fn show_templates(&mut self, templates: Vec<String>) {
-        let (menu, ids) = build_template_menu(&templates, &self.shared.menu_actions, &self.template_ids);
+    pub fn show_templates(&mut self, items: Vec<crate::menu::MenuItem>) {
+        let (menu, ids) = build_template_menu(items, &self.shared.menu_actions, &self.template_ids);
         self.template_ids = ids;
         self.templates_menu = Some(menu);
         unsafe { PostMessageW(self.msg_hwnd, WM_APP_MENU, MENU_TEMPLATES, 0) };
