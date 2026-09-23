@@ -2,14 +2,13 @@
 //! global shortcut). There is nothing to register with Chrome: vtype starts a Chrome of its own
 //! for the speech page (standalone plan C4).
 
-use std::path::Path;
-
 use anyhow::Result;
 
 use crate::platform::PlatformError;
 
 /// True for an executable inside the Windows Store's package folder.
-pub fn is_msix_install(exe: &Path) -> bool {
+#[cfg(any(windows, test))]
+pub fn is_msix_install(exe: &std::path::Path) -> bool {
     // Split by hand rather than with Path::components, so the test runs the same on every OS.
     let text = exe.to_string_lossy().to_ascii_lowercase().replace('/', "\\");
     text.split('\\').any(|part| part == "windowsapps") && !text.contains(r"\microsoft\windowsapps\")
@@ -54,6 +53,7 @@ fn before_uninstall_hooks() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn the_deb_ships_the_autostart_entry() {

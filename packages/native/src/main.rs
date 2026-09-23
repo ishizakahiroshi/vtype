@@ -43,20 +43,17 @@ use clap::Parser;
 use cli::{Cli, Command};
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().collect();
-    let result = if args.len() == 1 && std::env::current_exe().is_ok_and(|exe| install::is_msix_install(&exe)) {
-        // The Store package starts vtype without arguments (its StartupTask, its Start menu tile).
-        daemon::run()
-    } else {
-        let cli = Cli::parse();
-        match cli.command {
-            Command::Daemon => daemon::run(),
-            Command::Install => install::install(),
-            Command::Uninstall => install::uninstall(),
-            other => {
-                crate::log::init_stderr();
-                cli::run_client(other)
-            }
+    let cli = Cli::parse();
+    // Double-clicking the exe from the zip / tar.gz, and the Store package's StartupTask and Start
+    // menu tile, start vtype without arguments.
+    let command = cli::command_or_default(cli.command, || ipc::daemon_answers(&paths::ipc_endpoint()));
+    let result = match command {
+        Command::Daemon => daemon::run(),
+        Command::Install => install::install(),
+        Command::Uninstall => install::uninstall(),
+        other => {
+            crate::log::init_stderr();
+            cli::run_client(other)
         }
     };
     match result {

@@ -7,10 +7,27 @@ use crate::ipc;
 use crate::protocol::{InputMode, Reply, Request};
 
 #[derive(Parser, Debug)]
-#[command(name = "vtype", version, about = "vtype desktop: voice input into any app")]
+#[command(
+    name = "vtype",
+    version,
+    about = "vtype desktop: voice input into any app",
+    after_help = "Without a command, vtype starts the resident app, or opens its settings page if it is already running."
+)]
 pub struct Cli {
+    /// None for a bare `vtype`: see `command_or_default`.
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
+}
+
+/// What a bare `vtype` does (a double-click on the exe, the Store's StartupTask or Start menu
+/// tile): start the resident app, or open its settings page when one already answers, so a second
+/// double-click shows something. `daemon_answers` is asked only when there is no subcommand.
+pub fn command_or_default(command: Option<Command>, daemon_answers: impl FnOnce() -> bool) -> Command {
+    match command {
+        Some(command) => command,
+        None if daemon_answers() => Command::Settings,
+        None => Command::Daemon,
+    }
 }
 
 #[derive(Subcommand, Debug, PartialEq)]
@@ -202,7 +219,7 @@ mod tests {
 
     #[test]
     fn parses_the_subcommands() {
-        let parse = |list: &[&str]| Cli::try_parse_from(list).map(|c| c.command);
+        let parse = |list: &[&str]| Cli::try_parse_from(list).map(|c| c.command.expect("a subcommand"));
         assert_eq!(parse(&["vtype", "toggle"]).unwrap(), Command::Toggle { mode: None });
         assert_eq!(
             parse(&["vtype", "start", "--mode", "kana"]).unwrap(),
@@ -214,5 +231,22 @@ mod tests {
         assert!(parse(&["vtype", "host"]).is_err());
         assert!(parse(&["vtype", "install", "--extension-id", "a"]).is_err());
         assert!(parse(&["vtype", "mode", "katakana"]).is_err());
+    }
+
+    #[test]
+    fn a_bare_vtype_starts_the_app_or_opens_its_settings() {
+        let bare = Cli::try_parse_from(["vtype"]).unwrap().command;
+        assert_eq!(bare, None);
+        assert_eq!(command_or_default(bare, || false), Command::Daemon);
+        assert_eq!(command_or_default(None, || true), Command::Settings);
+        // A subcommand is followed as given, without asking the daemon.
+        assert_eq!(command_or_default(Some(Command::Status), || unreachable!("asked the daemon")), Command::Status);
+        assert_eq!(command_or_default(Some(Command::Daemon), || unreachable!("asked the daemon")), Command::Daemon);
+        // `--help` and `--version` are still clap's, and the help says what a bare `vtype` does.
+        let help = Cli::try_parse_from(["vtype", "--help"]).unwrap_err();
+        assert_eq!(help.kind(), clap::error::ErrorKind::DisplayHelp);
+        assert!(help.to_string().contains("Without a command, vtype starts the resident app"));
+        let version = Cli::try_parse_from(["vtype", "--version"]).unwrap_err();
+        assert_eq!(version.kind(), clap::error::ErrorKind::DisplayVersion);
     }
 }
