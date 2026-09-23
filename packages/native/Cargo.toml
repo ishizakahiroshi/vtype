@@ -34,6 +34,15 @@ tray-icon = "0.25.1"
 
 [build-dependencies]
 serde_json = "1.0.151"
+# vtype.exe's icon and version details (plan C13). Used by build.rs on Windows builds only;
+# nothing of it goes into the program.
+winresource = "0.1.31"
+
+# The strings on vtype.exe's Properties > Details (winresource reads them; the product name,
+# description and version come from [package]).
+[package.metadata.winresource]
+LegalCopyright = "© 2026 ishizakahiroshi"
+OriginalFilename = "vtype.exe"
 
 # cargo-deb (child plan C9-C3): the binary and the autostart entry (so no `vtype install` is
 # needed). The release workflow builds it with `cargo deb --no-build` after `cargo build --release`.

@@ -68,6 +68,25 @@ fn main() {
     fs::write(dest, out).unwrap();
 
     embed_speech_page(&manifest_dir.join("../extension/dist-desktop"));
+    windows_resources(&manifest_dir);
+}
+
+/// The icon Explorer shows for vtype.exe (the extension's, assets/icons/favicon.ico: 16, 32, 48
+/// and 256 px), and the version details on its Properties page (from Cargo.toml). Windows builds
+/// only; the resource compiler comes with the Windows SDK that the MSVC toolchain needs anyway.
+fn windows_resources(manifest_dir: &Path) {
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
+    // Built from components rather than "../..": the resource compiler gets a plain path.
+    let repo = manifest_dir.parent().and_then(Path::parent).expect("packages/native sits two levels down");
+    let icon = repo.join("assets").join("icons").join("favicon.ico");
+    println!("cargo:rerun-if-changed={}", icon.display());
+    println!("cargo:rerun-if-changed=Cargo.toml");
+    winresource::WindowsResource::new()
+        .set_icon(&icon.to_string_lossy())
+        .compile()
+        .unwrap_or_else(|e| panic!("cannot embed the icon and version details into vtype.exe: {e}"));
 }
 
 /// The speech page the daemon serves on 127.0.0.1 (standalone plan C2 / C3), built by
