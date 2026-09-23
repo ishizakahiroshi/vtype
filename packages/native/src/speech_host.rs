@@ -776,10 +776,7 @@ mod tests {
     #[test]
     fn a_dns_rebinding_host_header_is_refused() {
         let (h, rx) = host();
-        let (head, _) = raw(
-            &h,
-            &format!("GET /t/{}/speech HTTP/1.1\r\nHost: evil.attacker.com\r\n\r\n", h.token),
-        );
+        let (head, _) = raw(&h, &format!("GET /t/{}/speech HTTP/1.1\r\nHost: evil.attacker.com\r\n\r\n", h.token));
         assert!(head.starts_with("HTTP/1.1 403"), "{head}");
         assert!(rx.recv_timeout(Duration::from_millis(300)).is_err());
     }

@@ -158,12 +158,14 @@ mod tests {
 
     #[test]
     fn masks_templates_and_replacements_in_report() {
-        let mut cfg = NativeConfig::default();
-        cfg.templates = vec!["CONFIDENTIAL TEMPLATE TEXT".to_string()];
-        cfg.replacements = vec![crate::config::ReplacementRule {
-            from: "SECRET_WORD".to_string(),
-            to: "REPLACED_WORD".to_string(),
-        }];
+        let cfg = NativeConfig {
+            templates: vec!["CONFIDENTIAL TEMPLATE TEXT".to_string()],
+            replacements: vec![crate::config::ReplacementRule {
+                from: "SECRET_WORD".to_string(),
+                to: "REPLACED_WORD".to_string(),
+            }],
+            ..NativeConfig::default()
+        };
         let errors = ErrorLog::default();
         let r = report(&Snapshot {
             os: "Windows 10.0.26200",

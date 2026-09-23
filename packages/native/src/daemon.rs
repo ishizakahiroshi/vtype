@@ -27,8 +27,8 @@ use crate::ipc;
 use crate::menu;
 use crate::overlay_logic;
 use crate::platform::{
-    Anchor, EditKeys, FieldInfo, FieldProbe, IconState, InjectOutcome, KeptButton, MenuAction, MicButton, MicPart, Platform,
-    PlatformError, PlatformEvent, Rect, TrayState, VoiceCue, MESSAGE_HOLD,
+    Anchor, EditKeys, FieldInfo, FieldProbe, IconState, InjectOutcome, KeptButton, MenuAction, MicButton, MicPart,
+    Platform, PlatformError, PlatformEvent, Rect, TrayState, VoiceCue, MESSAGE_HOLD,
 };
 use crate::protocol::{FromExtension, InputMode, Reply, Request, SessionEvent, ToExtension};
 use crate::report::{self, ReportInfo, Surface};
@@ -115,10 +115,7 @@ fn is_protected_field(field: &FieldInfo) -> bool {
     }
     if let Some(app) = field.app_id.as_deref() {
         let app_lower = app.to_ascii_lowercase();
-        if app_lower == "credentialuibroker.exe"
-            || app_lower == "consent.exe"
-            || app_lower == "logonui.exe"
-        {
+        if app_lower == "credentialuibroker.exe" || app_lower == "consent.exe" || app_lower == "logonui.exe" {
             return true;
         }
     }
