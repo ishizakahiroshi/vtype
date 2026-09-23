@@ -14,6 +14,7 @@ use thiserror::Error;
 pub use crate::beside_field::{Anchor, FieldProbe};
 use crate::config::{BesideFieldConfig, InjectMethod};
 pub use crate::field_check::FieldCheck;
+pub use crate::kept_bubble::KeptButton;
 pub use crate::overlay_logic::{MicButton, MicPart};
 use crate::protocol::InputMode;
 pub use crate::ripple::VoiceCue;
@@ -59,6 +60,8 @@ pub enum PlatformEvent {
     },
     /// One of the small buttons around the floating mic was clicked.
     MicButton(MicButton),
+    /// A button of the kept words' bubble (`Platform::show_kept`) was clicked.
+    KeptButton(KeptButton),
     /// The pointer moved onto this part of the floating mic, or (`None`) off the mic: the bubble
     /// says what the part does once the pointer rests there. Sent only when the part changes.
     MicHover(Option<MicPart>),
@@ -210,6 +213,16 @@ pub trait Platform: Send + Sync {
     /// user can switch it off; it hides over full-screen apps) and `or_notify` is set does it fall
     /// back to a system notification, whose showing depends on the system's settings.
     fn tell(&self, text: &str, hold: Duration, or_notify: bool);
+    /// Whether `show_kept` can put words on screen: this system can show the floating mic (not
+    /// Wayland). Where it cannot, words are typed as before, whatever has the focus.
+    fn keeps_words(&self) -> bool {
+        false
+    }
+    /// Words that did not go in because no text field had the focus (plan C11), in the bubble
+    /// above the floating mic with "Copy", "Insert" and ✕ (`PlatformEvent::KeptButton`), until
+    /// `None` takes them away. Live text and messages cover them while they show, and the words
+    /// come back after. Called again, it shows them where the mic is now.
+    fn show_kept(&self, _text: Option<&str>) {}
     fn set_autostart(&self, enabled: bool) -> Result<(), PlatformError>;
     /// Starts Chrome with `args` (e.g. `--no-startup-window`, or a URL to open).
     fn launch_chrome(&self, args: &[String]) -> Result<(), PlatformError>;

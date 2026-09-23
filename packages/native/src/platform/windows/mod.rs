@@ -147,6 +147,15 @@ impl Platform for WindowsPlatform {
         });
     }
 
+    fn keeps_words(&self) -> bool {
+        true
+    }
+
+    fn show_kept(&self, text: Option<&str>) {
+        let text = text.map(str::to_string);
+        self.shared.run(move |ui| ui.show_kept(text));
+    }
+
     fn set_autostart(&self, enabled: bool) -> Result<(), PlatformError> {
         system::set_autostart(enabled)
     }

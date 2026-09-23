@@ -19,7 +19,9 @@ use gtk::{cairo, gdk, glib};
 use tiny_skia::Pixmap;
 use tray_icon::menu::{ContextMenu, Menu};
 
-use crate::icon_draw::{draw_floating, draw_rounded_panel, to_premultiplied_bgra};
+use crate::i18n::t;
+use crate::icon_draw::{draw_floating, draw_kept, draw_rounded_panel, to_premultiplied_bgra};
+use crate::kept_bubble::{self, Layout, CAPTION_WIDTH, TEXT_LINES};
 use crate::menu::TemplateList;
 use crate::overlay_logic::{
     bubble_position, button_at, button_shown, fits, part_at, resized_position, resolve_position, scaled_size, tail,
@@ -311,14 +313,59 @@ fn wire_icon(window: &gtk::Window) {
 
 struct Bubble {
     window: gtk::Window,
+    /// Holds the labels where the kept words' layout puts them.
+    fixed: gtk::Fixed,
     label: gtk::Label,
+    /// The kept words' caption and buttons' labels (plan C11), hidden otherwise.
+    caption: gtk::Label,
+    copy: gtk::Label,
+    insert: gtk::Label,
     /// The panel behind the text, in points.
     size: Rc<Cell<(i32, i32)>>,
+    /// Set while the bubble shows kept words: what its drawing and its clicks follow.
+    kept: Rc<Cell<Option<Layout>>>,
     shown: bool,
 }
 
 fn markup(text: &str) -> String {
-    format!("<span foreground=\"#1f2937\" size=\"{BUBBLE_FONT_SIZE}\">{}</span>", glib::markup_escape_text(text))
+    markup_in(text, kept_bubble::TEXT_COLOR, BUBBLE_FONT_SIZE)
+}
+
+fn markup_in(text: &str, rgb: (u8, u8, u8), size: i32) -> String {
+    let (r, g, b) = rgb;
+    format!("<span foreground=\"#{r:02x}{g:02x}{b:02x}\" size=\"{size}\">{}</span>", glib::markup_escape_text(text))
+}
+
+/// A label of the kept words' bubble: shown only with them.
+fn kept_label(fixed: &gtk::Fixed) -> gtk::Label {
+    let label = gtk::Label::new(None);
+    label.set_xalign(0.0);
+    label.set_no_show_all(true);
+    fixed.put(&label, 0, 0);
+    label
+}
+
+/// Clicks on the kept words' buttons: one counts when the press started and ended on it.
+fn wire_bubble(window: &gtk::Window, kept: &Rc<Cell<Option<Layout>>>, events: Sender<PlatformEvent>) {
+    window.add_events(gdk::EventMask::BUTTON_PRESS_MASK | gdk::EventMask::BUTTON_RELEASE_MASK);
+    let pressed = Rc::new(Cell::new(None));
+    {
+        let (kept, pressed) = (kept.clone(), pressed.clone());
+        window.connect_button_press_event(move |_, ev| {
+            let (x, y) = ev.position();
+            pressed.set(kept.get().and_then(|l| l.button_at(x as f32, y as f32)));
+            glib::Propagation::Stop
+        });
+    }
+    let kept = kept.clone();
+    window.connect_button_release_event(move |_, ev| {
+        let (x, y) = ev.position();
+        let here = kept.get().and_then(|l| l.button_at(x as f32, y as f32));
+        if let Some(button) = pressed.take().filter(|b| ev.button() == 1 && here == Some(*b)) {
+            let _ = events.send(PlatformEvent::KeptButton(button));
+        }
+        glib::Propagation::Stop
+    });
 }
 
 pub struct Overlay {
@@ -329,6 +376,7 @@ pub struct Overlay {
 
 impl Overlay {
     pub fn new(events: Sender<PlatformEvent>, menu: Menu) -> Overlay {
+        let bubble_events = events.clone();
         let side = scaled_size(SCALE_DEFAULT, 1.0);
         let window = new_popup(side, side);
         wire_icon(&window);
@@ -364,25 +412,40 @@ impl Overlay {
         label.set_margin_top(BUBBLE_PADDING);
         label.set_margin_bottom(BUBBLE_PADDING);
         label.set_size_request(BUBBLE_WIDTH - BUBBLE_PADDING * 2, -1);
-        bubble_window.add(&label);
+        let fixed = gtk::Fixed::new();
+        fixed.put(&label, 0, 0);
+        let caption = kept_label(&fixed);
+        caption.set_line_wrap(true);
+        caption.set_line_wrap_mode(gtk::pango::WrapMode::WordChar);
+        caption.set_size_request(CAPTION_WIDTH as i32, -1);
+        let copy = kept_label(&fixed);
+        let insert = kept_label(&fixed);
+        bubble_window.add(&fixed);
         let size = Rc::new(Cell::new((BUBBLE_WIDTH, 40)));
+        let kept = Rc::new(Cell::new(None));
         {
-            let size = size.clone();
-            // The panel first; the label draws itself after (Proceed).
+            let (size, kept) = (size.clone(), kept.clone());
+            // The panel first; the labels draw themselves after (Proceed).
             bubble_window.connect_draw(move |w, cr| {
                 let scale = w.scale_factor().max(1) as f64;
-                let (bw, bh) = size.get();
-                let panel = draw_rounded_panel(
-                    (bw as f64 * scale).round() as u32,
-                    (bh as f64 * scale).round() as u32,
-                    (10.0 * scale) as f32,
-                    (255, 255, 255, 250),
-                );
+                let panel = match kept.get() {
+                    Some(layout) => draw_kept(&layout, scale as f32),
+                    None => {
+                        let (bw, bh) = size.get();
+                        draw_rounded_panel(
+                            (bw as f64 * scale).round() as u32,
+                            (bh as f64 * scale).round() as u32,
+                            (10.0 * scale) as f32,
+                            (255, 255, 255, 250),
+                        )
+                    }
+                };
                 paint(cr, &panel, scale);
                 glib::Propagation::Proceed
             });
         }
-        let bubble = Bubble { window: bubble_window, label, size, shown: false };
+        wire_bubble(&bubble_window, &kept, bubble_events);
+        let bubble = Bubble { window: bubble_window, fixed, label, caption, copy, insert, size, kept, shown: false };
         Overlay { icon, bubble, shown: false }
     }
 
@@ -486,6 +549,7 @@ impl Overlay {
 
     /// At most `max_lines`; a longer text loses its start (live text: the latest words matter).
     pub fn show_bubble(&mut self, text: &str, max_lines: i32) {
+        self.leave_kept();
         let max_height = self.text_height("Xg") * max_lines + 1;
         let mut shown = text.to_string();
         let mut limit = text.chars().count();
@@ -512,7 +576,73 @@ impl Overlay {
         }
     }
 
+    /// The kept words' bubble (plan C11) above the mic, with its buttons.
+    pub fn show_kept(&mut self, words: &str) {
+        // The words: at most TEXT_LINES, the latest, as the speech bubble shows them.
+        let max_height = self.text_height("Xg") * TEXT_LINES + 1;
+        let mut shown = words.to_string();
+        let mut limit = words.chars().count();
+        let words_height = loop {
+            let h = self.text_height(&shown);
+            if h <= max_height || limit <= 4 {
+                break h.min(max_height);
+            }
+            limit = (limit * 4 / 5).max(4);
+            shown = tail(words, limit);
+        };
+        let b = &self.bubble;
+        let small = BUBBLE_FONT_SIZE - 1024;
+        b.caption.set_markup(&markup_in(&t("native_keptCaption"), kept_bubble::CAPTION_COLOR, small));
+        b.copy.set_markup(&markup_in(&t("native_keptCopy"), kept_bubble::COPY_LABEL_COLOR, small));
+        b.insert.set_markup(&markup_in(&t("native_keptInsert"), kept_bubble::INSERT_LABEL_COLOR, small));
+        let (_, caption_height) = b.caption.preferred_height_for_width(CAPTION_WIDTH as i32);
+        let (_, copy_width) = b.copy.preferred_width();
+        let (_, insert_width) = b.insert.preferred_width();
+        let (_, button_height) = b.copy.preferred_height();
+        let layout =
+            kept_bubble::layout(caption_height as f32, words_height as f32, copy_width as f32, insert_width as f32);
+
+        let at = |v: f32| v.round() as i32;
+        b.fixed.move_(&b.caption, at(layout.caption.x), at(layout.caption.y));
+        // The words' label keeps its padding as a margin.
+        b.fixed.move_(&b.label, at(layout.text.x) - BUBBLE_PADDING, at(layout.text.y) - BUBBLE_PADDING);
+        for (label, width, area) in [(&b.copy, copy_width, layout.copy), (&b.insert, insert_width, layout.insert)] {
+            let x = at(area.x + (area.width - width as f32) / 2.0);
+            let y = at(area.y + (area.height - button_height as f32) / 2.0);
+            b.fixed.move_(label, x, y);
+        }
+        for extra in [&b.caption, &b.copy, &b.insert] {
+            extra.show();
+        }
+
+        let size = (at(layout.width), at(layout.height));
+        b.kept.set(Some(layout));
+        b.size.set(size);
+        b.window.resize(size.0, size.1);
+        let (areas, primary) = work_areas();
+        let (x, y) = bubble_position(self.icon.pos.get(), self.icon.size.get(), size, 8, &areas, primary);
+        b.window.move_(x, y);
+        b.window.queue_draw();
+        if !self.bubble.shown {
+            self.bubble.window.show_all();
+            self.bubble.shown = true;
+        }
+    }
+
+    /// Back to a bubble that only says something: no buttons.
+    fn leave_kept(&mut self) {
+        let b = &self.bubble;
+        if b.kept.take().is_none() {
+            return;
+        }
+        b.fixed.move_(&b.label, 0, 0);
+        for extra in [&b.caption, &b.copy, &b.insert] {
+            extra.hide();
+        }
+    }
+
     pub fn hide_bubble(&mut self) {
+        self.leave_kept();
         if self.bubble.shown {
             self.bubble.window.hide();
             self.bubble.shown = false;

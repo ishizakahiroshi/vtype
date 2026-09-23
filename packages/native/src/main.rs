@@ -14,6 +14,7 @@ mod i18n;
 mod icon_draw;
 mod install;
 mod ipc;
+mod kept_bubble;
 #[cfg(any(target_os = "macos", test))]
 mod launch_agent;
 #[cfg(any(target_os = "linux", test))]

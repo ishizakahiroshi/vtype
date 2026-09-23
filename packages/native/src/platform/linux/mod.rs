@@ -149,6 +149,16 @@ impl Platform for LinuxPlatform {
         });
     }
 
+    /// Only X11 has the floating mic to keep words above.
+    fn keeps_words(&self) -> bool {
+        self.session == Session::X11
+    }
+
+    fn show_kept(&self, text: Option<&str>) {
+        let text = text.map(str::to_string);
+        self.shared.run(move |ui| ui.show_kept(text));
+    }
+
     fn set_autostart(&self, enabled: bool) -> Result<(), PlatformError> {
         system::set_autostart(enabled)
     }

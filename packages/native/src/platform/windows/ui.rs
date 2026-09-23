@@ -98,6 +98,10 @@ pub struct Ui {
     hide_on_fullscreen: bool,
     hidden_for_fullscreen: bool,
     recording: bool,
+    /// Words kept above the mic (plan C11): in the bubble whenever nothing else is.
+    kept: Option<String>,
+    /// Live text or a message is in the bubble until its timer runs out.
+    bubble_busy: bool,
 }
 
 thread_local! {
@@ -172,7 +176,7 @@ unsafe extern "system" fn msg_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 }
                 TIMER_BUBBLE => {
                     KillTimer(hwnd, TIMER_BUBBLE);
-                    with_ui(|ui| ui.overlay.hide_bubble());
+                    with_ui(|ui| ui.hide_bubble());
                 }
                 _ => {}
             }
@@ -198,6 +202,7 @@ impl Ui {
             self.hidden_for_fullscreen = false;
             if self.icon_wanted {
                 self.overlay.show(self.overlay.look(), self.icon_position);
+                self.bubble_free();
             }
         }
     }
@@ -231,6 +236,7 @@ impl Ui {
             self.overlay.set_look(look);
         } else {
             self.overlay.show(look, position);
+            self.bubble_free();
         }
         unsafe {
             if look == IconState::Done {
@@ -273,13 +279,33 @@ impl Ui {
             return false;
         }
         self.overlay.show_bubble(text, max_lines);
+        self.bubble_busy = true;
         let ms = u32::try_from(hold.as_millis()).unwrap_or(u32::MAX);
         unsafe { SetTimer(self.msg_hwnd, TIMER_BUBBLE, ms, None) };
         true
     }
 
+    /// Takes live text or a message away; kept words come back in their place.
     pub fn hide_bubble(&mut self) {
-        self.overlay.hide_bubble();
+        self.bubble_busy = false;
+        self.bubble_free();
+    }
+
+    /// Words kept above the mic, or (`None`) none any more. Shown now unless live text or a
+    /// message is in the bubble; then when it goes.
+    pub fn show_kept(&mut self, words: Option<String>) {
+        self.kept = words;
+        if !self.bubble_busy {
+            self.bubble_free();
+        }
+    }
+
+    /// Nothing else is in the bubble: the kept words are, if there are any.
+    fn bubble_free(&mut self) {
+        match &self.kept {
+            Some(words) if self.overlay.is_shown() => self.overlay.show_kept(words),
+            _ => self.overlay.hide_bubble(),
+        }
     }
 
     pub fn show_beside(&mut self, pos: (i32, i32), look: IconState, reported_at: Instant) {
@@ -325,6 +351,7 @@ impl Ui {
         } else if !busy && self.hidden_for_fullscreen {
             self.hidden_for_fullscreen = false;
             self.overlay.show(self.overlay.look(), self.icon_position);
+            self.bubble_free();
         }
     }
 }
@@ -426,6 +453,8 @@ pub fn run(shared: Arc<Shared>, events: Sender<PlatformEvent>) -> Result<(), Pla
             hide_on_fullscreen: true,
             hidden_for_fullscreen: false,
             recording: false,
+            kept: None,
+            bubble_busy: false,
         });
     });
     shared.msg_hwnd.store(msg_hwnd as isize, Ordering::Release);

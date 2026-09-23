@@ -16,9 +16,9 @@ use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, SIZE, W
 use windows_sys::Win32::Graphics::Gdi::{
     CreateCompatibleDC, CreateDIBSection, CreateFontIndirectW, DeleteDC, DeleteObject, DrawTextW, EnumDisplayMonitors,
     GdiFlush, GetDC, GetMonitorInfoW, MonitorFromPoint, ReleaseDC, SelectObject, SetBkMode, SetTextColor, AC_SRC_ALPHA,
-    AC_SRC_OVER, ANTIALIASED_QUALITY, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION, DIB_RGB_COLORS, DT_CALCRECT,
-    DT_EDITCONTROL, DT_NOPREFIX, DT_WORDBREAK, FW_NORMAL, HDC, HMONITOR, MONITORINFO, MONITOR_DEFAULTTOPRIMARY,
-    TRANSPARENT,
+    AC_SRC_OVER, ANTIALIASED_QUALITY, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION, DIB_RGB_COLORS,
+    DRAW_TEXT_FORMAT, DT_CALCRECT, DT_CENTER, DT_EDITCONTROL, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, DT_WORDBREAK,
+    FW_NORMAL, HDC, HFONT, HMONITOR, MONITORINFO, MONITOR_DEFAULTTOPRIMARY, TRANSPARENT,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
@@ -34,7 +34,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::beside_field::{follow_position, home_position, keep_on_screen, Anchor, BESIDE_SIZE};
-use crate::icon_draw::{draw_floating, draw_icon, draw_rounded_panel, to_premultiplied_bgra};
+use crate::i18n::t;
+use crate::icon_draw::{draw_floating, draw_icon, draw_kept, draw_rounded_panel, to_premultiplied_bgra};
+use crate::kept_bubble::{self, Area, KeptButton, Layout, CAPTION_WIDTH, TEXT_LINES, TEXT_WIDTH};
 use crate::overlay_logic::{
     bubble_position, button_at, button_shown, fits, part_at, resized_position, resolve_position, scaled_size, tail,
     Gesture, MicButton, MicPart, Press, WheelSteps, SCALE_DEFAULT,
@@ -341,7 +343,26 @@ unsafe extern "system" fn icon_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
 
 unsafe extern "system" fn bubble_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
+        // "Insert" types into the app that has the focus: the bubble must not take it.
         WM_MOUSEACTIVATE => MA_NOACTIVATE as LRESULT,
+        WM_SETCURSOR if kept_button_under_pointer().is_some() => {
+            SetCursor(LoadCursorW(null_mut(), IDC_HAND));
+            1
+        }
+        WM_LBUTTONDOWN => {
+            KEPT_PRESS.with(|p| p.set(kept_button_under_pointer()));
+            0
+        }
+        // A button counts when the press started and ended on it.
+        WM_LBUTTONUP => {
+            let pressed = KEPT_PRESS.with(Cell::take);
+            if let (Some(button), Some(s)) =
+                (pressed.filter(|b| kept_button_under_pointer() == Some(*b)), icon_shared())
+            {
+                let _ = s.events.send(PlatformEvent::KeptButton(button));
+            }
+            0
+        }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
 }
@@ -555,28 +576,13 @@ impl Overlay {
     /// At most `max_lines`; a longer text loses its start (live text: the latest words matter).
     /// As wide as the text, up to `BUBBLE_WIDTH`, so it sits centred over the mic.
     pub fn show_bubble(&mut self, text: &str, max_lines: i32) {
+        KEPT.with(|k| k.set(None));
         let scale = scale_for(self.icon.hwnd.get());
         let max_width = (BUBBLE_WIDTH as f32 * scale).round() as i32;
         let pad = (BUBBLE_PADDING as f32 * scale).round() as i32;
         let font_px = (14.0 * scale).round() as i32;
         unsafe {
-            // The system's message font (Yu Gothic UI on Japanese Windows): "Segoe UI" has no
-            // Japanese, and GDI's stand-in draws the kana shrunk beside the Latin letters.
-            let mut metrics: NONCLIENTMETRICSW = std::mem::zeroed();
-            metrics.cbSize = std::mem::size_of::<NONCLIENTMETRICSW>() as u32;
-            SystemParametersInfoW(
-                SPI_GETNONCLIENTMETRICS,
-                metrics.cbSize,
-                &mut metrics as *mut NONCLIENTMETRICSW as *mut _,
-                0,
-            );
-            let mut logfont = metrics.lfMessageFont;
-            logfont.lfHeight = -font_px;
-            logfont.lfWidth = 0;
-            logfont.lfWeight = FW_NORMAL as i32;
-            // Not ClearType: its colored fringes are wrong on a layered window's alpha.
-            logfont.lfQuality = ANTIALIASED_QUALITY;
-            let font = CreateFontIndirectW(&logfont);
+            let font = message_font(font_px);
             // Measure: at most `max_lines`; drop the start until it fits.
             let screen = GetDC(null_mut());
             let measure = CreateCompatibleDC(screen);
@@ -634,11 +640,169 @@ impl Overlay {
         }
     }
 
+    /// The kept words' bubble (plan C11) above the mic, with its buttons.
+    pub fn show_kept(&mut self, words: &str) {
+        let scale = scale_for(self.icon.hwnd.get());
+        let labels = [t("native_keptCaption"), t("native_keptCopy"), t("native_keptInsert")];
+        let (layout, width, height, bgra) = render_kept(words, [&labels[0], &labels[1], &labels[2]], scale);
+        let (areas, primary) = work_areas();
+        let gap = (8.0 * scale) as i32;
+        let (x, y) = bubble_position(self.icon.pos.get(), self.icon.size.get(), (width, height), gap, &areas, primary);
+        update_layered(self.bubble, x, y, width, height, &bgra, |_, _| {});
+        KEPT.with(|k| k.set(Some(KeptHit { layout, scale, origin: (x, y) })));
+        if !self.bubble_shown {
+            unsafe { ShowWindow(self.bubble, SW_SHOWNOACTIVATE) };
+            self.bubble_shown = true;
+        }
+    }
+
     pub fn hide_bubble(&mut self) {
+        KEPT.with(|k| k.set(None));
         if self.bubble_shown {
             unsafe { ShowWindow(self.bubble, SW_HIDE) };
             self.bubble_shown = false;
         }
+    }
+}
+
+/// The system's message font at `px` pixels (Yu Gothic UI on Japanese Windows): "Segoe UI" has
+/// no Japanese, and GDI's stand-in draws the kana shrunk beside the Latin letters.
+unsafe fn message_font(px: i32) -> HFONT {
+    let mut metrics: NONCLIENTMETRICSW = std::mem::zeroed();
+    metrics.cbSize = std::mem::size_of::<NONCLIENTMETRICSW>() as u32;
+    SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, metrics.cbSize, &mut metrics as *mut NONCLIENTMETRICSW as *mut _, 0);
+    let mut logfont = metrics.lfMessageFont;
+    logfont.lfHeight = -px;
+    logfont.lfWidth = 0;
+    logfont.lfWeight = FW_NORMAL as i32;
+    // Not ClearType: its colored fringes are wrong on a layered window's alpha.
+    logfont.lfQuality = ANTIALIASED_QUALITY;
+    CreateFontIndirectW(&logfont)
+}
+
+// --- the kept words' bubble (plan C11) ----------------------------------------------------------
+
+/// Where the kept words' bubble is and what is in it, for its window procedure.
+#[derive(Clone, Copy)]
+struct KeptHit {
+    layout: Layout,
+    /// Pixels per unit of `layout`.
+    scale: f32,
+    origin: (i32, i32),
+}
+
+thread_local! {
+    /// Set while the bubble shows kept words.
+    static KEPT: Cell<Option<KeptHit>> = const { Cell::new(None) };
+    /// The kept words' button the press started on.
+    static KEPT_PRESS: Cell<Option<KeptButton>> = const { Cell::new(None) };
+}
+
+/// The kept words' button under the pointer, while the bubble shows them.
+fn kept_button_under_pointer() -> Option<KeptButton> {
+    let hit = KEPT.with(Cell::get)?;
+    let (x, y) = cursor();
+    hit.layout.button_at((x - hit.origin.0) as f32 / hit.scale, (y - hit.origin.1) as f32 / hit.scale)
+}
+
+const WRAPPED: DRAW_TEXT_FORMAT = DT_WORDBREAK | DT_EDITCONTROL | DT_NOPREFIX;
+const CENTRED: DRAW_TEXT_FORMAT = DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX;
+
+/// The size of `text` in `font`: wrapped at `wrap` pixels, or on one line.
+unsafe fn measure(dc: HDC, font: HFONT, text: &str, wrap: Option<i32>) -> (i32, i32) {
+    let old = SelectObject(dc, font);
+    let mut w = wide(text);
+    let (flags, right) = match wrap {
+        Some(width) => (WRAPPED, width),
+        None => (DT_SINGLELINE | DT_NOPREFIX, 0),
+    };
+    let mut r = RECT { left: 0, top: 0, right, bottom: 0 };
+    DrawTextW(dc, w.as_mut_ptr(), -1, &mut r, flags | DT_CALCRECT);
+    SelectObject(dc, old);
+    (r.right, r.bottom)
+}
+
+unsafe fn draw_text(dc: HDC, font: HFONT, text: &str, mut rect: RECT, flags: DRAW_TEXT_FORMAT, rgb: (u8, u8, u8)) {
+    let old = SelectObject(dc, font);
+    SetTextColor(dc, u32::from(rgb.0) | u32::from(rgb.1) << 8 | u32::from(rgb.2) << 16);
+    let mut w = wide(text);
+    DrawTextW(dc, w.as_mut_ptr(), -1, &mut rect, flags);
+    SelectObject(dc, old);
+}
+
+/// Draws the kept words' bubble at `scale` pixels per unit: its layout, its size in pixels, and
+/// its premultiplied BGRA. `labels` are the caption and the two buttons'.
+fn render_kept(words: &str, labels: [&str; 3], scale: f32) -> (Layout, i32, i32, Vec<u8>) {
+    let [caption, copy, insert] = labels;
+    let px = |units: f32| (units * scale).round() as i32;
+    let unit = |pixels: i32| pixels as f32 / scale;
+    unsafe {
+        let caption_font = message_font(px(12.0));
+        let words_font = message_font(px(14.0));
+        let button_font = message_font(px(13.0));
+        let dc = CreateCompatibleDC(null_mut());
+        // At most TEXT_LINES of the words: the latest, as the speech bubble shows them.
+        let (_, caption_height) = measure(dc, caption_font, caption, Some(px(CAPTION_WIDTH)));
+        let (_, line) = measure(dc, words_font, "Xg", Some(px(TEXT_WIDTH)));
+        let max_height = line * TEXT_LINES + 1;
+        let mut shown = words.to_string();
+        let mut limit = words.chars().count();
+        let words_height = loop {
+            let (_, h) = measure(dc, words_font, &shown, Some(px(TEXT_WIDTH)));
+            if h <= max_height || limit <= 4 {
+                break h.min(max_height);
+            }
+            limit = (limit * 4 / 5).max(4);
+            shown = tail(words, limit);
+        };
+        let (copy_width, _) = measure(dc, button_font, copy, None);
+        let (insert_width, _) = measure(dc, button_font, insert, None);
+        let layout =
+            kept_bubble::layout(unit(caption_height), unit(words_height), unit(copy_width), unit(insert_width));
+
+        let panel = draw_kept(&layout, scale);
+        let (width, height) = (panel.width() as i32, panel.height() as i32);
+        let alpha: Vec<u8> = panel.data().as_chunks::<4>().0.iter().map(|p| p[3]).collect();
+        let mut info: BITMAPINFO = std::mem::zeroed();
+        info.bmiHeader = BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width,
+            biHeight: -height, // top-down
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB,
+            ..std::mem::zeroed()
+        };
+        let mut bits: *mut c_void = null_mut();
+        let dib = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
+        let mut out = to_premultiplied_bgra(&panel);
+        if !dib.is_null() && !bits.is_null() {
+            let pixels = std::slice::from_raw_parts_mut(bits as *mut u8, out.len());
+            pixels.copy_from_slice(&out);
+            let old = SelectObject(dc, dib);
+            SetBkMode(dc, TRANSPARENT as i32);
+            let rect =
+                |a: Area| RECT { left: px(a.x), top: px(a.y), right: px(a.x + a.width), bottom: px(a.y + a.height) };
+            draw_text(dc, caption_font, caption, rect(layout.caption), WRAPPED, kept_bubble::CAPTION_COLOR);
+            draw_text(dc, words_font, &shown, rect(layout.text), WRAPPED, kept_bubble::TEXT_COLOR);
+            draw_text(dc, button_font, copy, rect(layout.copy), CENTRED, kept_bubble::COPY_LABEL_COLOR);
+            draw_text(dc, button_font, insert, rect(layout.insert), CENTRED, kept_bubble::INSERT_LABEL_COLOR);
+            GdiFlush();
+            // GDI writes alpha 0 where it draws; the body is opaque, so give it back.
+            for (i, a) in alpha.iter().enumerate() {
+                if *a >= 250 {
+                    pixels[i * 4 + 3] = *a;
+                }
+            }
+            out.copy_from_slice(pixels);
+            SelectObject(dc, old);
+            DeleteObject(dib);
+        }
+        DeleteDC(dc);
+        for font in [caption_font, words_font, button_font] {
+            DeleteObject(font);
+        }
+        (layout, width, height, out)
     }
 }
 
@@ -720,5 +884,43 @@ impl BesideMic {
             unsafe { ShowWindow(self.hwnd, SW_HIDE) };
             self.shown = false;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::i18n::{lookup, Lang};
+
+    /// Draws the kept words' bubble into a PNG to look at: `VTYPE_KEPT_PNG=<path> cargo test --
+    /// --ignored kept_bubble_png`. Japanese at 150 % above English at 100 %, each on a grey
+    /// backdrop so the rounded corners show.
+    #[test]
+    #[ignore]
+    fn kept_bubble_png() {
+        let path = std::env::var("VTYPE_KEPT_PNG").expect("VTYPE_KEPT_PNG");
+        let labels = |lang| ["native_keptCaption", "native_keptCopy", "native_keptInsert"].map(|key| lookup(lang, key));
+        let ja = labels(Lang::Ja);
+        let en = labels(Lang::En);
+        let words = "明日の会議は 10 時からに変更になりました。資料は前日までに共有します。よろしくお願いします。";
+        let bubbles = [
+            render_kept(words, [&ja[0], &ja[1], &ja[2]], 1.5),
+            render_kept("Please send me the latest version of the slides.", [&en[0], &en[1], &en[2]], 1.0),
+        ];
+        let margin = 16;
+        let width = bubbles.iter().map(|b| b.1).max().unwrap() + margin * 2;
+        let height = bubbles.iter().map(|b| b.2 + margin).sum::<i32>() + margin;
+        let mut sheet = tiny_skia::Pixmap::new(width as u32, height as u32).unwrap();
+        sheet.fill(tiny_skia::Color::from_rgba8(0x9c, 0xa3, 0xaf, 255));
+        let mut top = margin;
+        for (_, w, h, bgra) in &bubbles {
+            let rgba: Vec<u8> = bgra.chunks(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect();
+            let size = tiny_skia::IntSize::from_wh(*w as u32, *h as u32).unwrap();
+            let bubble = tiny_skia::Pixmap::from_vec(rgba, size).unwrap();
+            let paint = tiny_skia::PixmapPaint::default();
+            sheet.draw_pixmap(margin, top, bubble.as_ref(), &paint, tiny_skia::Transform::identity(), None);
+            top += h + margin;
+        }
+        sheet.save_png(&path).unwrap();
     }
 }

@@ -383,6 +383,26 @@
     "message": "The cursor is not in a text field, so nothing was cleared.",
     "description": "Desktop app: the clear button did nothing because the focus is not in a text field (or is in a password field)"
   },
+  "native_keptCaption": {
+    "message": "The cursor was not in a text field, so your words are kept here",
+    "description": "Desktop app: first line of the bubble that keeps the words said while no text field had the focus"
+  },
+  "native_keptCopy": {
+    "message": "Copy",
+    "description": "Desktop app: button in the kept words' bubble that copies them to the clipboard"
+  },
+  "native_keptInsert": {
+    "message": "Insert",
+    "description": "Desktop app: button in the kept words' bubble that types them into whatever has the focus now"
+  },
+  "native_bubbleKeptCopied": {
+    "message": "Copied.",
+    "description": "Desktop app: the kept words were copied to the clipboard"
+  },
+  "native_bubbleKeptCopyFailed": {
+    "message": "Could not copy.",
+    "description": "Desktop app: the kept words could not be copied to the clipboard"
+  },
   "native_bubbleKeysUnsupported": {
     "message": "The buttons cannot press keys on this screen.",
     "description": "Desktop app: the send / clear button cannot press keys here (e.g. Wayland)"

@@ -78,6 +78,10 @@ pub struct Ui {
     /// Bumped by each check mark / bubble text, so an older timer knows it is stale.
     done_generation: u64,
     bubble_generation: u64,
+    /// Words kept above the mic (plan C11): in the bubble whenever nothing else is.
+    kept: Option<String>,
+    /// Live text or a message is in the bubble until its timer runs out.
+    bubble_busy: bool,
 }
 
 thread_local! {
@@ -128,6 +132,7 @@ impl Ui {
                 if let Some(overlay) = &mut self.overlay {
                     overlay.show(overlay.look(), self.icon_position);
                 }
+                self.bubble_free();
             }
         }
     }
@@ -158,6 +163,7 @@ impl Ui {
             overlay.set_look(look);
         } else {
             overlay.show(look, position);
+            self.bubble_free();
         }
         if look == IconState::Done && !self.hidden_for_fullscreen {
             self.done_generation += 1;
@@ -219,23 +225,40 @@ impl Ui {
             return false;
         }
         overlay.show_bubble(text, max_lines);
+        self.bubble_busy = true;
         self.bubble_generation += 1;
         let generation = self.bubble_generation;
         glib::timeout_add_local_once(hold, move || {
             with_ui(|ui| {
                 if ui.bubble_generation == generation {
-                    if let Some(o) = &mut ui.overlay {
-                        o.hide_bubble();
-                    }
+                    ui.hide_bubble();
                 }
             })
         });
         true
     }
 
+    /// Takes live text or a message away; kept words come back in their place.
     pub fn hide_bubble(&mut self) {
-        if let Some(overlay) = &mut self.overlay {
-            overlay.hide_bubble();
+        self.bubble_busy = false;
+        self.bubble_free();
+    }
+
+    /// Words kept above the mic, or (`None`) none any more. Shown now unless live text or a
+    /// message is in the bubble; then when it goes.
+    pub fn show_kept(&mut self, words: Option<String>) {
+        self.kept = words;
+        if !self.bubble_busy {
+            self.bubble_free();
+        }
+    }
+
+    /// Nothing else is in the bubble: the kept words are, if there are any.
+    fn bubble_free(&mut self) {
+        let Some(overlay) = &mut self.overlay else { return };
+        match &self.kept {
+            Some(words) if overlay.is_shown() => overlay.show_kept(words),
+            _ => overlay.hide_bubble(),
         }
     }
 
@@ -252,6 +275,7 @@ impl Ui {
         } else if !busy && self.hidden_for_fullscreen {
             self.hidden_for_fullscreen = false;
             overlay.show(overlay.look(), self.icon_position);
+            self.bubble_free();
         }
     }
 }
@@ -312,6 +336,8 @@ pub fn run(shared: Arc<Shared>, events: Sender<PlatformEvent>, session: Session)
             recording: false,
             done_generation: 0,
             bubble_generation: 0,
+            kept: None,
+            bubble_busy: false,
         });
     });
 

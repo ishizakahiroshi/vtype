@@ -27,8 +27,8 @@ use crate::ipc;
 use crate::menu;
 use crate::overlay_logic;
 use crate::platform::{
-    Anchor, EditKeys, FieldProbe, IconState, InjectOutcome, MenuAction, MicButton, MicPart, Platform, PlatformError,
-    PlatformEvent, Rect, TrayState, VoiceCue, MESSAGE_HOLD,
+    Anchor, EditKeys, FieldProbe, IconState, InjectOutcome, KeptButton, MenuAction, MicButton, MicPart, Platform,
+    PlatformError, PlatformEvent, Rect, TrayState, VoiceCue, MESSAGE_HOLD,
 };
 use crate::protocol::{FromExtension, InputMode, Reply, Request, SessionEvent, ToExtension};
 use crate::report::{self, ReportInfo, Surface};
@@ -91,6 +91,22 @@ const HOME_DELAY: Duration = Duration::from_millis(700);
 /// How long the result of a look at an app's text fields stays in the bubble: longer than most
 /// messages, as it is read once and is two sentences.
 const FIELD_CHECK_HOLD: Duration = Duration::from_secs(12);
+
+/// How long "Copied" stays after the kept words were copied.
+const COPIED_HOLD: Duration = Duration::from_secs(2);
+
+/// What became of words handed to `Core::put_in`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Put {
+    /// Typed or pasted into the foreground app.
+    In,
+    /// No text field had the focus: kept above the mic (plan C11).
+    Kept,
+    /// Put nowhere: nothing to put, or a password field in front.
+    Refused,
+    /// On the clipboard for the user to paste (they could not be typed).
+    Copied,
+}
 
 pub struct Core {
     platform: Arc<dyn Platform>,
@@ -156,6 +172,9 @@ pub struct Core {
     /// A stop was sent for this recording: words still arriving (the page waits for the last
     /// one) do not set `silence_stop_at` again, so the stop is not sent twice.
     stop_sent: bool,
+    /// Words said while no text field had the focus, kept above the mic until the user copies,
+    /// inserts or throws them away (plan C11). Empty when there are none.
+    kept: String,
 }
 
 impl Core {
@@ -193,6 +212,7 @@ impl Core {
             hint_until: None,
             silence_stop_at: None,
             stop_sent: false,
+            kept: String::new(),
         }
     }
 
@@ -487,9 +507,10 @@ impl Core {
         }
     }
 
-    /// A hint may take the bubble: not while it shows what is being said, or the wait for Chrome.
+    /// A hint may take the bubble: not while it shows what is being said, the wait for Chrome, or
+    /// kept words (the pointer passes over the mic on its way to their buttons).
     fn hint_fits(&self) -> bool {
-        !self.recording && self.pending.is_none()
+        !self.recording && self.pending.is_none() && self.kept.is_empty()
     }
 
     /// What the bubble says for the part of the floating mic the pointer rests on.
@@ -799,6 +820,7 @@ impl Core {
                     self.recording = recording;
                     if recording {
                         self.show_icon(IconState::Recording);
+                        self.hide_kept_while_recording();
                     } else {
                         self.end_recording_ui();
                     }
@@ -840,6 +862,78 @@ impl Core {
         self.show_icon(IconState::Idle);
         // The focus left the fields during the recording: the mic goes back now.
         self.go_home_if_due();
+        self.show_kept();
+    }
+
+    /// The bubble is for what is being said: kept words step aside (they stay kept).
+    fn hide_kept_while_recording(&self) {
+        if !self.kept.is_empty() {
+            self.platform.show_kept(None);
+        }
+    }
+
+    /// The kept words in their bubble at the mic's current place, when there are any and no
+    /// recording needs the bubble.
+    fn show_kept(&self) {
+        if !self.kept.is_empty() && !self.recording {
+            self.platform.show_kept(Some(&self.kept));
+        }
+    }
+
+    /// Words can be kept only above a mic that can be on screen; elsewhere they are typed as before.
+    fn can_keep(&self) -> bool {
+        self.config.icon.visible && self.platform.keeps_words()
+    }
+
+    /// Adds words to the kept ones (English words spaced apart, as `put_in` does) and shows them,
+    /// unless a recording is on: then they show when it ends.
+    fn keep(&mut self, text: &str) {
+        let text = if self.kept.is_empty() { text.trim_start() } else { text };
+        if let (Some(a), Some(b)) = (self.kept.chars().last(), text.chars().next()) {
+            if a.is_ascii_alphanumeric() && b.is_ascii_alphanumeric() {
+                self.kept.push(' ');
+            }
+        }
+        self.kept.push_str(text);
+        self.show_kept();
+    }
+
+    /// A button of the kept words' bubble (plan C11).
+    fn kept_button(&mut self, button: KeptButton) {
+        if self.kept.is_empty() {
+            self.platform.show_kept(None);
+            return;
+        }
+        match button {
+            KeptButton::Copy => match self.platform.copy_to_clipboard(&self.kept) {
+                Ok(()) => {
+                    self.kept.clear();
+                    self.platform.show_kept(None);
+                    self.platform.tell(&t("native_bubbleKeptCopied"), COPIED_HOLD, false);
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "could not copy the kept words");
+                    self.errors.push("kept_copy_failed");
+                    self.platform.tell(&t("native_bubbleKeptCopyFailed"), MESSAGE_HOLD, false);
+                }
+            },
+            KeptButton::Insert => {
+                let text = std::mem::take(&mut self.kept);
+                self.platform.show_kept(None);
+                // Words of their own: no space in front of them for what was typed before.
+                self.last_char = None;
+                // The user chose where they go, so not only into what the OS takes for a text
+                // field. Not into a password field: then they stay.
+                if self.put_in(&text, false) == Put::Refused {
+                    self.kept = text;
+                    self.show_kept();
+                }
+            }
+            KeptButton::Close => {
+                self.kept.clear();
+                self.platform.show_kept(None);
+            }
+        }
     }
 
     /// New words (or the recognizer hearing speech again after them): the recording stops
@@ -859,6 +953,7 @@ impl Core {
                 self.silence_stop_at = None;
                 self.stop_sent = false;
                 self.show_icon(IconState::Recording);
+                self.hide_kept_while_recording();
                 self.update_tray();
             }
             SessionEvent::Interim { text } => {
@@ -902,45 +997,58 @@ impl Core {
         }
     }
 
-    /// Puts recognized text into the foreground app. Never into a password field. True when the
+    /// Puts recognized text into the foreground app. Never into a password field; words for
+    /// something the OS says is not a text field are kept above the mic instead. True when the
     /// text went in.
     fn insert(&mut self, text: &str) -> bool {
+        self.put_in(text, true) == Put::In
+    }
+
+    /// Puts words into the foreground app, never into a password field. With `keep_off_fields`,
+    /// words for something the OS says is not a text field are kept above the mic instead, where
+    /// the user can copy or insert them (plan C11). When the OS cannot say, they are typed.
+    fn put_in(&mut self, text: &str, keep_off_fields: bool) -> Put {
         if text.trim().is_empty() {
-            return false;
+            return Put::Refused;
         }
         // Chrome ends a recognition after each utterance, so one recording yields several finals.
         // English words would run together ("helloworld"); Japanese needs no space.
-        let text = match (self.last_char, text.chars().next()) {
+        let spaced = match (self.last_char, text.chars().next()) {
             (Some(a), Some(b)) if a.is_ascii_alphanumeric() && b.is_ascii_alphanumeric() => {
                 format!(" {text}")
             }
             _ => text.to_string(),
         };
-        let text = text.as_str();
         // End-to-end checks on the developer's machine (standalone plan C4): nothing is typed into
         // whatever app happens to be in front. Not for users; not documented.
         if std::env::var_os("VTYPE_TEST_NO_INJECT").is_some() {
-            tracing::info!("test: final len={}", text.chars().count());
-            self.last_char = text.chars().last();
-            return true;
+            tracing::info!("test: final len={}", spaced.chars().count());
+            self.last_char = spaced.chars().last();
+            return Put::In;
         }
         let field = self.platform.focused_field();
         if field.is_password == Some(true) {
             tracing::info!(len = text.chars().count(), "password field in front; not inserting");
             self.platform.tell(&t("native_notifyPasswordField"), MESSAGE_HOLD, true);
-            return false;
+            return Put::Refused;
         }
+        if keep_off_fields && field.is_text_field == Some(false) && self.can_keep() {
+            tracing::info!(len = text.chars().count(), app = ?field.app_id, "no text field has the focus; keeping");
+            self.keep(text);
+            return Put::Kept;
+        }
+        let text = spaced.as_str();
         match self.platform.inject_text(text, self.config.inject) {
             Ok(outcome @ (InjectOutcome::Typed | InjectOutcome::Pasted)) => {
                 // TEMP(clear-ime): `?outcome` only; remove after the check.
                 tracing::info!(len = text.chars().count(), ?outcome, "inserted");
                 self.last_char = text.chars().last();
                 self.show_icon(IconState::Done);
-                true
+                Put::In
             }
             Ok(InjectOutcome::CopiedOnly) => {
                 self.platform.tell(&t("native_notifyPasteManually"), MESSAGE_HOLD, true);
-                false
+                Put::Copied
             }
             Err(e) => {
                 tracing::warn!(error = %e, "could not insert; copying instead");
@@ -948,7 +1056,7 @@ impl Core {
                 if self.platform.copy_to_clipboard(text).is_ok() {
                     self.platform.tell(&t("native_notifyPasteManually"), MESSAGE_HOLD, true);
                 }
-                false
+                Put::Copied
             }
         }
     }
@@ -1003,6 +1111,9 @@ impl Core {
                 self.platform.hide_icon();
             }
         }
+        if scale_changed || icon_changed {
+            self.show_kept();
+        }
         if mode_changed {
             self.mode = self.config.input_mode;
             self.send(&ToExtension::SetMode { mode: self.mode });
@@ -1027,6 +1138,7 @@ impl Core {
             self.home_at = None;
             self.followed_field = None;
             self.platform.icon_home();
+            self.show_kept();
         }
     }
 
@@ -1054,6 +1166,8 @@ impl Core {
             }
             self.followed_field = Some(field);
             self.platform.icon_to_field(anchor, at);
+            // Kept words come along: click a field, then "Insert" right there.
+            self.show_kept();
             return;
         }
         match beside_field::decide(&self.config.beside_field, probe) {
@@ -1120,12 +1234,14 @@ impl Core {
                 let _ = self.toggle(None);
             }
             PlatformEvent::MicButton(button) => self.mic_button(button),
+            PlatformEvent::KeptButton(button) => self.kept_button(button),
             PlatformEvent::FieldChanged { probe, at } => self.field_changed(&probe, at),
             PlatformEvent::FieldsChecked(check) => self.fields_checked(check),
             PlatformEvent::IconMoved { x, y } => {
                 self.config.icon.x = Some(x);
                 self.config.icon.y = Some(y);
                 self.save_config();
+                self.show_kept();
             }
             PlatformEvent::IconZoom { steps } => {
                 let scale = overlay_logic::zoom_scale(self.config.icon.scale, steps);
@@ -1133,6 +1249,7 @@ impl Core {
                     self.config.icon.scale = scale;
                     self.save_config();
                     self.platform.set_icon_scale(scale);
+                    self.show_kept();
                 }
             }
             PlatformEvent::Menu(action) => match action {
@@ -1344,6 +1461,8 @@ pub mod tests {
         pub selection: Mutex<Option<String>>,
         /// Acts like Windows: the floating mic comes to fields.
         pub icon_follows: Mutex<bool>,
+        /// Acts like Wayland: no mic to keep words above.
+        pub cannot_keep: Mutex<bool>,
     }
 
     impl FakePlatform {
@@ -1408,6 +1527,15 @@ pub mod tests {
         }
         fn tell(&self, text: &str, hold: Duration, or_notify: bool) {
             self.log(format!("tell {text} {}s notify={or_notify}", hold.as_secs()));
+        }
+        fn keeps_words(&self) -> bool {
+            !*self.cannot_keep.lock().unwrap()
+        }
+        fn show_kept(&self, text: Option<&str>) {
+            match text {
+                Some(text) => self.log(format!("kept {text}")),
+                None => self.log("kept gone".into()),
+            }
         }
         fn set_autostart(&self, enabled: bool) -> Result<(), PlatformError> {
             self.log(format!("autostart {enabled}"));
@@ -2248,6 +2376,163 @@ pub mod tests {
         let calls = h.fake.take();
         assert!(!calls.iter().any(|c| c.starts_with("inject")));
         assert!(calls.contains(&format!("tell {} 6s notify=true", t("native_notifyPasswordField"))));
+    }
+
+    fn not_a_field() -> FieldInfo {
+        FieldInfo { is_text_field: Some(false), is_password: Some(false), ..FieldInfo::default() }
+    }
+
+    fn kept_button(h: &mut Harness, button: KeptButton) {
+        h.core.handle(Event::Platform(PlatformEvent::KeptButton(button)));
+    }
+
+    #[test]
+    fn words_off_the_fields_are_kept_and_shown_when_the_recording_ends() {
+        let mut h = Harness::new();
+        *h.fake.field.lock().unwrap() = not_a_field();
+        recording(&mut h);
+        session(&mut h, json!({"kind":"final","text":"hello"}));
+        session(&mut h, json!({"kind":"final","text":"world"}));
+        session(&mut h, json!({"kind":"final","text":"です"}));
+        let calls = h.fake.take();
+        assert!(!calls.iter().any(|c| c.starts_with("inject")), "not typed into what is not a field");
+        assert!(!calls.iter().any(|c| c.starts_with("kept")), "the bubble is for the live text meanwhile");
+        session(&mut h, json!({"kind":"ended","reason":"stopped"}));
+        assert!(h.fake.take().contains(&"kept hello worldです".to_string()));
+        // Kept until the user decides; the next recording steps them aside and adds to them.
+        session(&mut h, json!({"kind":"started"}));
+        assert!(h.fake.take().contains(&"kept gone".to_string()));
+        session(&mut h, json!({"kind":"final","text":"again"}));
+        session(&mut h, json!({"kind":"ended","reason":"stopped"}));
+        assert!(h.fake.take().contains(&"kept hello worldですagain".to_string()));
+    }
+
+    #[test]
+    fn words_are_typed_when_the_os_cannot_say_or_no_mic_can_keep_them() {
+        // The OS cannot say what has the focus: typed, as before.
+        let mut h = Harness::new();
+        recording(&mut h);
+        session(&mut h, json!({"kind":"final","text":"hello"}));
+        assert!(h.fake.take().contains(&"inject hello Auto".to_string()));
+        // No mic on screen (switched off), or none this system can show (Wayland).
+        for wayland in [false, true] {
+            let mut h = Harness::new();
+            *h.fake.field.lock().unwrap() = not_a_field();
+            if wayland {
+                *h.fake.cannot_keep.lock().unwrap() = true;
+            } else {
+                h.core.config.icon.visible = false;
+            }
+            recording(&mut h);
+            session(&mut h, json!({"kind":"final","text":"hello"}));
+            session(&mut h, json!({"kind":"ended","reason":"stopped"}));
+            let calls = h.fake.take();
+            assert!(calls.contains(&"inject hello Auto".to_string()));
+            assert!(!calls.iter().any(|c| c.starts_with("kept")));
+        }
+    }
+
+    #[test]
+    fn a_template_off_the_fields_is_kept_and_not_sent() {
+        let mut h = Harness::new();
+        h.connect();
+        h.core.config.templates = vec!["お世話になっております。".into()];
+        h.core.config.template_send_immediate = true;
+        *h.fake.field.lock().unwrap() = not_a_field();
+        h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::InsertTemplate(0))));
+        let calls = h.fake.take();
+        assert!(calls.contains(&"kept お世話になっております。".to_string()));
+        assert!(!calls.iter().any(|c| c.starts_with("inject") || c.starts_with("keys")));
+    }
+
+    #[test]
+    fn copy_puts_the_kept_words_on_the_clipboard() {
+        let mut h = Harness::new();
+        h.connect();
+        *h.fake.field.lock().unwrap() = not_a_field();
+        session(&mut h, json!({"kind":"final","text":"hello"}));
+        h.fake.take();
+        kept_button(&mut h, KeptButton::Copy);
+        let calls = h.fake.take();
+        assert_eq!(
+            calls,
+            vec![
+                "copy 5".to_string(),
+                "kept gone".into(),
+                format!("tell {} 2s notify=false", t("native_bubbleKeptCopied"))
+            ]
+        );
+        assert!(h.core.kept.is_empty());
+    }
+
+    #[test]
+    fn insert_types_the_kept_words_wherever_the_focus_is() {
+        let mut h = Harness::new();
+        h.connect();
+        *h.fake.field.lock().unwrap() = not_a_field();
+        session(&mut h, json!({"kind":"final","text":"hello"}));
+        h.core.last_char = Some('x');
+        h.fake.take();
+        // Still not what the OS takes for a text field: the user chose, so in they go, unspaced.
+        kept_button(&mut h, KeptButton::Insert);
+        let calls = h.fake.take();
+        assert!(calls.contains(&"kept gone".to_string()));
+        assert!(calls.contains(&"inject hello Auto".to_string()));
+        assert!(h.core.kept.is_empty());
+        // Nothing kept: nothing to do.
+        kept_button(&mut h, KeptButton::Insert);
+        assert!(!h.fake.take().iter().any(|c| c.starts_with("inject")));
+    }
+
+    #[test]
+    fn insert_keeps_the_words_when_a_password_field_is_in_front() {
+        let mut h = Harness::new();
+        h.connect();
+        *h.fake.field.lock().unwrap() = not_a_field();
+        session(&mut h, json!({"kind":"final","text":"hello"}));
+        *h.fake.field.lock().unwrap() = FieldInfo { is_password: Some(true), ..FieldInfo::default() };
+        h.fake.take();
+        kept_button(&mut h, KeptButton::Insert);
+        let calls = h.fake.take();
+        assert!(!calls.iter().any(|c| c.starts_with("inject")));
+        assert_eq!(calls.last().map(String::as_str), Some("kept hello"));
+        assert_eq!(h.core.kept, "hello");
+    }
+
+    #[test]
+    fn close_throws_the_kept_words_away() {
+        let mut h = Harness::new();
+        h.connect();
+        *h.fake.field.lock().unwrap() = not_a_field();
+        session(&mut h, json!({"kind":"final","text":"hello"}));
+        h.fake.take();
+        kept_button(&mut h, KeptButton::Close);
+        assert_eq!(h.fake.take(), vec!["kept gone".to_string()]);
+        assert!(h.core.kept.is_empty());
+    }
+
+    #[test]
+    fn kept_words_keep_hints_away_and_follow_the_mic() {
+        let mut h = following_fields();
+        *h.fake.field.lock().unwrap() = not_a_field();
+        session(&mut h, json!({"kind":"final","text":"hello"}));
+        h.fake.take();
+        // No hint over the kept words: the pointer crosses the mic on its way to their buttons.
+        hover(&mut h, Some(MicPart::Mic));
+        h.advance(HINT_DELAY);
+        h.core.tick();
+        assert!(!h.fake.take().iter().any(|c| c.starts_with("tell")));
+        hover(&mut h, None);
+        // The mic comes to a field: the words come along, to be inserted right there.
+        focus(&mut h, text_field());
+        let calls = h.fake.take();
+        let moved = calls.iter().position(|c| c.starts_with("icon to")).expect("the mic moved");
+        assert_eq!(calls[moved + 1..], ["kept hello".to_string()]);
+        // Dragged elsewhere, or resized: shown at the new place.
+        h.core.handle(Event::Platform(PlatformEvent::IconMoved { x: 5, y: 6 }));
+        assert_eq!(h.fake.take().last().map(String::as_str), Some("kept hello"));
+        h.core.handle(Event::Platform(PlatformEvent::IconZoom { steps: 1 }));
+        assert_eq!(h.fake.take().last().map(String::as_str), Some("kept hello"));
     }
 
     #[test]

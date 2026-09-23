@@ -319,6 +319,35 @@ pub fn draw_rounded_panel(width: u32, height: u32, radius: f32, rgba: (u8, u8, u
     pm
 }
 
+/// The kept words' bubble (plan C11) without its text: the panel, the two buttons and ✕, drawn
+/// at `scale` pixels per unit of `layout`. Each system draws the text over it.
+pub fn draw_kept(layout: &crate::kept_bubble::Layout, scale: f32) -> Pixmap {
+    let width = (layout.width * scale).round() as u32;
+    let height = (layout.height * scale).round() as u32;
+    let mut pm = draw_rounded_panel(width, height, 10.0 * scale, (255, 255, 255, 250));
+    let pill = |pm: &mut Pixmap, a: crate::kept_bubble::Area, rgb: (u8, u8, u8)| {
+        let (x, y, w, h) = (a.x * scale, a.y * scale, a.width * scale, a.height * scale);
+        if let Some(path) = rounded_rect(x, y, w, h, 6.0 * scale) {
+            pm.fill_path(&path, &paint(rgb, 255), FillRule::Winding, Transform::identity(), None);
+        }
+    };
+    pill(&mut pm, layout.copy, (0xe5, 0xe7, 0xeb));
+    pill(&mut pm, layout.insert, (0x4f, 0x46, 0xe5));
+    // ✕: two strokes in the middle of its square.
+    let c = layout.close;
+    let (cx, cy, r) = ((c.x + c.width / 2.0) * scale, (c.y + c.height / 2.0) * scale, c.width * 0.22 * scale);
+    let mut pb = PathBuilder::new();
+    pb.move_to(cx - r, cy - r);
+    pb.line_to(cx + r, cy + r);
+    pb.move_to(cx + r, cy - r);
+    pb.line_to(cx - r, cy + r);
+    if let Some(cross) = pb.finish() {
+        let stroke = Stroke { width: 1.6 * scale, line_cap: LineCap::Round, ..Stroke::default() };
+        pm.stroke_path(&cross, &paint(crate::kept_bubble::CAPTION_COLOR, 255), &stroke, Transform::identity(), None);
+    }
+    pm
+}
+
 /// `rgb` mixed with `amount` (0..1) of white.
 fn lighten(rgb: (u8, u8, u8), amount: f32) -> (u8, u8, u8) {
     let mix = |c: u8| (f32::from(c) + (255.0 - f32::from(c)) * amount).round() as u8;

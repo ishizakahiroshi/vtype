@@ -27,7 +27,9 @@ use tiny_skia::Pixmap;
 use tray_icon::menu::{ContextMenu, Menu};
 
 use crate::beside_field::{keep_on_screen, BESIDE_SIZE};
-use crate::icon_draw::{draw_floating, draw_icon, draw_rounded_panel};
+use crate::i18n::t;
+use crate::icon_draw::{draw_floating, draw_icon, draw_kept, draw_rounded_panel};
+use crate::kept_bubble::{self, Area, KeptButton, Layout, CAPTION_WIDTH, TEXT_LINES, TEXT_WIDTH};
 use crate::menu::TemplateList;
 use crate::overlay_logic::{
     bubble_position, button_at, button_shown, fits, part_at, resized_position, resolve_position, scaled_size, tail,
@@ -50,8 +52,9 @@ pub enum Role {
     FloatingMic,
     /// The mic beside a field: click only.
     BesideMic,
-    /// The bubble's background: nothing.
-    Picture,
+    /// The bubble's background: its buttons while it keeps words (plan C11), else nothing (the
+    /// panel lets the pointer through then).
+    Bubble,
 }
 
 pub struct ViewIvars {
@@ -80,10 +83,21 @@ define_class!(
             true
         }
 
+        // The kept words' labels sit on the bubble: its clicks are the bubble's, not theirs.
+        #[unsafe(method(hitTest:))]
+        fn hit_test(&self, point: NSPoint) -> *mut NSView {
+            if self.ivars().role == Role::Bubble {
+                return self as *const ImageView as *mut NSView;
+            }
+            unsafe { msg_send![super(self), hitTest: point] }
+        }
+
         #[unsafe(method(mouseDown:))]
         fn mouse_down(&self, _event: &NSEvent) {
-            if self.ivars().role == Role::FloatingMic {
-                with_icon(|s| s.press());
+            match self.ivars().role {
+                Role::FloatingMic => with_icon(|s| s.press()),
+                Role::Bubble => with_icon(|s| KEPT_PRESS.with(|p| p.set(kept_button_under_pointer(s.mtm)))),
+                Role::BesideMic => {}
             }
         }
 
@@ -103,7 +117,13 @@ define_class!(
                         let _ = events.send(PlatformEvent::ToggleRequested);
                     }
                 }),
-                Role::Picture => {}
+                // A button counts when the press started and ended on it.
+                Role::Bubble => with_icon(|s| {
+                    let pressed = KEPT_PRESS.with(Cell::take);
+                    if let Some(button) = pressed.filter(|b| kept_button_under_pointer(s.mtm) == Some(*b)) {
+                        let _ = s.events.send(PlatformEvent::KeptButton(button));
+                    }
+                }),
             }
         }
 
@@ -155,8 +175,18 @@ define_class!(
 
         #[unsafe(method(resetCursorRects))]
         fn reset_cursor_rects(&self) {
-            if self.ivars().role != Role::Picture {
-                self.addCursorRect_cursor(self.bounds(), &NSCursor::pointingHandCursor());
+            match self.ivars().role {
+                Role::FloatingMic | Role::BesideMic => {
+                    self.addCursorRect_cursor(self.bounds(), &NSCursor::pointingHandCursor());
+                }
+                Role::Bubble => {
+                    if let Some(hit) = KEPT.with(Cell::get) {
+                        let l = hit.layout;
+                        for area in [l.copy, l.insert, l.close] {
+                            self.addCursorRect_cursor(flipped(area, l.height), &NSCursor::pointingHandCursor());
+                        }
+                    }
+                }
             }
         }
     }
@@ -258,6 +288,55 @@ pub fn screen_frames(mtm: MainThreadMarker) -> Vec<Rect> {
 fn cursor(mtm: MainThreadMarker) -> (i32, i32) {
     let p = NSEvent::mouseLocation();
     (p.x.round() as i32, (main_screen_height(mtm) - p.y).round() as i32)
+}
+
+/// Where the kept words' bubble is and what is in it (plan C11), for its view's clicks.
+#[derive(Clone, Copy)]
+struct KeptHit {
+    layout: Layout,
+    /// The bubble's top-left corner (top-left space).
+    origin: (i32, i32),
+}
+
+thread_local! {
+    /// Set while the bubble shows kept words.
+    static KEPT: Cell<Option<KeptHit>> = const { Cell::new(None) };
+    /// The kept words' button the press started on.
+    static KEPT_PRESS: Cell<Option<KeptButton>> = const { Cell::new(None) };
+}
+
+/// The kept words' button under the pointer, while the bubble shows them.
+fn kept_button_under_pointer(mtm: MainThreadMarker) -> Option<KeptButton> {
+    let hit = KEPT.with(Cell::get)?;
+    let (x, y) = cursor(mtm);
+    hit.layout.button_at((x - hit.origin.0) as f32, (y - hit.origin.1) as f32)
+}
+
+/// An area of a layout (top-left, y down) as a frame in a view `height` points tall (y up).
+fn flipped(a: Area, height: f32) -> NSRect {
+    NSRect::new(
+        NSPoint::new(f64::from(a.x), f64::from(height - a.y - a.height)),
+        NSSize::new(f64::from(a.width), f64::from(a.height)),
+    )
+}
+
+fn color(rgb: (u8, u8, u8)) -> Retained<NSColor> {
+    let c = |v: u8| f64::from(v) / 255.0;
+    NSColor::colorWithSRGBRed_green_blue_alpha(c(rgb.0), c(rgb.1), c(rgb.2), 1.0)
+}
+
+/// A one-line label (the kept words' caption wraps, the buttons' do not).
+fn new_label(mtm: MainThreadMarker, size: f64, rgb: (u8, u8, u8), wraps: bool) -> Retained<NSTextField> {
+    let empty = NSString::from_str("");
+    let label = if wraps {
+        NSTextField::wrappingLabelWithString(&empty, mtm)
+    } else {
+        NSTextField::labelWithString(&empty, mtm)
+    };
+    label.setFont(Some(&NSFont::systemFontOfSize(size)));
+    label.setTextColor(Some(&color(rgb)));
+    label.setHidden(true);
+    label
 }
 
 /// Puts a panel's top-left corner at `pos` (top-left space).
@@ -424,6 +503,10 @@ struct Bubble {
     panel: Retained<NSPanel>,
     view: Retained<ImageView>,
     label: Retained<NSTextField>,
+    /// The kept words' caption and buttons' labels (plan C11), hidden otherwise.
+    caption: Retained<NSTextField>,
+    copy: Retained<NSTextField>,
+    insert: Retained<NSTextField>,
     shown: bool,
 }
 
@@ -463,20 +546,22 @@ impl Overlay {
         ICON.with(|slot| *slot.borrow_mut() = Some(icon.clone()));
 
         let bubble_size = NSSize::new(BUBBLE_WIDTH, 40.0);
-        let bubble_view = ImageView::new(mtm, bubble_size, Role::Picture);
+        let bubble_view = ImageView::new(mtm, bubble_size, Role::Bubble);
         let label = NSTextField::wrappingLabelWithString(&NSString::from_str(""), mtm);
         label.setFont(Some(&NSFont::systemFontOfSize(BUBBLE_FONT_SIZE)));
-        label.setTextColor(Some(&NSColor::colorWithSRGBRed_green_blue_alpha(
-            0x1f as f64 / 255.0,
-            0x29 as f64 / 255.0,
-            0x37 as f64 / 255.0,
-            1.0,
-        )));
+        label.setTextColor(Some(&color(kept_bubble::TEXT_COLOR)));
         label.setMaximumNumberOfLines(2);
         label.setPreferredMaxLayoutWidth(BUBBLE_WIDTH - BUBBLE_PADDING * 2.0);
         bubble_view.addSubview(&label);
+        let caption = new_label(mtm, BUBBLE_FONT_SIZE - 2.0, kept_bubble::CAPTION_COLOR, true);
+        caption.setPreferredMaxLayoutWidth(f64::from(CAPTION_WIDTH));
+        let copy = new_label(mtm, BUBBLE_FONT_SIZE - 1.0, kept_bubble::COPY_LABEL_COLOR, false);
+        let insert = new_label(mtm, BUBBLE_FONT_SIZE - 1.0, kept_bubble::INSERT_LABEL_COLOR, false);
+        for extra in [&caption, &copy, &insert] {
+            bubble_view.addSubview(extra);
+        }
         let bubble_panel = new_panel(mtm, bubble_size, &bubble_view, true);
-        let bubble = Bubble { panel: bubble_panel, view: bubble_view, label, shown: false };
+        let bubble = Bubble { panel: bubble_panel, view: bubble_view, label, caption, copy, insert, shown: false };
         Overlay { icon, bubble, shown: false }
     }
 
@@ -580,6 +665,7 @@ impl Overlay {
 
     /// At most `max_lines`; a longer text loses its start (live text: the latest words matter).
     pub fn show_bubble(&mut self, text: &str, max_lines: i32) {
+        self.leave_kept();
         let mtm = self.icon.mtm;
         let inner = BUBBLE_WIDTH - BUBBLE_PADDING * 2.0;
         let max_height = self.text_height("Xg", inner) * f64::from(max_lines) + 1.0;
@@ -620,7 +706,85 @@ impl Overlay {
         }
     }
 
+    /// The kept words' bubble (plan C11) above the mic, with its buttons.
+    pub fn show_kept(&mut self, words: &str) {
+        let mtm = self.icon.mtm;
+        let b = &self.bubble;
+        // The words: at most TEXT_LINES, the latest, as the speech bubble shows them.
+        b.label.setMaximumNumberOfLines(TEXT_LINES as isize);
+        let width = f64::from(TEXT_WIDTH);
+        let max_height = self.text_height("Xg", width) * f64::from(TEXT_LINES) + 1.0;
+        let mut shown = words.to_string();
+        let mut limit = words.chars().count();
+        let words_height = loop {
+            let h = self.text_height(&shown, width);
+            if h <= max_height || limit <= 4 {
+                break h.min(max_height);
+            }
+            limit = (limit * 4 / 5).max(4);
+            shown = tail(words, limit);
+        };
+        let fit = |label: &NSTextField, text: &str, wrap: f64| {
+            label.setStringValue(&NSString::from_str(text));
+            label.sizeThatFits(NSSize::new(wrap, 10_000.0))
+        };
+        let caption = fit(&b.caption, &t("native_keptCaption"), f64::from(CAPTION_WIDTH));
+        let copy = fit(&b.copy, &t("native_keptCopy"), 10_000.0);
+        let insert = fit(&b.insert, &t("native_keptInsert"), 10_000.0);
+        let layout = kept_bubble::layout(
+            caption.height.ceil() as f32,
+            words_height as f32,
+            copy.width.ceil() as f32,
+            insert.width.ceil() as f32,
+        );
+
+        let size = NSSize::new(f64::from(layout.width), f64::from(layout.height));
+        let scale = b.panel.backingScaleFactor();
+        b.panel.setContentSize(size);
+        b.view.setFrameSize(size);
+        b.view.set_image(image_from(&draw_kept(&layout, scale as f32), size));
+        b.label.setFrame(flipped(layout.text, layout.height));
+        b.caption.setFrame(flipped(layout.caption, layout.height));
+        // A button's label in the middle of its button.
+        let centre = |label: &NSTextField, fits: NSSize, a: Area| {
+            let x = f64::from(a.x) + (f64::from(a.width) - fits.width) / 2.0;
+            let y = f64::from(layout.height - a.y - a.height) + (f64::from(a.height) - fits.height) / 2.0;
+            label.setFrame(NSRect::new(NSPoint::new(x, y), fits));
+        };
+        centre(&b.copy, copy, layout.copy);
+        centre(&b.insert, insert, layout.insert);
+        for extra in [&b.caption, &b.copy, &b.insert] {
+            extra.setHidden(false);
+        }
+
+        let (areas, primary) = work_areas(mtm);
+        let px = (layout.width.round() as i32, layout.height.round() as i32);
+        let at = bubble_position(self.icon.pos.get(), self.icon.size.get(), px, 8, &areas, primary);
+        place(&b.panel, mtm, at, size.height);
+        KEPT.with(|k| k.set(Some(KeptHit { layout, origin: at })));
+        b.panel.setIgnoresMouseEvents(false);
+        b.panel.invalidateCursorRectsForView(&b.view);
+        if !self.bubble.shown {
+            self.bubble.panel.orderFrontRegardless();
+            self.bubble.shown = true;
+        }
+    }
+
+    /// Back to a bubble that only says something: no buttons, and the pointer goes through.
+    fn leave_kept(&mut self) {
+        if KEPT.with(Cell::take).is_none() {
+            return;
+        }
+        let b = &self.bubble;
+        b.panel.setIgnoresMouseEvents(true);
+        b.label.setMaximumNumberOfLines(2);
+        for extra in [&b.caption, &b.copy, &b.insert] {
+            extra.setHidden(true);
+        }
+    }
+
     pub fn hide_bubble(&mut self) {
+        self.leave_kept();
         if self.bubble.shown {
             self.bubble.panel.orderOut(None);
             self.bubble.shown = false;
