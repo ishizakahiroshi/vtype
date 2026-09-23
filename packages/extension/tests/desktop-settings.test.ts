@@ -600,6 +600,40 @@ describe("one settings window at a time", () => {
     expect(closed).toBe(1);
     expect(second.querySelector<HTMLTextAreaElement>("#tpl-list .tpl-edit")?.value).toBe("two");
   });
+
+  it("ignores elements not in NATIVE_FIELDS in draft native fields", async () => {
+    const app = fakeApp();
+    const channel = channels();
+    const ch1 = channel();
+    const second = secondWindow();
+    const extraInput = second.createElement("input");
+    extraInput.id = "malicious-field";
+    extraInput.value = "original";
+    second.body.append(extraInput);
+
+    let openedId = "";
+    ch1.addEventListener("message", (e: any) => {
+      if (e.data?.type === "opened") openedId = e.data.id;
+    });
+
+    await initSettingsPage({ doc: second, href: PAGE, fetch: app.fetch, language: "en", channel: channel(), openedAt: 2 }).loaded;
+    await settle();
+
+    ch1.postMessage({
+      type: "draft",
+      to: openedId,
+      draft: {
+        native: {
+          "malicious-field": "injected-value",
+          "nc-hotkey": "Ctrl+Shift+F9",
+        },
+      },
+    });
+    await settle();
+
+    expect(extraInput.value).toBe("original");
+    expect((second.getElementById("nc-hotkey") as HTMLInputElement).value).toBe("Ctrl+Shift+F9");
+  });
 });
 
 describe("About vtype on the desktop settings page", () => {

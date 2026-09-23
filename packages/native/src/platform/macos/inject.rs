@@ -77,19 +77,40 @@ pub fn type_text(text: &str) -> bool {
     })
 }
 
-/// Puts the text on the clipboard, presses Cmd+V, and brings back what was there (text only;
-/// anything else is left replaced, which is logged).
+enum PreviousClipboard {
+    Text(String),
+    Image(arboard::ImageData<'static>),
+    Empty,
+}
+
+/// Puts the text on the clipboard, presses Cmd+V, and brings back what was there (text or image;
+/// cleared if it held neither, so typed voice text does not linger on the clipboard).
 pub fn paste_text(text: &str) -> Result<(), PlatformError> {
     let mut clipboard = arboard::Clipboard::new().map_err(PlatformError::failed)?;
-    let previous = clipboard.get_text().ok();
+    let previous = match clipboard.get_text() {
+        Ok(t) => PreviousClipboard::Text(t),
+        Err(_) => match clipboard.get_image() {
+            Ok(img) => PreviousClipboard::Image(arboard::ImageData {
+                width: img.width,
+                height: img.height,
+                bytes: std::borrow::Cow::Owned(img.bytes.into_owned()),
+            }),
+            Err(_) => PreviousClipboard::Empty,
+        },
+    };
     clipboard.set_text(text.to_string()).map_err(PlatformError::failed)?;
     let pressed = press(KEY_V, None, CGEventFlags::MaskCommand);
     thread::sleep(PASTE_RESTORE_DELAY);
     match previous {
-        Some(old) => {
+        PreviousClipboard::Text(old) => {
             let _ = clipboard.set_text(old);
         }
-        None => tracing::info!("the clipboard held no text before; it keeps the pasted text"),
+        PreviousClipboard::Image(img) => {
+            let _ = clipboard.set_image(img);
+        }
+        PreviousClipboard::Empty => {
+            let _ = clipboard.clear();
+        }
     }
     if pressed {
         Ok(())

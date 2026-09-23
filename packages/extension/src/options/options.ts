@@ -91,6 +91,7 @@ export function initOptionsPage(options: OptionsPageOptions = {}): void {
   const storage = options.storage !== undefined ? options.storage : extensionStorage();
   const t = translator(options.language ?? globalThis.navigator?.language);
 
+  doc.title = t("optionsTitle");
   setText(doc, "title", t("optionsTitle"));
   setText(doc, "lead", t("optionsLead"));
   setText(doc, "legend", t("optionsLegend"));

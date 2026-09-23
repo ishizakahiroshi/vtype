@@ -63,23 +63,39 @@ export function submitFrom(field: Element): SubmitResult {
   if (resolveTarget(field) !== field || !field.isConnected) return { submitted: false, path: "none" };
 
   const form = formOf(field);
-  if (form !== null && typeof form.requestSubmit === "function") {
-    let submitEventSeen = false;
-    const onSubmit = (): void => {
-      submitEventSeen = true;
-    };
-    form.addEventListener("submit", onSubmit, { capture: true });
-    try {
-      form.requestSubmit();
-    } catch {
-      // e.g. a detached form; treated as "not submitted" below
-    } finally {
-      form.removeEventListener("submit", onSubmit, { capture: true });
+  if (form !== null) {
+    const view = (form.ownerDocument.defaultView ?? globalThis) as typeof globalThis;
+    const formProto = view.HTMLFormElement?.prototype;
+    const eventProto = view.EventTarget?.prototype;
+    const requestSubmit =
+      typeof form.requestSubmit === "function" ? form.requestSubmit : formProto?.requestSubmit;
+    const addListener =
+      typeof form.addEventListener === "function" ? form.addEventListener : eventProto?.addEventListener;
+    const removeListener =
+      typeof form.removeEventListener === "function" ? form.removeEventListener : eventProto?.removeEventListener;
+
+    if (typeof requestSubmit === "function") {
+      let submitEventSeen = false;
+      const onSubmit = (): void => {
+        submitEventSeen = true;
+      };
+      try {
+        addListener.call(form, "submit", onSubmit, { capture: true });
+        requestSubmit.call(form);
+      } catch {
+        // e.g. a detached form; treated as "not submitted" below
+      } finally {
+        try {
+          removeListener.call(form, "submit", onSubmit, { capture: true });
+        } catch {
+          // ignore
+        }
+      }
+      if (submitEventSeen) return { submitted: true, path: "requestSubmit" };
+      // The form exists but refused (HTML validation): do not fall through to Enter, which
+      // would try to submit the same form behind the validation.
+      return { submitted: false, path: "none" };
     }
-    if (submitEventSeen) return { submitted: true, path: "requestSubmit" };
-    // The form exists but refused (HTML validation): do not fall through to Enter, which
-    // would try to submit the same form behind the validation.
-    return { submitted: false, path: "none" };
   }
 
   return pressEnter(field) ? { submitted: true, path: "enter-key" } : { submitted: false, path: "none" };

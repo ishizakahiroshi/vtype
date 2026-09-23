@@ -108,6 +108,30 @@ describe("offscreen document lifecycle", () => {
     const last = inbox.get("1:0")?.at(-1) as { event: unknown };
     expect(last.event).toEqual({ kind: "ended", reason: "error", code: "offscreen-unavailable" });
   });
+
+  it("closes offscreen document after idle duration once session ends", async () => {
+    hub.startBackground();
+    listen(1, 0);
+    await send(1, 0, { target: "background", type: "start", sessionId: "a" });
+    const sr = FakeSpeechRecognition.started();
+    sr.fireStart();
+    expect(hub.closeDocumentCalls).toHaveLength(0);
+    expect(hub.offscreenOpen).toBe(true);
+
+    await send(1, 0, { target: "background", type: "stop", sessionId: "a" });
+    sr.fireEnd();
+    await flush(vi);
+
+    // Before idle timeout
+    vi.advanceTimersByTime(29_000);
+    expect(hub.closeDocumentCalls).toHaveLength(0);
+
+    // After idle timeout (30s)
+    vi.advanceTimersByTime(2_000);
+    await flush(vi);
+    expect(hub.closeDocumentCalls).toHaveLength(1);
+    expect(hub.offscreenOpen).toBe(false);
+  });
 });
 
 describe("routing to the requesting frame", () => {

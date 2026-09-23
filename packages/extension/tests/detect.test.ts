@@ -186,6 +186,16 @@ describe("resolveTarget: password is excluded structurally", () => {
       expect(resolveTarget(input)).toBeNull();
     },
   );
+
+  it("a textarea with password autocomplete is not a target", () => {
+    const ta = pick(mount(`<textarea autocomplete="current-password"></textarea>`), "textarea");
+    expect(resolveTarget(ta)).toBeNull();
+  });
+
+  it("an element masked by -webkit-text-security style is not a target", () => {
+    const input = pick(mount(`<input type="text" style="-webkit-text-security: disc">`), "input");
+    expect(resolveTarget(input)).toBeNull();
+  });
 });
 
 describe("resolveTarget: other exclusions", () => {

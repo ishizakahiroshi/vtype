@@ -95,6 +95,7 @@ export class FakeChromeHub {
   readonly toOffscreen: unknown[] = [];
   readonly createdTabs: string[] = [];
   readonly createDocumentCalls: string[] = [];
+  readonly closeDocumentCalls: number[] = [];
   readonly removedListeners: Array<(tabId: number) => void> = [];
   readonly installedListeners: Array<(d: { reason: string }) => void> = [];
   offscreenOpen = false;
@@ -160,6 +161,12 @@ export class FakeChromeHub {
           hub.openOffscreen();
         },
         hasDocument: async () => hub.offscreenOpen,
+        closeDocument: async () => {
+          hub.closeDocumentCalls.push(Date.now());
+          hub.offscreenOpen = false;
+          hub.offscreen = null;
+          hub.offscreenListeners.length = 0;
+        },
       },
     };
     if (this.withGetContexts) {

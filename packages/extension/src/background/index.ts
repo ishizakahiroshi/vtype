@@ -75,6 +75,7 @@ export interface BackgroundChrome {
   offscreen: {
     createDocument(params: { url: string; reasons: string[]; justification: string }): Promise<void>;
     hasDocument?: () => Promise<boolean>;
+    closeDocument?: () => Promise<void>;
   };
   /** Absent in a browser without it and in the older tests; the diagnostic log is then off. */
   storage?: StorageView;
@@ -86,10 +87,36 @@ export interface Background {
   ensureOffscreen(): Promise<void>;
 }
 
-export function createBackground(chrome: BackgroundChrome): Background {
+export interface BackgroundOptions {
+  /** Idle duration in ms before closing offscreen document after sessions end. 0 to disable. Default: 30000ms. */
+  idleCloseMs?: number;
+}
+
+export function createBackground(chrome: BackgroundChrome, options: BackgroundOptions = {}): Background {
   const offscreenUrl = chrome.runtime.getURL(OFFSCREEN_PATH);
+  const idleCloseMs = options.idleCloseMs ?? 30_000;
   let creating: Promise<void> | null = null;
   let lastOffscreenCheck: Background["lastOffscreenCheck"] = null;
+  let activeSessions = 0;
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function cancelIdleClose(): void {
+    if (idleTimer !== null) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+  }
+
+  function scheduleIdleClose(): void {
+    if (idleCloseMs <= 0 || typeof chrome.offscreen.closeDocument !== "function") return;
+    cancelIdleClose();
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      if (activeSessions === 0 && typeof chrome.offscreen.closeDocument === "function") {
+        void chrome.offscreen.closeDocument().catch(() => undefined);
+      }
+    }, idleCloseMs);
+  }
 
   async function offscreenExists(): Promise<boolean> {
     // getContexts (Chrome 116+) is the documented way; hasDocument is the older API.
@@ -203,12 +230,16 @@ export function createBackground(chrome: BackgroundChrome): Background {
   }
 
   async function start(sessionId: string, owner: TabOwner): Promise<void> {
+    cancelIdleClose();
+    activeSessions++;
     diag(`start requested tab=${owner.tabId} frame=${owner.frameId}`);
     try {
       await ensureOffscreen();
       await inputSettingsRead;
       await toOffscreen({ target: "offscreen", type: "start", sessionId, owner, mode: inputMode, rules });
     } catch {
+      activeSessions = Math.max(0, activeSessions - 1);
+      if (activeSessions === 0) scheduleIdleClose();
       await toContent(owner, sessionId, { kind: "ended", reason: "error", code: "offscreen-unavailable" }).catch(
         () => undefined,
       );
@@ -242,6 +273,10 @@ export function createBackground(chrome: BackgroundChrome): Background {
     if (isOffscreenToBackground(message)) {
       const { sessionId, owner, event } = message;
       diag(describeSessionEvent(event));
+      if (event.kind === "ended") {
+        activeSessions = Math.max(0, activeSessions - 1);
+        if (activeSessions === 0) scheduleIdleClose();
+      }
       toContent(owner, sessionId, event).catch(() => {
         // The tab navigated away or its frame is gone: nobody will ever stop this session.
         if (event.kind !== "ended") void toOffscreen({ target: "offscreen", type: "abort", sessionId }).catch(() => undefined);

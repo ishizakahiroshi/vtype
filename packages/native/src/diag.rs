@@ -53,6 +53,17 @@ pub struct Snapshot<'a> {
 }
 
 pub fn report(s: &Snapshot<'_>) -> Value {
+    let mut config_val = serde_json::to_value(s.config).unwrap_or_else(|_| json!({}));
+    if let Some(obj) = config_val.as_object_mut() {
+        if obj.contains_key("templates") {
+            obj.insert("templatesCount".to_string(), json!(s.config.templates.len()));
+            obj.remove("templates");
+        }
+        if obj.contains_key("replacements") {
+            obj.insert("replacementsCount".to_string(), json!(s.config.replacements.len()));
+            obj.remove("replacements");
+        }
+    }
     json!({
         "app": "vtype desktop",
         "version": env!("CARGO_PKG_VERSION"),
@@ -60,7 +71,7 @@ pub fn report(s: &Snapshot<'_>) -> Value {
         "connected": s.connected,
         "extensionVersion": s.extension_version,
         "browser": s.browser,
-        "config": s.config,
+        "config": config_val,
         "notes": s.notes.iter().map(|(k, v)| json!({"name": k, "value": v})).collect::<Vec<_>>(),
         "recentErrors": s.errors.entries().collect::<Vec<_>>(),
         "lastFieldCheck": s.field_check,
@@ -143,5 +154,31 @@ mod tests {
                 "version"
             ]
         );
+    }
+
+    #[test]
+    fn masks_templates_and_replacements_in_report() {
+        let mut cfg = NativeConfig::default();
+        cfg.templates = vec!["CONFIDENTIAL TEMPLATE TEXT".to_string()];
+        cfg.replacements = vec![crate::config::ReplacementRule {
+            from: "SECRET_WORD".to_string(),
+            to: "REPLACED_WORD".to_string(),
+        }];
+        let errors = ErrorLog::default();
+        let r = report(&Snapshot {
+            os: "Windows 10.0.26200",
+            config: &cfg,
+            connected: true,
+            extension_version: Some("0.1.0"),
+            browser: Some("Chrome 140"),
+            errors: &errors,
+            notes: &[],
+            field_check: None,
+        });
+        let config_str = r["config"].to_string();
+        assert!(!config_str.contains("CONFIDENTIAL"));
+        assert!(!config_str.contains("SECRET_WORD"));
+        assert_eq!(r["config"]["templatesCount"], 1);
+        assert_eq!(r["config"]["replacementsCount"], 1);
     }
 }

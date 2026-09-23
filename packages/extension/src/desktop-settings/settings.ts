@@ -630,6 +630,7 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
     if (config === null) return;
     if (typeof d.replacements === "string" && replText !== null) replText.value = d.replacements;
     for (const [id, value] of Object.entries(d.native ?? {})) {
+      if (!NATIVE_FIELDS.includes(id)) continue;
       const input = el(id, HTMLInputElement);
       const select = el(id, HTMLSelectElement);
       if (input !== null && input.type === "checkbox" && typeof value === "boolean") input.checked = value;

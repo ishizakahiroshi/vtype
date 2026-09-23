@@ -27,7 +27,7 @@ use crate::ipc;
 use crate::menu;
 use crate::overlay_logic;
 use crate::platform::{
-    Anchor, EditKeys, FieldProbe, IconState, InjectOutcome, KeptButton, MenuAction, MicButton, MicPart, Platform,
+    Anchor, EditKeys, FieldInfo, FieldProbe, IconState, InjectOutcome, KeptButton, MenuAction, MicButton, MicPart, Platform,
     PlatformError, PlatformEvent, Rect, TrayState, VoiceCue, MESSAGE_HOLD,
 };
 use crate::protocol::{FromExtension, InputMode, Reply, Request, SessionEvent, ToExtension};
@@ -106,6 +106,23 @@ enum Put {
     Refused,
     /// On the clipboard for the user to paste (they could not be typed).
     Copied,
+}
+
+/// Whether `field` is a password field or a security credential dialog that must not receive text.
+fn is_protected_field(field: &FieldInfo) -> bool {
+    if field.is_password == Some(true) {
+        return true;
+    }
+    if let Some(app) = field.app_id.as_deref() {
+        let app_lower = app.to_ascii_lowercase();
+        if app_lower == "credentialuibroker.exe"
+            || app_lower == "consent.exe"
+            || app_lower == "logonui.exe"
+        {
+            return true;
+        }
+    }
+    false
 }
 
 pub struct Core {
@@ -519,7 +536,7 @@ impl Core {
             MicButton::Clear => {
                 let field = self.platform.focused_field();
                 // Only an editable text field: Ctrl+A in a file list or a document selects far more.
-                if field.is_text_field == Some(true) && field.is_password != Some(true) {
+                if field.is_text_field == Some(true) && !is_protected_field(&field) {
                     self.press(EditKeys::ClearField);
                 } else {
                     self.platform.tell(&t("native_bubbleClearNotField"), MESSAGE_HOLD, false);
@@ -1052,7 +1069,7 @@ impl Core {
             return Put::In;
         }
         let field = self.platform.focused_field();
-        if field.is_password == Some(true) {
+        if is_protected_field(&field) {
             tracing::info!(len = text.chars().count(), "password field in front; not inserting");
             self.platform.tell(&t("native_notifyPasswordField"), MESSAGE_HOLD, true);
             return Put::Refused;
@@ -2410,6 +2427,22 @@ pub mod tests {
         h.connect();
         *h.fake.field.lock().unwrap() =
             FieldInfo { is_password: Some(true), caret_rect: Some(Rect::default()), app_id: None, is_text_field: None };
+        h.ext(json!({"type":"session","event":{"kind":"final","text":"secret words"}}));
+        let calls = h.fake.take();
+        assert!(!calls.iter().any(|c| c.starts_with("inject")));
+        assert!(calls.contains(&format!("tell {} 6s notify=true", t("native_notifyPasswordField"))));
+    }
+
+    #[test]
+    fn never_types_into_a_credential_dialog() {
+        let mut h = Harness::new();
+        h.connect();
+        *h.fake.field.lock().unwrap() = FieldInfo {
+            is_password: None,
+            caret_rect: Some(Rect::default()),
+            app_id: Some("CredentialUIBroker.exe".into()),
+            is_text_field: Some(true),
+        };
         h.ext(json!({"type":"session","event":{"kind":"final","text":"secret words"}}));
         let calls = h.fake.take();
         assert!(!calls.iter().any(|c| c.starts_with("inject")));

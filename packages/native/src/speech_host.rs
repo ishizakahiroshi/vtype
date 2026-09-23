@@ -16,8 +16,9 @@
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender, TryRecvError};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -34,6 +35,25 @@ use crate::speech_assets::asset;
 
 /// Tried in order; the first free one is used.
 pub const SPEECH_PORTS: [u16; 3] = [47213, 47214, 47215];
+
+/// Maximum simultaneous connections to prevent thread exhaustion / DoS.
+const MAX_CONCURRENT_CONNECTIONS: usize = 16;
+
+struct ConnGuard(Arc<AtomicUsize>);
+impl Drop for ConnGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+fn valid_host(host_header: Option<&str>, port: u16) -> bool {
+    let Some(host) = host_header else { return false };
+    let host = host.trim().to_ascii_lowercase();
+    host == "127.0.0.1"
+        || host == "localhost"
+        || host == format!("127.0.0.1:{port}")
+        || host == format!("localhost:{port}")
+}
 
 /// A request's line and headers may not be longer than this.
 const HEAD_LIMIT: usize = 8 * 1024;
@@ -78,14 +98,23 @@ fn start_on(ports: &[u16], tx: Sender<Event>) -> Result<SpeechHost> {
     let host = SpeechHost { port, token: new_token()? };
     let token = host.token.clone();
     let origin = host.origin();
+    let active_conns = Arc::new(AtomicUsize::new(0));
     tracing::info!(port, "speech page server listening");
     thread::spawn(move || {
         for stream in listener.incoming() {
             match stream {
                 Ok(stream) => {
+                    if active_conns.load(Ordering::SeqCst) >= MAX_CONCURRENT_CONNECTIONS {
+                        tracing::warn!("speech page connection dropped: max connections reached");
+                        drop(stream);
+                        continue;
+                    }
+                    active_conns.fetch_add(1, Ordering::SeqCst);
+                    let guard = ConnGuard(active_conns.clone());
                     let (tx, token, origin) = (tx.clone(), token.clone(), origin.clone());
                     thread::spawn(move || {
-                        if let Err(e) = serve(stream, &token, &origin, tx) {
+                        let _guard = guard;
+                        if let Err(e) = serve(stream, port, &token, &origin, tx) {
                             tracing::debug!(error = %e, "speech page connection ended");
                         }
                     });
@@ -191,9 +220,13 @@ fn not_found(stream: &mut TcpStream) -> io::Result<()> {
     respond(stream, "404 Not Found", "text/plain; charset=utf-8", b"not found")
 }
 
-fn serve(mut stream: TcpStream, token: &str, origin: &str, tx: Sender<Event>) -> io::Result<()> {
+fn serve(mut stream: TcpStream, port: u16, token: &str, origin: &str, tx: Sender<Event>) -> io::Result<()> {
     stream.set_read_timeout(Some(HEAD_TIMEOUT))?;
     let Some(head) = read_head(&mut stream)? else { return Ok(()) };
+    let host_hdr = head.headers.get("host").map(String::as_str);
+    if !valid_host(host_hdr, port) {
+        return refuse(&mut stream, "403 Forbidden", b"forbidden");
+    }
     // Everything that is not this start's token gets the same answer.
     let Some(name) =
         head.path.strip_prefix("/t/").and_then(|p| p.strip_prefix(token)).and_then(|p| p.strip_prefix('/'))
@@ -737,6 +770,17 @@ mod tests {
         let (h, rx) = host();
         let err = socket(&h, &format!("/t/{}/ws", "0".repeat(32)), &h.origin()).unwrap_err();
         assert!(matches!(err, tungstenite::Error::Http(ref r) if r.status() == 404), "{err:?}");
+        assert!(rx.recv_timeout(Duration::from_millis(300)).is_err());
+    }
+
+    #[test]
+    fn a_dns_rebinding_host_header_is_refused() {
+        let (h, rx) = host();
+        let (head, _) = raw(
+            &h,
+            &format!("GET /t/{}/speech HTTP/1.1\r\nHost: evil.attacker.com\r\n\r\n", h.token),
+        );
+        assert!(head.starts_with("HTTP/1.1 403"), "{head}");
         assert!(rx.recv_timeout(Duration::from_millis(300)).is_err());
     }
 }

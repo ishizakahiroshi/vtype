@@ -36,6 +36,7 @@ export function initPermissionPage(options: PermissionPageOptions = {}): void {
     options.queryMicrophone ??
     (async () => (await nav.permissions.query({ name: "microphone" as PermissionName })).state);
 
+  doc.title = t("permissionTitle");
   setText(doc, "title", t("permissionTitle"));
   setText(doc, "lead", t("permissionLead"));
   // Before the button on purpose: the user decides with the audio's destination in view.

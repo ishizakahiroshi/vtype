@@ -72,10 +72,10 @@ pub fn autostart_here() {
     }
 }
 
-/// Where chrome.exe is: the App Paths registration (per user, then per machine), then the usual
+/// Where chrome.exe is: the App Paths registration (per machine, then per user), then the usual
 /// install folders.
 pub fn find_chrome() -> Option<PathBuf> {
-    for hive in [Hive::CurrentUser, Hive::LocalMachine] {
+    for hive in [Hive::LocalMachine, Hive::CurrentUser] {
         if let Ok(Some(path)) = win_registry::get_string(hive, CHROME_APP_PATH, None) {
             let path = PathBuf::from(path.trim_matches('"'));
             if path.is_file() {

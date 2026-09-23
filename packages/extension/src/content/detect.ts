@@ -37,8 +37,16 @@ function isTextArea(el: Element): el is HTMLTextAreaElement {
   return el.localName === "textarea" && el.namespaceURI === "http://www.w3.org/1999/xhtml";
 }
 
+function safeGetAttribute(el: Element, name: string): string | null {
+  try {
+    return Element.prototype.getAttribute.call(el, name);
+  } catch {
+    return null;
+  }
+}
+
 function hasPasswordAutocomplete(el: Element): boolean {
-  const value = el.getAttribute("autocomplete");
+  const value = safeGetAttribute(el, "autocomplete");
   if (value === null) return false;
   return value
     .toLowerCase()
@@ -46,16 +54,41 @@ function hasPasswordAutocomplete(el: Element): boolean {
     .some((token) => PASSWORD_AUTOCOMPLETE_TOKENS.has(token));
 }
 
+function isTextSecurityObscured(el: Element): boolean {
+  try {
+    const rawStyle = safeGetAttribute(el, "style");
+    if (rawStyle !== null && /-webkit-text-security\s*:\s*(disc|circle|square)/i.test(rawStyle)) {
+      return true;
+    }
+    const inline = (el as HTMLElement).style?.getPropertyValue?.("-webkit-text-security");
+    if (inline === "disc" || inline === "circle" || inline === "square") return true;
+
+    const win = el.ownerDocument.defaultView;
+    if (!win || typeof win.getComputedStyle !== "function") return false;
+    const style = win.getComputedStyle(el);
+    const sec =
+      style.getPropertyValue?.("-webkit-text-security") ||
+      (style as unknown as { webkitTextSecurity?: string }).webkitTextSecurity;
+    return sec === "disc" || sec === "circle" || sec === "square";
+  } catch {
+    return false;
+  }
+}
+
 function isTextInput(el: HTMLInputElement): boolean {
   // `.type` is the normalized IDL value: a missing or unknown type attribute reads as "text".
   if (!TARGET_INPUT_TYPES.has(el.type.toLowerCase())) return false;
   if (el.readOnly || el.disabled) return false;
   if (hasPasswordAutocomplete(el)) return false;
+  if (isTextSecurityObscured(el)) return false;
   return true;
 }
 
 function isWritableTextArea(el: HTMLTextAreaElement): boolean {
-  return !el.readOnly && !el.disabled;
+  if (el.readOnly || el.disabled) return false;
+  if (hasPasswordAutocomplete(el)) return false;
+  if (isTextSecurityObscured(el)) return false;
+  return true;
 }
 
 /**
@@ -67,7 +100,7 @@ function isWritableTextArea(el: HTMLTextAreaElement): boolean {
  */
 export function isContentEditableElement(el: Element): boolean {
   for (let node: Element | null = el; node !== null; node = node.parentElement) {
-    const value = node.getAttribute("contenteditable");
+    const value = safeGetAttribute(node, "contenteditable");
     if (value === null) continue;
     const v = value.toLowerCase();
     if (v === "" || v === "true" || v === "plaintext-only") return true;
@@ -96,7 +129,11 @@ export function resolveTarget(el: Element | null): TargetField | null {
   if (el === null) return null;
   if (isInput(el)) return isTextInput(el) ? el : null;
   if (isTextArea(el)) return isWritableTextArea(el) ? el : null;
-  return editingHost(el);
+  const host = editingHost(el);
+  if (host === null) return null;
+  if (hasPasswordAutocomplete(host) || hasPasswordAutocomplete(el)) return null;
+  if (isTextSecurityObscured(host) || isTextSecurityObscured(el)) return null;
+  return host;
 }
 
 export function isTargetField(el: Element | null): el is TargetField {
