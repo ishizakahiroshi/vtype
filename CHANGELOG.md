@@ -28,10 +28,40 @@ from it. Releasing turns `## [Unreleased]` into `## [X.Y.Z] - YYYY-MM-DD` and op
   launchers and AutoHotkey, no typing into password fields, and an experimental mic beside the
   text field in use (Windows and macOS, off by default). On Linux: X11 through XTest, Wayland
   through the remote desktop portal, then `ydotool`, then the clipboard.
+- Running `vtype` with no arguments starts the desktop app on every system, not only in the
+  Microsoft Store build, so double-clicking `vtype.exe` from the zip starts it. When it is already
+  running, it opens the settings page instead.
+- Buttons at the corners of the desktop app's floating mic: templates (top left), the input mode
+  (top right; each press goes to the next of normal, English and katakana), send (bottom right;
+  presses Enter, or Ctrl+Enter / ⌘+Enter as chosen on the settings page, in the app in front) and
+  clear the text field (bottom left; only when the system says the cursor is in a text field). The
+  button under the pointer lights up, and resting the pointer on the mic or a button for a moment
+  says what it does. While recording, the middle of the mic turns into ■, and ripples spread around
+  it while you speak.
+- The floating mic's size, from 50% to 500%: hold Ctrl and turn the mouse wheel over it (⌘ works
+  too on macOS), or use the slider on the settings page.
+- "Stop after you finish speaking" on the desktop app's settings page: the recording stops by
+  itself once no new words have come for 1 to 10 seconds (3 by default; Off never stops it).
+  Silence before you start speaking does not count, and stopping sends nothing.
+- On Windows, with the experimental mic beside text fields turned on and set to "when the cursor
+  enters a field", the floating mic itself comes to the text field: next to where you clicked, or
+  to the field Tab moved to, clear of the text and the IME's candidates. Chrome's fields count too
+  ("Also in Chrome's fields"; clear it if the extension is installed as well). About 0.7 seconds
+  after the cursor leaves the text fields, the mic goes back to the bottom-right corner of the
+  screen the pointer is on, but not while recording or while the pointer is on it. Its saved
+  position is not changed.
+- "The mic does not come to this app's text fields" in the floating mic's right-click menu and the
+  tray menu (Windows): it watches the app used last for 10 seconds while you click into one of its
+  text fields, then says in a bubble what it found (for example, that the app reports only its
+  window, or that no text field was found). "Copy diagnostic info" gets the same, as the kind of
+  element, its class name, its position and whether it takes text, never the text in it. It needs
+  the mic beside text fields turned on.
 - Templates in the desktop app: the button at the top left of the floating mic lists them, and
   choosing one puts it into the app in front. Each row has ✏ and ✕ at its right end: ✏ opens that
   template on the settings page, ✕ deletes it at once and leaves "Undo" in its row, with the list
-  still open.
+  still open. Text selected in another app becomes a template with "Save the selection as a
+  template" in the mic's right-click menu. The settings page adds, edits, reorders and deletes them
+  (at most 100), and can press the send key right after one goes in.
 - Words said in the desktop app while the system says no text field has the focus are not typed
   into whatever is in front: they wait in a bubble above the floating mic, with "Copy", "Insert"
   and ✕, held in memory only (never written to disk) until one of them is pressed. When the system

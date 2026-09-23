@@ -631,7 +631,7 @@
     "description": "Options page: experimental mic beside text fields of other apps"
   },
   "optionsNativeBesideHint": {
-    "message": "Windows と macOS だけです。アプリによっては出ません。Windows で「入力欄にカーソルが入ったとき」にすると、いつものマイクがクリックした所や Tab で移った欄の近くへ動き、欄から離れてもそこに残ります。",
+    "message": "Windows と macOS だけです。アプリによっては出ません。Windows で「入力欄にカーソルが入ったとき」にすると、いつものマイクがクリックした所や Tab で移った欄の近くへ動き、入力欄から離れて 0.7 秒ほどたつと画面の右下へ戻ります（録音中と、マウスを乗せている間は戻りません）。",
     "description": "Options page: explains the experimental mic beside fields"
   },
   "optionsNativeBesideTrigger": {

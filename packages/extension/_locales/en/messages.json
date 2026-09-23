@@ -631,7 +631,7 @@
     "description": "Options page: experimental mic beside text fields of other apps"
   },
   "optionsNativeBesideHint": {
-    "message": "Windows and macOS only. It may not appear in every app. On Windows, with \"when the cursor enters a field\", the usual mic moves next to where you clicked or to the field Tab moved to, and stays there after you leave the field.",
+    "message": "Windows and macOS only. It may not appear in every app. On Windows, with \"when the cursor enters a field\", the usual mic moves next to where you clicked or to the field Tab moved to, and goes back to the bottom-right corner about 0.7 seconds after you leave the text fields (not while recording or while the pointer is on it).",
     "description": "Options page: explains the experimental mic beside fields"
   },
   "optionsNativeBesideTrigger": {

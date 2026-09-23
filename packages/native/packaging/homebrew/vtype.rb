@@ -23,6 +23,9 @@ class Vtype < Formula
 
   def caveats
     <<~EOS
+      Start vtype by running:
+        vtype
+
       vtype needs Google Chrome: it starts Chrome in a profile of its own for
       the speech recognition. The first-run screen asks whether to start vtype
       at login (ticked by default); its settings page changes it later. From

@@ -64,6 +64,10 @@ programs, and each works without the other.
   (change it with `vtype settings`)
 - A small mic icon near the bottom right, and a tray / menu bar icon with the same controls
 - Three input modes that stay until you change them: normal, English, katakana
+- Templates: the button at the mic's top left lists saved texts and puts in the one you choose;
+  select text in any app and right-click the mic to save it as one
+- Words said while no text field has the cursor are not typed into whatever is in front: they
+  wait in a bubble above the mic, with **Copy** and **Insert** (click a field, then Insert)
 - Nothing is typed into password fields (on Linux, wherever the desktop's accessibility service
   can tell that it is one)
 - Experimental, off by default (Windows and macOS): a mic beside the text field you are in
@@ -79,10 +83,14 @@ them on a real Mac or Linux machine. If something does not work there, please
 
 ### The first time
 
-1. Start vtype and press the shortcut (or the mic icon). A small Chrome window opens once: read
-   what vtype sends where, press **Agree and start**, and allow the microphone. The window then
-   closes itself, and from then on Chrome runs off screen.
-2. The same window has **Start vtype when you sign in**, ticked to begin with. Leave it ticked and
+1. Start vtype. From the Microsoft Store: open it from the Start menu. From the zip: double-click
+   `vtype.exe` (or run `vtype`). From npm, Homebrew or the tar.gz: run `vtype` in a terminal
+   (`./vtype` in the unpacked folder for the tar.gz). From the `.deb`: it starts at your next
+   sign-in, or run `vtype`. Starting it again while it runs opens the settings page.
+2. Press the shortcut (or the mic icon). A small Chrome window opens once: read what vtype sends
+   where, press **Agree and start**, and allow the microphone. The window then closes itself, and
+   from then on Chrome runs off screen.
+3. The same window has **Start vtype when you sign in**, ticked to begin with. Leave it ticked and
    vtype starts with the OS from then on; clear it and it does not (the Store and `.deb` packages
    start with the OS already, and clearing the box turns that off). To change it later, use the
    same checkbox at the top of the desktop settings on the settings page.
