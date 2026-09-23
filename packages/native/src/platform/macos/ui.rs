@@ -20,8 +20,8 @@ use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, 
 
 use super::overlay::{screen_frames, BesideMic, Overlay};
 use crate::hotkey::HotkeySpec;
-use crate::menu::tooltip;
-use crate::platform::desktop::{build_menu, build_template_menu, to_global_hotkey, tray_icons, update_checks, Timing};
+use crate::menu::{tooltip, TemplateList};
+use crate::platform::desktop::{build_menu, to_global_hotkey, tray_icons, update_checks, Timing};
 use crate::platform::{IconState, MenuAction, PlatformError, PlatformEvent, TrayState, VoiceCue, LIVE_LINES};
 use crate::ripple::FRAME;
 
@@ -100,8 +100,6 @@ pub struct Ui {
     hide_on_fullscreen: bool,
     hidden_for_fullscreen: bool,
     recording: bool,
-    /// The templates menu's entry ids, dropped from the action map when it is rebuilt.
-    template_ids: Vec<String>,
 }
 
 thread_local! {
@@ -199,12 +197,15 @@ impl Ui {
         self.overlay.set_scale(percent);
     }
 
-    /// Builds the templates menu and opens it at the mic from the main queue (it is modal).
-    pub fn show_templates(&mut self, items: Vec<crate::menu::MenuItem>) {
-        let (menu, ids) = build_template_menu(items, &self.shared.menu_actions, &self.template_ids);
-        self.template_ids = ids;
-        self.overlay.set_templates_menu(menu);
+    /// Opens the templates list at the mic from the main queue (it is modal).
+    pub fn show_templates(&mut self, list: TemplateList) {
+        self.overlay.set_templates(list);
         DispatchQueue::main().exec_async(super::overlay::show_templates_menu);
+    }
+
+    /// The daemon's list after a deletion, for the list if it is still open.
+    pub fn refresh_templates(&mut self, list: TemplateList) {
+        super::template_menu::refresh(list);
     }
 
     /// Starts the ripple's ticker if it is not running: a thread that hands each frame to the main
@@ -365,7 +366,6 @@ pub fn run(shared: Arc<Shared>, events: Sender<PlatformEvent>) -> Result<(), Pla
             hide_on_fullscreen: true,
             hidden_for_fullscreen: false,
             recording: false,
-            template_ids: Vec::new(),
         });
     });
 

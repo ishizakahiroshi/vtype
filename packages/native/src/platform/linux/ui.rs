@@ -18,8 +18,8 @@ use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 use super::overlay::Overlay;
 use crate::hotkey::HotkeySpec;
 use crate::linux_setup::Session;
-use crate::menu::tooltip;
-use crate::platform::desktop::{build_menu, build_template_menu, to_global_hotkey, tray_icons, update_checks};
+use crate::menu::{tooltip, TemplateList};
+use crate::platform::desktop::{build_menu, to_global_hotkey, tray_icons, update_checks};
 use crate::platform::{IconState, MenuAction, PlatformError, PlatformEvent, TrayState, VoiceCue, LIVE_LINES};
 
 /// How long the green check stays after text went in.
@@ -75,8 +75,6 @@ pub struct Ui {
     hide_on_fullscreen: bool,
     hidden_for_fullscreen: bool,
     recording: bool,
-    /// The templates menu's entry ids, dropped from the action map when it is rebuilt.
-    template_ids: Vec<String>,
     /// Bumped by each check mark / bubble text, so an older timer knows it is stale.
     done_generation: u64,
     bubble_generation: u64,
@@ -191,13 +189,16 @@ impl Ui {
         }
     }
 
-    /// Builds the templates menu and opens it at the mic from GTK's loop (not inside this job).
-    pub fn show_templates(&mut self, items: Vec<crate::menu::MenuItem>) {
+    /// Opens the templates list at the mic from GTK's loop (not inside this job).
+    pub fn show_templates(&mut self, list: TemplateList) {
         let Some(overlay) = &mut self.overlay else { return };
-        let (menu, ids) = build_template_menu(items, &self.shared.menu_actions, &self.template_ids);
-        self.template_ids = ids;
-        overlay.set_templates_menu(menu);
+        overlay.set_templates(list);
         glib::idle_add_local_once(super::overlay::show_templates_menu);
+    }
+
+    /// The daemon's list after a deletion, for the list if it is still open.
+    pub fn refresh_templates(&mut self, list: TemplateList) {
+        super::template_menu::refresh(list);
     }
 
     pub fn voice_cue(&mut self, cue: VoiceCue) {
@@ -309,7 +310,6 @@ pub fn run(shared: Arc<Shared>, events: Sender<PlatformEvent>, session: Session)
             hide_on_fullscreen: true,
             hidden_for_fullscreen: false,
             recording: false,
-            template_ids: Vec::new(),
             done_generation: 0,
             bubble_generation: 0,
         });

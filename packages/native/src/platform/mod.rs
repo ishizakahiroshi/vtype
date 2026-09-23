@@ -82,6 +82,7 @@ pub enum MenuAction {
     InsertTemplate(usize),
     /// Open the settings page with the template at this index being edited.
     EditTemplate(usize),
+    /// Delete the template at this index at once (the list offers to put it back).
     DeleteTemplate(usize),
     /// Put back the template deleted last.
     UndoDeleteTemplate,
@@ -176,9 +177,14 @@ pub trait Platform: Send + Sync {
     fn copy_selection(&self) -> Result<Option<String>, PlatformError> {
         Err(PlatformError::Failed("copying is not implemented here".into()))
     }
-    /// Opens the templates menu (`crate::menu::template_menu`) at the floating mic. The focus
-    /// goes back to the foreground app when it closes.
-    fn show_templates(&self, _items: &[crate::menu::MenuItem]) {}
+    /// Opens the templates list (`crate::menu::template_list`) at the floating mic. A click on a
+    /// row sends its `MenuAction`; deleting and putting back leave the list open
+    /// (`crate::menu::keeps_list_open`), everything else closes it and gives the focus back to the
+    /// foreground app.
+    fn show_templates(&self, _list: &crate::menu::TemplateList) {}
+    /// The templates changed while the list was open (a deletion, or putting one back): shows
+    /// `list` in its place. Nothing when the list is closed by now.
+    fn refresh_templates(&self, _list: &crate::menu::TemplateList) {}
     fn focused_field(&self) -> FieldInfo;
     fn show_icon(&self, state: IconState, position: Option<(i32, i32)>);
     fn hide_icon(&self);

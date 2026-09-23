@@ -28,6 +28,7 @@ use tray_icon::menu::{ContextMenu, Menu};
 
 use crate::beside_field::{keep_on_screen, BESIDE_SIZE};
 use crate::icon_draw::{draw_floating, draw_icon, draw_rounded_panel};
+use crate::menu::TemplateList;
 use crate::overlay_logic::{
     button_at, button_shown, fits, part_at, resized_position, resolve_position, scaled_size, tail, Gesture, MicButton,
     MicPart, Press, WheelSteps, SCALE_DEFAULT,
@@ -271,8 +272,8 @@ struct IconShared {
     panel: Retained<NSPanel>,
     view: Retained<ImageView>,
     menu: RefCell<Option<Menu>>,
-    /// The templates menu, rebuilt by the UI each time it opens.
-    templates_menu: RefCell<Option<Menu>>,
+    /// The templates list to open next (`show_templates_menu`).
+    templates: RefCell<Option<TemplateList>>,
     look: Cell<IconState>,
     /// The input mode, shown as a badge.
     mode: Cell<InputMode>,
@@ -297,13 +298,13 @@ thread_local! {
     static ICON: RefCell<Option<Rc<IconShared>>> = const { RefCell::new(None) };
 }
 
-/// Opens the templates menu at the mic. Called from the main queue, not from a UI job: the menu
-/// runs a modal loop, and jobs arriving meanwhile must find the UI free.
+/// Opens the templates list at the pointer. Called from the main queue, not from a UI job: the
+/// menu runs a modal loop, and jobs arriving meanwhile must find the UI free.
 pub fn show_templates_menu() {
-    let target = icon_shared().and_then(|s| s.templates_menu.borrow().clone().map(|m| (m, s.view.clone())));
-    if let Some((menu, view)) = target {
-        let view = &*view as *const ImageView as *const c_void;
-        unsafe { menu.show_context_menu_for_nsview(view, None) };
+    let target =
+        icon_shared().and_then(|s| s.templates.borrow_mut().take().map(|list| (list, s.events.clone(), s.mtm)));
+    if let Some((list, events, mtm)) = target {
+        super::template_menu::open(list, events, mtm);
     }
 }
 
@@ -444,7 +445,7 @@ impl Overlay {
             panel,
             view,
             menu: RefCell::new(Some(menu)),
-            templates_menu: RefCell::new(None),
+            templates: RefCell::new(None),
             look: Cell::new(IconState::Idle),
             mode: Cell::new(InputMode::Normal),
             ripple: RefCell::new(Ripple::default()),
@@ -531,8 +532,8 @@ impl Overlay {
         }
     }
 
-    pub fn set_templates_menu(&mut self, menu: Menu) {
-        *self.icon.templates_menu.borrow_mut() = Some(menu);
+    pub fn set_templates(&mut self, list: TemplateList) {
+        *self.icon.templates.borrow_mut() = Some(list);
     }
 
     pub fn set_mode(&mut self, mode: InputMode) {

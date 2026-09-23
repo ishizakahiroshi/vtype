@@ -9,6 +9,7 @@ mod atspi_focus;
 pub mod gnome;
 mod overlay;
 mod system;
+mod template_menu;
 mod ui;
 mod wayland;
 mod x11;
@@ -99,9 +100,14 @@ impl Platform for LinuxPlatform {
         }
     }
 
-    fn show_templates(&self, items: &[crate::menu::MenuItem]) {
-        let items = items.to_vec();
-        self.shared.run(move |ui| ui.show_templates(items));
+    fn show_templates(&self, list: &crate::menu::TemplateList) {
+        let list = list.clone();
+        self.shared.run(move |ui| ui.show_templates(list));
+    }
+
+    fn refresh_templates(&self, list: &crate::menu::TemplateList) {
+        let list = list.clone();
+        self.shared.run(move |ui| ui.refresh_templates(list));
     }
 
     fn focused_field(&self) -> FieldInfo {

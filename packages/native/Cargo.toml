@@ -60,7 +60,7 @@ strip = true
 [target.'cfg(target_os = "macos")'.dependencies]
 dispatch2 = "0.3.1"
 objc2 = "0.6.4"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "NSApplication", "NSColor", "NSControl", "NSCursor", "NSEvent", "NSFont", "NSGraphics", "NSImage", "NSPanel", "NSResponder", "NSRunningApplication", "NSScreen", "NSText", "NSTextField", "NSTrackingArea", "NSView", "NSWindow", "NSWorkspace", "NSParagraphStyle", "NSGraphicsContext", "libc"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "NSApplication", "NSAttributedString", "NSBezierPath", "NSColor", "NSControl", "NSCursor", "NSEvent", "NSFont", "NSGraphics", "NSImage", "NSMenu", "NSMenuItem", "NSPanel", "NSResponder", "NSRunningApplication", "NSScreen", "NSStringDrawing", "NSText", "NSTextField", "NSTrackingArea", "NSView", "NSWindow", "NSWorkspace", "NSParagraphStyle", "NSGraphicsContext", "libc"] }
 objc2-application-services = { version = "0.3.2", default-features = false, features = ["std", "HIServices", "AXUIElement", "AXValue", "AXError", "AXAttributeConstants", "AXRoleConstants", "libc"] }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFArray", "CFBase", "CFCGTypes", "CFDictionary", "CFNumber", "CFString"] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGEvent", "CGEventSource", "CGEventTypes", "CGRemoteOperation", "CGWindow", "CGGeometry"] }
@@ -70,7 +70,7 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 # windows-core: the COM `implement` macro (a focus handler for UI Automation) expands to paths in it.
 windows-core = "0.62.2"
 windows = { version = "0.62.2", features = ["Win32_UI_Accessibility", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant", "Win32_Foundation"] }
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 # One async runtime on Linux: zbus's own async-io (ashpd would bring tokio by default).
 [target.'cfg(target_os = "linux")'.dependencies]

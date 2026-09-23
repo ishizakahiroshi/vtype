@@ -404,10 +404,7 @@ impl Core {
     /// The small buttons around the floating mic.
     fn mic_button(&mut self, button: MicButton) {
         match button {
-            MicButton::Templates => {
-                let deleted = self.deleted_template.as_ref().map(|(_, text)| text.as_str());
-                self.platform.show_templates(&menu::template_menu(&self.config.templates, deleted));
-            }
+            MicButton::Templates => self.platform.show_templates(&self.template_list()),
             MicButton::Mode => {
                 let next = match self.mode {
                     InputMode::Normal => InputMode::En,
@@ -517,32 +514,38 @@ impl Core {
         self.platform.tell(&message, MESSAGE_HOLD, false);
     }
 
-    /// Deletes a template from the templates menu at once (a menu cannot ask first); the menu
-    /// offers to put it back until the next deletion.
+    /// The templates list as it stands, with the one deleted last where it was.
+    fn template_list(&self) -> menu::TemplateList {
+        let deleted = self.deleted_template.as_ref().map(|(index, text)| (*index, text.as_str()));
+        menu::template_list(&self.config.templates, deleted)
+    }
+
+    /// Deletes a template from the templates list at once (it does not ask); the list stays open
+    /// and offers to put it back, until the next deletion.
     fn delete_template(&mut self, index: usize) {
-        if index >= self.config.templates.len() {
-            return;
+        if index < self.config.templates.len() {
+            let text = self.config.templates.remove(index);
+            self.save_config();
+            self.deleted_template = Some((index, text));
         }
-        let text = self.config.templates.remove(index);
-        self.save_config();
-        self.deleted_template = Some((index, text));
-        self.platform.tell(&t("native_bubbleTemplateDeleted"), MESSAGE_HOLD, false);
+        // Always: on Windows the click closed the menu, and this opens it again.
+        self.platform.refresh_templates(&self.template_list());
     }
 
     /// Puts the template deleted last back where it was (or last, when the list got shorter).
     fn undo_delete_template(&mut self) {
-        let Some((index, text)) = self.deleted_template.take() else { return };
-        let message = if self.config.templates.contains(&text) {
-            t("native_bubbleTemplateDuplicate")
-        } else if self.config.templates.len() >= config::MAX_TEMPLATES {
-            t("native_bubbleTemplateFull")
-        } else {
-            let at = index.min(self.config.templates.len());
-            self.config.templates.insert(at, text);
-            self.save_config();
-            t("native_bubbleTemplateRestored")
-        };
-        self.platform.tell(&message, MESSAGE_HOLD, false);
+        if let Some((index, text)) = self.deleted_template.take() {
+            if self.config.templates.contains(&text) {
+                self.platform.tell(&t("native_bubbleTemplateDuplicate"), MESSAGE_HOLD, false);
+            } else if self.config.templates.len() >= config::MAX_TEMPLATES {
+                self.platform.tell(&t("native_bubbleTemplateFull"), MESSAGE_HOLD, false);
+            } else {
+                let at = index.min(self.config.templates.len());
+                self.config.templates.insert(at, text);
+                self.save_config();
+            }
+        }
+        self.platform.refresh_templates(&self.template_list());
     }
 
     fn press(&self, keys: EditKeys) {
@@ -1205,12 +1208,11 @@ pub mod tests {
             self.log("copy selection".into());
             Ok(self.selection.lock().unwrap().clone())
         }
-        fn show_templates(&self, items: &[menu::MenuItem]) {
-            let has = |f: fn(&MenuAction) -> bool| {
-                items.iter().filter(|i| matches!(i, menu::MenuItem::Action { action, .. } if f(action))).count()
-            };
-            let undo = if has(|a| *a == MenuAction::UndoDeleteTemplate) > 0 { " undo" } else { "" };
-            self.log(format!("templates {}{undo}", has(|a| matches!(a, MenuAction::InsertTemplate(_)))));
+        fn show_templates(&self, list: &menu::TemplateList) {
+            self.log(format!("templates {}", describe_list(list)));
+        }
+        fn refresh_templates(&self, list: &menu::TemplateList) {
+            self.log(format!("refresh {}", describe_list(list)));
         }
         fn show_icon(&self, state: IconState, _position: Option<(i32, i32)>) {
             self.log(format!("icon {state:?}"));
@@ -1735,7 +1737,7 @@ pub mod tests {
         h.core.config.templates = vec!["お世話になっております。".into(), "hello".into()];
         h.fake.take();
         h.core.handle(Event::Platform(PlatformEvent::MicButton(MicButton::Templates)));
-        assert_eq!(h.fake.take(), vec!["templates 2"]);
+        assert_eq!(h.fake.take(), vec!["templates お世話になっております。,hello"]);
         // No space in front of a template, even after English words.
         h.core.last_char = Some('d');
         h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::InsertTemplate(1))));
@@ -1758,24 +1760,28 @@ pub mod tests {
     }
 
     #[test]
-    fn a_template_deleted_from_the_menu_can_be_put_back_where_it_was() {
+    fn a_template_deleted_from_the_list_can_be_put_back_where_it_was() {
         let mut h = Harness::new();
         h.connect();
         h.core.config.templates = vec!["a".into(), "b".into(), "c".into()];
         h.fake.take();
         let told = |calls: &[String], key: &str| calls.iter().any(|c| c.contains(&t(key)));
+        let refreshed = |calls: &[String], rows: &str| calls.iter().any(|c| *c == format!("refresh {rows}"));
+        // Gone at once, and the open list shows where it was (no bubble: the list says it).
         h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::DeleteTemplate(1))));
-        assert!(told(&h.fake.take(), "native_bubbleTemplateDeleted"));
+        let calls = h.fake.take();
+        assert!(refreshed(&calls, "a,undo,c"), "{calls:?}");
+        assert!(!calls.iter().any(|c| c.starts_with("tell")), "{calls:?}");
         assert_eq!(h.core.config.templates, vec!["a".to_string(), "c".to_string()]);
-        // The next menu offers to put it back.
+        // Still offered the next time the list opens.
         h.core.handle(Event::Platform(PlatformEvent::MicButton(MicButton::Templates)));
-        assert_eq!(h.fake.take(), vec!["templates 2 undo"]);
+        assert_eq!(h.fake.take(), vec!["templates a,undo,c"]);
         h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::UndoDeleteTemplate)));
-        assert!(told(&h.fake.take(), "native_bubbleTemplateRestored"));
+        assert!(refreshed(&h.fake.take(), "a,b,c"));
         assert_eq!(h.core.config.templates, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
         // Once only.
         h.core.handle(Event::Platform(PlatformEvent::MicButton(MicButton::Templates)));
-        assert_eq!(h.fake.take(), vec!["templates 3"]);
+        assert_eq!(h.fake.take(), vec!["templates a,b,c"]);
         // Put back last when the list got shorter meanwhile; not twice when it came back already.
         h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::DeleteTemplate(2))));
         h.core.config.templates = vec!["x".into()];
@@ -1787,9 +1793,25 @@ pub mod tests {
         h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::UndoDeleteTemplate)));
         assert!(told(&h.fake.take(), "native_bubbleTemplateDuplicate"));
         assert_eq!(h.core.config.templates, vec!["x".to_string(), "c".to_string()]);
-        // An index that is gone does nothing.
+        // An index that is gone deletes nothing, but the list (closed by the click on Windows)
+        // is shown again.
         h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::DeleteTemplate(9))));
-        assert!(h.fake.take().is_empty());
+        assert_eq!(h.fake.take(), vec!["refresh x,c"]);
+        assert_eq!(h.core.config.templates, vec!["x".to_string(), "c".to_string()]);
+    }
+
+    /// The rows of a templates list for the fake's log: each template's label, `undo` for the
+    /// deleted one.
+    fn describe_list(list: &menu::TemplateList) -> String {
+        let rows: Vec<&str> = list
+            .rows
+            .iter()
+            .map(|row| match row {
+                menu::TemplateRow::Template { label, .. } => label.as_str(),
+                menu::TemplateRow::Deleted { .. } => "undo",
+            })
+            .collect();
+        rows.join(",")
     }
 
     #[test]

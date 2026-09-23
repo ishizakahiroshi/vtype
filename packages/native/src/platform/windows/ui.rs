@@ -28,15 +28,14 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use super::overlay::{wide, BesideMic, Overlay};
+use super::template_menu;
 use crate::hotkey::HotkeySpec;
-use crate::menu::tooltip;
-use crate::platform::desktop::{build_menu, build_template_menu, to_global_hotkey, tray_icons, update_checks, Timing};
+use crate::menu::{tooltip, TemplateList};
+use crate::platform::desktop::{build_menu, to_global_hotkey, tray_icons, update_checks, Timing};
 use crate::platform::{IconState, MenuAction, PlatformError, PlatformEvent, TrayState, VoiceCue, LIVE_LINES};
 
 pub const WM_APP_RUN: u32 = WM_APP + 1;
 pub const WM_APP_MENU: u32 = WM_APP + 2;
-/// `WM_APP_MENU`'s wparam for the templates menu.
-pub const MENU_TEMPLATES: WPARAM = 1;
 const TIMER_FULLSCREEN: usize = 1;
 const TIMER_DONE: usize = 2;
 const TIMER_BUBBLE: usize = 3;
@@ -99,9 +98,6 @@ pub struct Ui {
     hide_on_fullscreen: bool,
     hidden_for_fullscreen: bool,
     recording: bool,
-    /// The floating mic's templates menu, rebuilt each time it opens, and its entries' ids.
-    templates_menu: Option<Menu>,
-    template_ids: Vec<String>,
 }
 
 thread_local! {
@@ -149,18 +145,12 @@ unsafe extern "system" fn msg_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         }
         WM_APP_MENU => {
             // Clone what is needed and let go of the borrow: the menu runs a modal loop.
-            // wparam 1 is the templates menu, 0 the main one.
             let target = UI.with(|slot| {
-                slot.try_borrow().ok().and_then(|g| {
-                    g.as_ref().and_then(|u| {
-                        let menu = if wparam == MENU_TEMPLATES { u.templates_menu.clone()? } else { u.menu.clone() };
-                        Some((menu, u.overlay.hwnd()))
-                    })
-                })
+                slot.try_borrow().ok().and_then(|g| g.as_ref().map(|u| (u.menu.clone(), u.overlay.hwnd())))
             });
             if let Some((menu, owner)) = target {
                 // The menu makes the mic's window the foreground one; give it back afterwards, so
-                // a template (or the copy of the selection) goes to the app the user was in.
+                // the copy of the selection comes from the app the user was in.
                 let before = GetForegroundWindow();
                 menu.show_context_menu_for_hwnd(owner as isize, None);
                 if !before.is_null() && before != owner {
@@ -262,12 +252,14 @@ impl Ui {
         self.overlay.voice_cue(cue);
     }
 
-    /// Builds the templates menu and opens it at the mic, outside this borrow (it is modal).
-    pub fn show_templates(&mut self, items: Vec<crate::menu::MenuItem>) {
-        let (menu, ids) = build_template_menu(items, &self.shared.menu_actions, &self.template_ids);
-        self.template_ids = ids;
-        self.templates_menu = Some(menu);
-        unsafe { PostMessageW(self.msg_hwnd, WM_APP_MENU, MENU_TEMPLATES, 0) };
+    /// Opens the templates list at the mic (outside this borrow: it is modal).
+    pub fn show_templates(&mut self, list: TemplateList) {
+        template_menu::show(list);
+    }
+
+    /// Reopens the templates list a deletion closed, with the new rows.
+    pub fn refresh_templates(&mut self, list: TemplateList) {
+        template_menu::refresh(list);
     }
 
     pub fn show_bubble(&mut self, text: &str) {
@@ -399,6 +391,7 @@ pub fn run(shared: Arc<Shared>, events: Sender<PlatformEvent>) -> Result<(), Pla
         }));
     }
 
+    template_menu::init(events.clone());
     let beside = BesideMic::new(events.clone());
     let overlay = Overlay::new(events, msg_hwnd);
     UI.with(|slot| {
@@ -419,8 +412,6 @@ pub fn run(shared: Arc<Shared>, events: Sender<PlatformEvent>) -> Result<(), Pla
             hide_on_fullscreen: true,
             hidden_for_fullscreen: false,
             recording: false,
-            templates_menu: None,
-            template_ids: Vec::new(),
         });
     });
     shared.msg_hwnd.store(msg_hwnd as isize, Ordering::Release);
