@@ -15,7 +15,7 @@ pub const MARGIN: i32 = 16 - (ICON_SIZE - MIC_SIZE) / 2;
 /// The floating mic's size the user chose, in percent of `ICON_SIZE`: typed on the settings page,
 /// or Ctrl+wheel over the mic in `SCALE_STEP`s.
 pub const SCALE_MIN: u16 = 50;
-pub const SCALE_MAX: u16 = 200;
+pub const SCALE_MAX: u16 = 500;
 pub const SCALE_DEFAULT: u16 = 100;
 pub const SCALE_STEP: u16 = 10;
 
@@ -306,7 +306,7 @@ mod tests {
         // A typed size lands on the next ten each way.
         assert_eq!(zoom_scale(95, 1), 100);
         assert_eq!(zoom_scale(95, -1), 90);
-        assert_eq!(zoom_scale(195, 5), SCALE_MAX);
+        assert_eq!(zoom_scale(495, 5), SCALE_MAX);
         assert_eq!(zoom_scale(SCALE_MIN, -1), SCALE_MIN);
         assert_eq!(zoom_scale(120, 0), 120);
         assert_eq!(clamp_scale(10), SCALE_MIN);

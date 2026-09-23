@@ -341,7 +341,7 @@ mod tests {
         let read = |json: &str| serde_json::from_str::<NativeConfig>(json).unwrap().icon.scale;
         assert_eq!(read(r#"{"icon":{"scale":150}}"#), 150);
         assert_eq!(read(r#"{"icon":{"scale":10}}"#), 50);
-        assert_eq!(read(r#"{"icon":{"scale":900}}"#), 200);
+        assert_eq!(read(r#"{"icon":{"scale":900}}"#), 500);
         assert_eq!(read(r#"{"icon":{"scale":"big"}}"#), 100);
         assert_eq!(serde_json::to_value(NativeConfig::default()).unwrap()["icon"]["scale"], 100);
     }

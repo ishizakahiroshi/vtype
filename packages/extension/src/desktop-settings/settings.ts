@@ -111,7 +111,7 @@ export function templateFromHref(href: string): number | null {
 
 /** The floating mic's size in percent: same limits as the desktop app's overlay_logic.rs. */
 export const ICON_SCALE_MIN = 50;
-export const ICON_SCALE_MAX = 200;
+export const ICON_SCALE_MAX = 500;
 export const ICON_SCALE_DEFAULT = 100;
 
 /**

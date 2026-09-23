@@ -242,7 +242,7 @@ describe("the desktop settings page", () => {
     expect(select.value).toBe("10");
   });
 
-  it("saves the mic's size at once, within 50-200 %, and puts it back to 100 %", async () => {
+  it("saves the mic's size at once, within 50-500 %, and puts it back to 100 %", async () => {
     const app = fakeApp({ ...CONFIG, icon: { ...CONFIG.icon, scale: 120 } });
     await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "en" }).loaded;
     const number = $<HTMLInputElement>("nc-icon-scale");
@@ -250,7 +250,7 @@ describe("the desktop settings page", () => {
     const scale = () => (app.calls.at(-1)!.body as { icon: { scale: number } }).icon.scale;
     expect(number.value).toBe("120");
     expect(range.value).toBe("120");
-    expect($("nc-icon-scale-hint").textContent).toBe(translate("settings_iconScaleHint", "en", { min: 50, max: 200 }));
+    expect($("nc-icon-scale-hint").textContent).toBe(translate("settings_iconScaleHint", "en", { min: 50, max: 500 }));
 
     number.value = "137.4";
     number.dispatchEvent(new Event("change"));
@@ -259,8 +259,10 @@ describe("the desktop settings page", () => {
     number.value = "900";
     number.dispatchEvent(new Event("change"));
     await flush();
-    expect(scale()).toBe(200);
-    expect(number.value).toBe("200");
+    expect(scale()).toBe(500);
+    expect(number.value).toBe("500");
+    // The page's own limits are the same as the app's.
+    expect([range.min, range.max, number.min, number.max]).toEqual(["50", "500", "50", "500"]);
 
     // Not a number: nothing is sent and the size shown stays.
     const saves = app.calls.length;
@@ -268,7 +270,7 @@ describe("the desktop settings page", () => {
     number.dispatchEvent(new Event("change"));
     await flush();
     expect(app.calls.length).toBe(saves);
-    expect(number.value).toBe("200");
+    expect(number.value).toBe("500");
 
     // The slider shows the number while it moves and saves when let go.
     range.value = "60";
