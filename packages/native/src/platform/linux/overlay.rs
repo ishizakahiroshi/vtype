@@ -22,8 +22,8 @@ use tray_icon::menu::{ContextMenu, Menu};
 use crate::icon_draw::{draw_floating, draw_rounded_panel, to_premultiplied_bgra};
 use crate::menu::TemplateList;
 use crate::overlay_logic::{
-    button_at, button_shown, fits, part_at, resized_position, resolve_position, scaled_size, tail, Gesture, MicButton,
-    MicPart, Press, WheelSteps, SCALE_DEFAULT,
+    bubble_position, button_at, button_shown, fits, part_at, resized_position, resolve_position, scaled_size, tail,
+    Gesture, MicButton, MicPart, Press, WheelSteps, SCALE_DEFAULT,
 };
 use crate::platform::{IconState, PlatformEvent, Rect, VoiceCue};
 use crate::protocol::InputMode;
@@ -501,17 +501,9 @@ impl Overlay {
         self.bubble.size.set((BUBBLE_WIDTH, height));
         self.bubble.window.resize(BUBBLE_WIDTH, height);
 
-        // Above the mic, right edges lined up, kept on the mic's screen.
-        let (ix, iy) = self.icon.pos.get();
         let (areas, primary) = work_areas();
-        let area = areas
-            .iter()
-            .copied()
-            .find(|a| ix >= a.x && ix < a.x + a.width && iy >= a.y && iy < a.y + a.height)
-            .unwrap_or(primary);
-        let x =
-            (ix + self.icon.size.get() - BUBBLE_WIDTH).clamp(area.x, (area.x + area.width - BUBBLE_WIDTH).max(area.x));
-        let y = (iy - height - 8).max(area.y);
+        let size = (BUBBLE_WIDTH, height);
+        let (x, y) = bubble_position(self.icon.pos.get(), self.icon.size.get(), size, 8, &areas, primary);
         self.bubble.window.move_(x, y);
         self.bubble.window.queue_draw();
         if !self.bubble.shown {

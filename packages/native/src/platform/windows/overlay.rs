@@ -14,11 +14,11 @@ use std::time::Instant;
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
-    CreateCompatibleDC, CreateDIBSection, CreateFontW, DeleteDC, DeleteObject, DrawTextW, EnumDisplayMonitors,
+    CreateCompatibleDC, CreateDIBSection, CreateFontIndirectW, DeleteDC, DeleteObject, DrawTextW, EnumDisplayMonitors,
     GdiFlush, GetDC, GetMonitorInfoW, MonitorFromPoint, ReleaseDC, SelectObject, SetBkMode, SetTextColor, AC_SRC_ALPHA,
-    AC_SRC_OVER, ANTIALIASED_QUALITY, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION, CLIP_DEFAULT_PRECIS,
-    DEFAULT_CHARSET, DIB_RGB_COLORS, DT_CALCRECT, DT_EDITCONTROL, DT_NOPREFIX, DT_WORDBREAK, FF_DONTCARE, FW_NORMAL,
-    HDC, HMONITOR, MONITORINFO, MONITOR_DEFAULTTOPRIMARY, OUT_DEFAULT_PRECIS, TRANSPARENT,
+    AC_SRC_OVER, ANTIALIASED_QUALITY, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION, DIB_RGB_COLORS, DT_CALCRECT,
+    DT_EDITCONTROL, DT_NOPREFIX, DT_WORDBREAK, FW_NORMAL, HDC, HMONITOR, MONITORINFO, MONITOR_DEFAULTTOPRIMARY,
+    TRANSPARENT,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
@@ -27,17 +27,17 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, GetCursorPos, KillTimer, LoadCursorW, PostMessageW, RegisterClassExW, SetCursor,
-    SetTimer, SetWindowPos, ShowWindow, UpdateLayeredWindow, HWND_TOPMOST, IDC_HAND, MA_NOACTIVATE, SWP_NOACTIVATE,
-    SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE, ULW_ALPHA, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE,
-    WM_MOUSEWHEEL, WM_RBUTTONUP, WM_SETCURSOR, WM_TIMER, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    SetTimer, SetWindowPos, ShowWindow, SystemParametersInfoW, UpdateLayeredWindow, HWND_TOPMOST, IDC_HAND,
+    MA_NOACTIVATE, NONCLIENTMETRICSW, SPI_GETNONCLIENTMETRICS, SWP_NOACTIVATE, SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE,
+    ULW_ALPHA, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_RBUTTONUP, WM_SETCURSOR,
+    WM_TIMER, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 use crate::beside_field::{keep_on_screen, BESIDE_SIZE};
 use crate::icon_draw::{draw_floating, draw_icon, draw_rounded_panel, to_premultiplied_bgra};
 use crate::overlay_logic::{
-    button_at, button_shown, fits, part_at, resized_position, resolve_position, scaled_size, tail, Gesture, MicButton,
-    MicPart, Press, WheelSteps, SCALE_DEFAULT,
+    bubble_position, button_at, button_shown, fits, part_at, resized_position, resolve_position, scaled_size, tail,
+    Gesture, MicButton, MicPart, Press, WheelSteps, SCALE_DEFAULT,
 };
 use crate::platform::{IconState, PlatformEvent, Rect, VoiceCue};
 use crate::protocol::InputMode;
@@ -490,46 +490,48 @@ impl Overlay {
     }
 
     /// At most `max_lines`; a longer text loses its start (live text: the latest words matter).
+    /// As wide as the text, up to `BUBBLE_WIDTH`, so it sits centred over the mic.
     pub fn show_bubble(&mut self, text: &str, max_lines: i32) {
         let scale = scale_for(self.icon.hwnd.get());
-        let width = (BUBBLE_WIDTH as f32 * scale).round() as i32;
+        let max_width = (BUBBLE_WIDTH as f32 * scale).round() as i32;
         let pad = (BUBBLE_PADDING as f32 * scale).round() as i32;
         let font_px = (14.0 * scale).round() as i32;
-        let face = wide("Segoe UI");
         unsafe {
-            let font = CreateFontW(
-                -font_px,
+            // The system's message font (Yu Gothic UI on Japanese Windows): "Segoe UI" has no
+            // Japanese, and GDI's stand-in draws the kana shrunk beside the Latin letters.
+            let mut metrics: NONCLIENTMETRICSW = std::mem::zeroed();
+            metrics.cbSize = std::mem::size_of::<NONCLIENTMETRICSW>() as u32;
+            SystemParametersInfoW(
+                SPI_GETNONCLIENTMETRICS,
+                metrics.cbSize,
+                &mut metrics as *mut NONCLIENTMETRICSW as *mut _,
                 0,
-                0,
-                0,
-                FW_NORMAL as i32,
-                0,
-                0,
-                0,
-                DEFAULT_CHARSET as u32,
-                OUT_DEFAULT_PRECIS as u32,
-                CLIP_DEFAULT_PRECIS as u32,
-                ANTIALIASED_QUALITY as u32,
-                FF_DONTCARE as u32,
-                face.as_ptr(),
             );
+            let mut logfont = metrics.lfMessageFont;
+            logfont.lfHeight = -font_px;
+            logfont.lfWidth = 0;
+            logfont.lfWeight = FW_NORMAL as i32;
+            // Not ClearType: its colored fringes are wrong on a layered window's alpha.
+            logfont.lfQuality = ANTIALIASED_QUALITY;
+            let font = CreateFontIndirectW(&logfont);
             // Measure: at most `max_lines`; drop the start until it fits.
             let screen = GetDC(null_mut());
             let measure = CreateCompatibleDC(screen);
             let old_font = SelectObject(measure, font);
             let flags = DT_WORDBREAK | DT_EDITCONTROL | DT_NOPREFIX;
             let mut one = wide("Xg");
-            let mut line = RECT { left: 0, top: 0, right: width - pad * 2, bottom: 0 };
+            let mut line = RECT { left: 0, top: 0, right: max_width - pad * 2, bottom: 0 };
             DrawTextW(measure, one.as_mut_ptr(), -1, &mut line, flags | DT_CALCRECT);
             let max_height = line.bottom * max_lines + 1;
             let mut shown = text.to_string();
             let mut limit = text.chars().count();
-            let text_height = loop {
+            // DT_CALCRECT narrows `right` to the widest line when the text is shorter.
+            let (text_width, text_height) = loop {
                 let mut w = wide(&shown);
-                let mut r = RECT { left: 0, top: 0, right: width - pad * 2, bottom: 0 };
+                let mut r = RECT { left: 0, top: 0, right: max_width - pad * 2, bottom: 0 };
                 DrawTextW(measure, w.as_mut_ptr(), -1, &mut r, flags | DT_CALCRECT);
                 if r.bottom <= max_height || limit <= 4 {
-                    break r.bottom.min(max_height);
+                    break (r.right.min(max_width - pad * 2), r.bottom.min(max_height));
                 }
                 limit = (limit * 4 / 5).max(4);
                 shown = tail(text, limit);
@@ -538,19 +540,13 @@ impl Overlay {
             DeleteDC(measure);
             ReleaseDC(null_mut(), screen);
 
-            let height = text_height + pad * 2;
+            let (width, height) = (text_width + pad * 2, text_height + pad * 2);
             let panel = draw_rounded_panel(width as u32, height as u32, 10.0 * scale, (255, 255, 255, 250));
             let alpha: Vec<u8> = panel.data().as_chunks::<4>().0.iter().map(|p| p[3]).collect();
-            let (ix, iy) = self.icon.pos.get();
-            let size = self.icon.size.get();
             let (areas, primary) = work_areas();
-            let area = areas
-                .iter()
-                .copied()
-                .find(|a| ix >= a.x && ix < a.x + a.width && iy >= a.y && iy < a.y + a.height)
-                .unwrap_or(primary);
-            let x = (ix + size - width).clamp(area.x, area.x + area.width - width);
-            let y = (iy - height - (8.0 * scale) as i32).max(area.y);
+            let gap = (8.0 * scale) as i32;
+            let (x, y) =
+                bubble_position(self.icon.pos.get(), self.icon.size.get(), (width, height), gap, &areas, primary);
             update_layered(self.bubble, x, y, width, height, &to_premultiplied_bgra(&panel), |dc, pixels| {
                 let old = SelectObject(dc, font);
                 SetBkMode(dc, TRANSPARENT as i32);

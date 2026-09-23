@@ -196,6 +196,28 @@ pub fn resolve_position(saved: Option<(i32, i32)>, size: i32, work_areas: &[Rect
     }
 }
 
+/// Where the bubble (`size`: width, height) goes: centred over the mic at `icon` (the window's top
+/// left, `icon_size` wide), `gap` above it, pushed back onto the mic's screen at the edges.
+pub fn bubble_position(
+    icon: (i32, i32),
+    icon_size: i32,
+    size: (i32, i32),
+    gap: i32,
+    work_areas: &[Rect],
+    primary: Rect,
+) -> (i32, i32) {
+    let (ix, iy) = icon;
+    let (width, height) = size;
+    let area = work_areas
+        .iter()
+        .copied()
+        .find(|a| ix >= a.x && ix < a.x + a.width && iy >= a.y && iy < a.y + a.height)
+        .unwrap_or(primary);
+    let x = (ix + (icon_size - width) / 2).clamp(area.x, (area.x + area.width - width).max(area.x));
+    let y = (iy - height - gap).max(area.y);
+    (x, y)
+}
+
 /// The bubble shows the end of what is being said: when it is too long, the start goes.
 pub fn tail(text: &str, max_chars: usize) -> String {
     let count = text.chars().count();
@@ -317,6 +339,25 @@ mod tests {
             resized_position(default_position(SECOND, 56), 56, 112, true, &areas, SCREEN),
             default_position(SECOND, 112)
         );
+    }
+
+    #[test]
+    fn the_bubble_sits_centred_over_the_mic_and_on_its_screen() {
+        let areas = [SCREEN, SECOND];
+        // In the middle of the screen: centred, 8 px above.
+        assert_eq!(bubble_position((500, 500), 56, (200, 30), 8, &areas, SCREEN), (428, 462));
+        // A bubble narrower than the mic is centred too.
+        assert_eq!(bubble_position((500, 500), 56, (40, 30), 8, &areas, SCREEN), (508, 462));
+        // In the default corner it stops at the screen's right edge.
+        let corner = default_position(SCREEN, 56);
+        assert_eq!(bubble_position(corner, 56, (320, 60), 8, &areas, SCREEN).0, 1920 - 320);
+        // At the left edge and the top.
+        assert_eq!(bubble_position((0, 10), 56, (320, 60), 8, &areas, SCREEN), (0, 0));
+        // On the second monitor it stays there, not on the primary.
+        assert_eq!(bubble_position((1920, 500), 56, (320, 60), 8, &areas, SCREEN).0, 1920);
+        // Wider than the screen: its left edge stays on it.
+        let narrow = Rect { x: 0, y: 0, width: 200, height: 400 };
+        assert_eq!(bubble_position((100, 300), 56, (320, 60), 8, &[narrow], narrow).0, 0);
     }
 
     #[test]
