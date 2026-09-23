@@ -98,8 +98,8 @@ jobs:
           cp packages/native/target/release/vtype.exe LICENSE out/zip/
           (cd out/zip && 7z a "../vtype-${VERSION}-windows-x64.zip" vtype.exe LICENSE)
 
-      # Unsigned: the Store re-signs packages it accepts. Identity values are placeholders until
-      # the app is reserved in Partner Center (see the script).
+      # Unsigned: the Store re-signs packages it accepts. The script's defaults are vtype's
+      # Partner Center identity, so this package is the one to upload to the Store.
       - name: MSIX
         shell: pwsh
         run: ./scripts/release/build-msix.ps1 -OutDir out

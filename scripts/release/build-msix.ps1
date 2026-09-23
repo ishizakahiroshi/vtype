@@ -7,9 +7,9 @@
   (packages/native/packaging/msix/AppxManifest.xml) with its {{…}} fields filled; packs it with
   MakeAppx; unpacks the result and checks the manifest again.
 
-  The Identity values come from Partner Center once the app name is reserved. Until then the
-  defaults below are placeholders: the package builds and sideloads, but the Store will not take
-  it. Pass the real values with -IdentityName / -Publisher / -PublisherDisplayName.
+  The Identity defaults are the values Partner Center gave when the name was reserved
+  (2026-09-24, Store ID 9PJSKZSMRV57, Apps and games > vtype > Product identity). They are not
+  secret: every published package carries them.
 
   Build the executable first (from packages/native): cargo build --release --locked
 
@@ -20,8 +20,8 @@
 param(
   [string]$ExePath,
   [string]$OutDir,
-  [string]$IdentityName = "ishizakahiroshi.vtype-placeholder",
-  [string]$Publisher = "CN=00000000-0000-0000-0000-000000000000",
+  [string]$IdentityName = "ishizakahiroshi.vtype",
+  [string]$Publisher = "CN=A454C7F3-0506-42C1-AB41-2BE056B76ABF",
   [string]$PublisherDisplayName = "ishizakahiroshi",
   [switch]$Sign,
   [switch]$Install
@@ -104,9 +104,6 @@ $match = [regex]::Match($cargoText, '(?m)^version\s*=\s*"(\d+\.\d+\.\d+)"')
 if (-not $match.Success) { throw "Could not read the version from $CargoToml" }
 $packageVersion = "$($match.Groups[1].Value).0"
 Write-Host "Package version: $packageVersion"
-if ($Publisher -eq "CN=00000000-0000-0000-0000-000000000000") {
-  Write-Warning "Placeholder identity: fine for a trial build and sideloading, not for the Store."
-}
 
 if (Test-Path -LiteralPath $WorkDir) { Remove-Item -LiteralPath $WorkDir -Recurse -Force }
 New-Item -ItemType Directory -Force -Path (Join-Path $StageDir "Assets") | Out-Null

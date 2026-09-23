@@ -4,16 +4,15 @@
 
   scripts/release/build-msix.ps1 fills the {{…}} fields:
     {{VERSION}}                 packages/native/Cargo.toml X.Y.Z as X.Y.Z.0 (the Store keeps the last field)
-    {{IDENTITY_NAME}}           Partner Center: Package/Identity/Name            TODO: Partner Center の値
-    {{PUBLISHER}}               Partner Center: Package/Identity/Publisher       TODO: Partner Center の値 (CN=<GUID>)
-    {{PUBLISHER_DISPLAY_NAME}}  Partner Center: Package/Properties/PublisherDisplayName   TODO: Partner Center の値
-  Until the app is reserved, the script uses placeholder values that pack and sideload but are not
-  what the Store will accept.
+    {{IDENTITY_NAME}}           Partner Center: Package/Identity/Name
+    {{PUBLISHER}}               Partner Center: Package/Identity/Publisher (CN=<GUID>)
+    {{PUBLISHER_DISPLAY_NAME}}  Partner Center: Package/Properties/PublisherDisplayName
+  The script's defaults are the values Partner Center gave for vtype (Store ID 9PJSKZSMRV57).
 
   Why each extra is here:
     runFullTrust               a Win32 program (the Store requires it for desktop apps)
     StartupTask                starts with Windows (parent plan D12); run without arguments, and vtype
-                               without arguments inside the package runs the daemon
+                               without arguments starts the daemon
     AppExecutionAlias          `vtype` on the command line
   Nothing is registered with Chrome: vtype starts a Chrome of its own for speech recognition, so
   the package needs no restricted capability besides runFullTrust (standalone plan C4).
