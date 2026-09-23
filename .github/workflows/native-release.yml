@@ -6,6 +6,9 @@ name: native release
 #
 # A `native-v*` tag attaches all of it to a *draft* GitHub Release; publishing that draft, the
 # Store submission, npm and the Homebrew tap stay manual steps (see packages/native/README.md).
+# The five npm packages are packed here too, after the release job and from the same zip and
+# tar.gz, and kept as the run's `npm-packages` artifact (not attached to the release): packed on
+# Windows, the macOS and Linux binaries would lose their executable bit (packages/native/npm).
 # Running it by hand (workflow_dispatch) is a dry run: the files end up as workflow artifacts and
 # no release is made. GitHub only offers the manual run once this file is on the default branch,
 # so a push to develop that touches the release files is a dry run as well (path filters do not
@@ -286,3 +289,100 @@ jobs:
         run: |
           gh release create "${GITHUB_REF_NAME}" dist/* \
             --draft --title "vtype desktop ${VERSION}" --notes-file packages/native/RELEASE_NOTES.md
+
+  # After the release job on purpose: that job attaches every artifact of the run it finds, so
+  # an npm-packages artifact uploaded earlier would end up in the release and in SHA256SUMS.txt.
+  npm:
+    name: npm packages
+    needs: [version, release]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      NPM_DIR: packages/native/npm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Check the versions
+        run: |
+          for p in vtype-win32-x64 vtype-darwin-arm64 vtype-darwin-x64 vtype-linux-x64 vtype; do
+            v=$(node -p "require('./${NPM_DIR}/$p/package.json').version")
+            [ "$v" = "$VERSION" ] || { echo "::error::$p/package.json is $v, not $VERSION"; exit 1; }
+          done
+          node -e '
+            const deps = require(`./${process.env.NPM_DIR}/vtype/package.json`).optionalDependencies;
+            for (const [name, v] of Object.entries(deps)) {
+              if (v !== process.env.VERSION) { console.log(`::error::${name} is ${v} in vtype/package.json`); process.exit(1); }
+            }'
+
+      # The same artifacts the release job summed into SHA256SUMS.txt and attached.
+      - name: Download (Windows)
+        uses: actions/download-artifact@v4
+        with:
+          name: native-windows
+          path: src
+      - name: Download (macOS)
+        uses: actions/download-artifact@v4
+        with:
+          name: native-macos
+          path: src
+      - name: Download (Linux)
+        uses: actions/download-artifact@v4
+        with:
+          name: native-linux
+          path: src
+
+      - name: Put the binaries into the packages
+        run: |
+          mkdir -p src/win src/mac src/linux out/npm
+          unzip -q "src/vtype-${VERSION}-windows-x64.zip" vtype.exe -d src/win
+          tar -xzf "src/vtype-${VERSION}-macos-universal.tar.gz" -C src/mac vtype
+          tar -xzf "src/vtype-${VERSION}-linux-x64.tar.gz" -C src/linux vtype
+          install -D -m 644 src/win/vtype.exe "${NPM_DIR}/vtype-win32-x64/bin/vtype.exe"
+          install -D -m 755 src/mac/vtype "${NPM_DIR}/vtype-darwin-arm64/bin/vtype"
+          install -D -m 755 src/mac/vtype "${NPM_DIR}/vtype-darwin-x64/bin/vtype"
+          install -D -m 755 src/linux/vtype "${NPM_DIR}/vtype-linux-x64/bin/vtype"
+          (cd src && sha256sum "vtype-${VERSION}-windows-x64.zip" "vtype-${VERSION}-macos-universal.tar.gz" \
+            "vtype-${VERSION}-linux-x64.tar.gz") > out/npm/SOURCE-SHA256SUMS.txt
+          cat out/npm/SOURCE-SHA256SUMS.txt
+
+      - name: Pack
+        run: |
+          for p in vtype-win32-x64 vtype-darwin-arm64 vtype-darwin-x64 vtype-linux-x64 vtype; do
+            (cd "${NPM_DIR}/$p" && npm pack --pack-destination "${GITHUB_WORKSPACE}/out/npm")
+          done
+          ls -l out/npm
+
+      # Each binary in a package must be the one from the release archive, and the macOS and Linux
+      # ones must stay executable (npm restores the bit only for files listed in `bin`).
+      - name: Check the packages
+        run: |
+          check() {
+            tgz="out/npm/ishizakahiroshi-$1-${VERSION}.tgz"; member="package/bin/$2"
+            line=$(tar -tvzf "$tgz" "$member") || { echo "::error::$member is missing from $tgz"; exit 1; }
+            echo "$1: $line"
+            if [ -n "$3" ] && [ "${line%% *}" != "$3" ]; then
+              echo "::error::$member in $tgz is ${line%% *}, not $3"; exit 1
+            fi
+            got=$(tar -xzOf "$tgz" "$member" | sha256sum | cut -d' ' -f1)
+            want=$(sha256sum "$4" | cut -d' ' -f1)
+            [ "$got" = "$want" ] || { echo "::error::$member in $tgz is not the binary from the release archive"; exit 1; }
+            echo "$1: $member sha256 $got matches the release archive"
+          }
+          check vtype-darwin-arm64 vtype -rwxr-xr-x src/mac/vtype
+          check vtype-darwin-x64 vtype -rwxr-xr-x src/mac/vtype
+          check vtype-linux-x64 vtype -rwxr-xr-x src/linux/vtype
+          check vtype-win32-x64 vtype.exe "" src/win/vtype.exe
+          tar -tvzf "out/npm/ishizakahiroshi-vtype-${VERSION}.tgz" package/bin/vtype.js
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-packages
+          path: out/npm/*
+          if-no-files-found: error

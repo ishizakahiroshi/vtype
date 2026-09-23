@@ -15,27 +15,42 @@ so no `postinstall` script runs:
 folder `vtype-<os>-<cpu>/bin/`) and runs it with the same arguments and exit code.
 
 These folders are not part of the pnpm workspace (`pnpm-workspace.yaml` lists only
-`packages/*`), and the `bin/` folders stay empty in git. Nothing here is published yet.
+`packages/*`), and the `bin/` folders stay empty in git. The packages are on npm from 0.1.0.
 
 ## Publishing (by hand, per release)
 
-1. Set the same version in all five `package.json` files (the four platform packages and the
-   `optionalDependencies` of `vtype/package.json`) as `packages/native/Cargo.toml`.
-2. Download the binaries from the GitHub Release of that version:
-   `vtype-<ver>-windows-x64.zip` gives `vtype.exe`; the macOS universal tar.gz gives one binary
-   for both `darwin-arm64` and `darwin-x64`; `vtype-<ver>-linux-x64.tar.gz` gives the Linux one.
-   Put each in the package's `bin/` folder (`chmod 755` for macOS and Linux).
+The release workflow (`.github/workflows/native-release.yml`) packs all five on Linux, after its
+release job and from the same zip and tar.gz files it attaches to the GitHub Release, and keeps them
+as the run's `npm-packages` artifact. Do not pack them yourself on Windows: `npm pack` there writes
+every file as 0644, and npm gives the executable bit back only to files listed in `bin` (the
+platform packages list none), so the macOS and Linux binaries would not start after `npm i`.
+
+1. Before tagging, set the same version in all five `package.json` files (the four platform
+   packages and the `optionalDependencies` of `vtype/package.json`) as `packages/native/Cargo.toml`.
+   The workflow's `npm packages` job fails when they differ.
+2. After the tag's run has finished, download the packages from that run and check that they were
+   packed from the released files (the zip and both tar.gz, so 3 lines):
+
+   ```sh
+   run=$(gh run list --workflow native-release.yml --branch native-v<ver> --limit 1 --json databaseId --jq '.[0].databaseId')
+   gh run download "$run" -n npm-packages -D npm-packages
+   cd npm-packages
+   gh release download native-v<ver> -p SHA256SUMS.txt
+   grep -Fxf SOURCE-SHA256SUMS.txt SHA256SUMS.txt | wc -l
+   ```
+
+   Artifacts expire (after 90 days by default), so publish soon after the release.
 3. Publish the platform packages first, then the launcher:
 
    ```sh
-   cd packages/native/npm
    for p in vtype-win32-x64 vtype-darwin-arm64 vtype-darwin-x64 vtype-linux-x64 vtype; do
-     (cd "$p" && npm publish --access public)
+     npm publish "ishizakahiroshi-$p-<ver>.tgz" --access public
    done
    ```
 
-4. Check: `npx @ishizakahiroshi/vtype --version` prints the version.
-5. Empty the `bin/` folders of the platform packages again.
+4. Check: `npm view @ishizakahiroshi/vtype version` prints the version (it can take a minute or
+   two to appear), and in an empty folder `npm i @ishizakahiroshi/vtype@<ver>` followed by
+   `npx --no-install vtype --version` prints it too.
 
 After installing (`npm i -g @ishizakahiroshi/vtype`), users start vtype. The first-run screen asks
 whether to start it with the OS (ticked by default), and the settings page switches it later;
