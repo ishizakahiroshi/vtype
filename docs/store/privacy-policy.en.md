@@ -1,6 +1,6 @@
 # vtype privacy policy
 
-Last updated: 2026-09-22
+Last updated: 2026-09-24
 
 **What you say is sent, for speech recognition, by the browser's speech recognition to Google's
 speech recognition service, which turns it into text (this is how speech recognition works in
@@ -125,16 +125,26 @@ runs apart from the extension, and each works without the other.
   page on an address reachable only from the same computer (`127.0.0.1`), behind a secret that
   changes every time it starts. The only things it talks to are the Chrome in its own profile that
   opened those pages, and its own commands run on the same computer (`vtype toggle` and the like)
-- Recognised text goes into the app in front and that is the end of it; nothing is kept. If you
-  choose the "paste" method in the settings, or on Linux under Wayland when direct typing is not
-  possible, the text is put on the clipboard (the paste method puts the clipboard's previous
-  contents back afterwards)
+- Recognised text goes into the app in front and that is the end of it; nothing is kept. Words
+  said while the cursor is not in a text field are not typed: they wait in a bubble above the mic.
+  They are held in memory only, never written to a file (until you press "Copy", "Insert" or ✕,
+  or quit vtype)
+- If you choose the "paste" method in the settings, on Linux under Wayland when direct typing is
+  not possible, and when you press "Copy" in that bubble, the text is put on the clipboard (the
+  paste method puts the clipboard's previous contents back afterwards)
 - It types nothing into password fields (on Windows and macOS it asks the system what kind of
   field it is; on Linux it leaves out the ones the system's accessibility service can identify)
 - On your computer it keeps a settings file (`config.json`: the shortcut, the input mode, the
-  replacement table, whether the icon is shown, whether you agreed, and so on) and a log (`vtype.log`: at most 1 MB, two generations; times,
-  kinds of events and errors only, never what you said or the text). Neither is sent to the
-  developer
+  replacement table, whether the icon is shown, whether you agreed, and so on) and a log (`vtype.log`: at most 1 MB, two generations; only times,
+  kinds of events, errors and, for some events, the name of the app in front (the executable's
+  name on Windows, the bundle ID on macOS), never what you said or the text). Neither is sent to
+  the developer
+- It switches starting at sign-in to match "Start vtype when you sign in" on the first-run screen
+  and the settings page (and the commands `vtype install` / `vtype uninstall`): the Run key in the
+  registry on Windows, the startup task in Windows for the Store version, a file in
+  `~/Library/LaunchAgents` on macOS, a file in `~/.config/autostart` on Linux. The entry holds only
+  where vtype is and how to start it. When vtype has moved, it points the entry at the new place
+  when it starts
 
 ## Reporting a problem
 

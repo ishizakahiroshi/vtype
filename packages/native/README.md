@@ -20,7 +20,7 @@ time.
 | `src/speech_assets.rs` | The pages built by the extension package into `packages/extension/dist-desktop/`, compiled in by `build.rs` |
 | `src/protocol.rs` | The JSON the command line, the daemon and the speech page exchange (`tests/fixtures/nm-messages.json` is shared with the TypeScript side) |
 | `src/ipc.rs` | The local socket / pipe between the command line and the daemon |
-| `src/install.rs` | `vtype install` / `uninstall`: starting with the OS |
+| `src/install.rs` | `vtype install` / `uninstall`: starting with the OS from the command line, and on GNOME the shortcut. The first-run screen and the settings page switch the same entry (`Platform::set_autostart`) |
 | `packaging/msix/` | The MSIX manifest (Microsoft Store). Built by `scripts/release/build-msix.ps1` |
 | `packaging/deb/` | Files the `.deb` installs (see `[package.metadata.deb]` in `Cargo.toml`) |
 | `packaging/homebrew/` | The Homebrew formula template and how to set up the tap |

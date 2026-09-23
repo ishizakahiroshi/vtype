@@ -37,7 +37,11 @@ These folders are not part of the pnpm workspace (`pnpm-workspace.yaml` lists on
 4. Check: `npx @ishizakahiroshi/vtype --version` prints the version.
 5. Empty the `bin/` folders of the platform packages again.
 
-After installing (`npm i -g @ishizakahiroshi/vtype`), users run `vtype install` once to start it
-with the OS (and, on GNOME, to add the shortcut). Google Chrome must be installed; vtype starts it
-for the speech recognition. Because the autostart entry points at the binary inside
-`node_modules`, run `vtype install` again after moving or reinstalling Node.
+After installing (`npm i -g @ishizakahiroshi/vtype`), users start vtype. The first-run screen asks
+whether to start it with the OS (ticked by default), and the settings page switches it later;
+`vtype install` does the same from the command line (and, on GNOME, adds the shortcut). Google
+Chrome must be installed; vtype starts it for the speech recognition. The sign-in entry points at
+the binary inside `node_modules`. After moving or reinstalling Node, install the package again and
+start vtype once (`vtype quit` first if the old copy is still running): when vtype starts, an entry
+that starts another copy is pointed at the binary now running. It only rewrites an entry that is
+there; it does not add one.

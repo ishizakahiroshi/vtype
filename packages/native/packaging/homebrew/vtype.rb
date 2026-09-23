@@ -24,8 +24,12 @@ class Vtype < Formula
   def caveats
     <<~EOS
       vtype needs Google Chrome: it starts Chrome in a profile of its own for
-      the speech recognition. To start vtype at login, run once:
+      the speech recognition. The first-run screen asks whether to start vtype
+      at login (ticked by default); its settings page changes it later. From
+      the command line, run once:
         vtype install
+      (brew services start vtype also starts it at login, but vtype's settings
+      page cannot see or switch that off; use one or the other.)
 
       Allow vtype in System Settings > Privacy & Security > Accessibility,
       so it can type into other apps. After an update, you may need to allow it again.

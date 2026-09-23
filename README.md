@@ -73,14 +73,26 @@ on macOS (`brew install ishizakahiroshi/tap/vtype`), a `.deb` on GitHub Releases
 npm everywhere (`npm i -g @ishizakahiroshi/vtype`). How the packages are made is in
 [`packages/native/README.md`](packages/native/README.md).
 
+The macOS and Linux versions are built and tested automatically (CI), but the author has not run
+them on a real Mac or Linux machine. If something does not work there, please
+[open an issue](https://github.com/ishizakahiroshi/vtype/issues).
+
 ### The first time
 
 1. Start vtype and press the shortcut (or the mic icon). A small Chrome window opens once: read
    what vtype sends where, press **Agree and start**, and allow the microphone. The window then
    closes itself, and from then on Chrome runs off screen.
-2. To start vtype with the OS, run `vtype install` once (on GNOME it also adds the shortcut). The
-   Store and `.deb` packages do this for you; with Homebrew or npm, run it yourself.
-   `vtype uninstall` undoes it.
+2. The same window has **Start vtype when you sign in**, ticked to begin with. Leave it ticked and
+   vtype starts with the OS from then on; clear it and it does not (the Store and `.deb` packages
+   start with the OS already, and clearing the box turns that off). To change it later, use the
+   same checkbox at the top of the desktop settings on the settings page.
+   From the command line, `vtype install` turns it on and, on GNOME, also adds the shortcut (the
+   window and the settings page do not add it). `vtype uninstall` turns it off, takes that
+   shortcut out, and quits vtype.
+
+If you move vtype, or install it again in another place, start it once from there. Each time vtype
+starts, a sign-in entry that starts another copy of vtype is pointed at the one running; it never
+adds an entry that is not there. The Store version always starts its own copy.
 
 `vtype settings` (or **Open settings** in the tray menu) opens vtype's own settings page in that
 Chrome: the shortcut, the input mode, the replacement table, and how text is typed.

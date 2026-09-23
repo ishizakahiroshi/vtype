@@ -27,8 +27,11 @@ in it.
    brew audit --strict vtype
    ```
 
-Users then install with `brew install ishizakahiroshi/tap/vtype`, run `vtype install` once, and
-start it at login with `brew services start vtype`.
+Users then install with `brew install ishizakahiroshi/tap/vtype` and start vtype. The first-run
+screen asks whether to start it at login (ticked by default), and the settings page switches it
+later; `vtype install` does the same from the command line. `brew services start vtype` also starts
+it at login, but through Homebrew's own entry, which the settings page cannot see or switch off, so
+use one or the other.
 
 The binary is not signed or notarized (parent plan D28), so macOS may ask the user to confirm it the
 first time, and the Accessibility permission may have to be given again after an update.
