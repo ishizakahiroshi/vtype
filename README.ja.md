@@ -14,7 +14,9 @@ vtype には 2 つの形があります。別々のプログラムで、どち�
   すぐ外側にうっすらとした小さなマイクが付きます。押して話すと、話している間にもその欄のカーソル位置へ
   文字が入っていきます。検索ボックスでも、問い合わせフォームでも、書式付きのメッセージ本文でも、
   文字を入力できる欄であればそのまま使えます。
-- **[vtype デスクトップ版](#デスクトップ版)**（Windows・macOS・Linux 用・リリース準備中）。
+- **[vtype デスクトップ版](#デスクトップ版)**（Windows・macOS・Linux 用・
+  [GitHub Releases](https://github.com/ishizakahiroshi/vtype/releases)・npm・Homebrew で公開中。
+  Microsoft Store 版は準備中）。
   **ブラウザも含め、パソコンのどのアプリでも使えます。** どのアプリ（テキストエディター、チャット、
   ターミナルなど）でもショートカットを押して話せば、その内容がそこへ入力されます。
 
@@ -27,7 +29,7 @@ vtype には 2 つの形があります。別々のプログラムで、どち�
 | ブラウザ以外のアプリ（テキストエディター、チャット、ターミナルなど） | ❌ | ✅ |
 | 始め方 | 欄の横のマイクを押す | ショートカットか、マイクアイコンを押す |
 | 必要なもの | Chrome 116 以降 | Google Chrome（裏で動かすため） |
-| 公開状況 | Chrome ウェブストアで公開中 | リリース準備中 |
+| 公開状況 | Chrome ウェブストアで公開中 | 0.1.0 を GitHub Releases・npm・Homebrew で公開中。Microsoft Store は準備中 |
 
 どちらも音声認識を自前では持っていません。Chrome には音声認識（Web Speech API）が組み込まれていて、
 vtype はそれを借りています（デスクトップ版は、そのために Chrome を裏で動かします）。そのため API キーも
@@ -86,13 +88,24 @@ vtype デスクトップ版（Windows・macOS・Linux）は、同じ音声認識
 
 ### インストール
 
-リリースの準備中で、npm・Microsoft Store・Homebrew・GitHub Releases を並行して進めています。
-公開後は次の方法で入れられます。
+vtype デスクトップ版 0.1.0 を公開しました。お使いの OS に合わせて、どれか 1 つの方法で入れてください。
 
-- Windows: Microsoft Store
-- macOS: Homebrew の tap（`brew install ishizakahiroshi/tap/vtype`）
-- Linux: GitHub Releases の `.deb`
-- どの OS でも: npm（`npm i -g @ishizakahiroshi/vtype`）
+- **Windows**（x64）: Node.js があれば `npm i -g @ishizakahiroshi/vtype`。または
+  [GitHub Releases](https://github.com/ishizakahiroshi/vtype/releases) の zip（展開して `vtype.exe` を
+  ダブルクリック。置いた場所からそのまま動きます）。Microsoft Store 版は準備中です。
+- **macOS**（Apple シリコンと Intel）: Homebrew で `brew install ishizakahiroshi/tap/vtype`。または
+  `npm i -g @ishizakahiroshi/vtype`、GitHub Releases の `macos-universal` の tar.gz。
+- **Linux**（x64）: Debian と Ubuntu では GitHub Releases の `.deb`
+  （`sudo apt install ./vtype_0.1.0_amd64.deb`）。それ以外では `npm i -g @ishizakahiroshi/vtype` か、
+  `linux-x64` の tar.gz。
+
+入れ方による違い:
+
+- 実行ファイルには署名をしていません。初回に Windows の SmartScreen や macOS が確認を求めることがあります。
+- `.deb` は、すべてのユーザーのサインイン時に vtype を起動します（ユーザーごとに止められます）。
+  ほかの入れ方では、初回の画面で聞かれます（下を参照）。
+- まだ自動では更新されません。先に vtype を終了し（トレイのメニューの **vtype を終了**）、npm のコマンドを
+  もう一度実行するか、`brew upgrade vtype` を実行するか、新しいリリースを落としてください。
 
 パッケージの作り方は [`packages/native/README.md`](packages/native/README.md)（英語）にあります。
 
@@ -118,7 +131,7 @@ Linux 版は、コードを読んでのバグの確認と、自動のビルド�
 
 ### はじめて使うとき
 
-1. vtype を起動します。Microsoft Store から入れた場合は、スタートメニューから開きます。zip の場合は
+1. vtype を起動します。Microsoft Store から入れた場合は（公開後）、スタートメニューから開きます。zip の場合は
    `vtype.exe` をダブルクリックします（または `vtype` を実行）。npm・Homebrew・tar.gz の場合は、
    ターミナルで `vtype` を実行します（tar.gz は展開したフォルダで `./vtype`）。`.deb` の場合は、
    次のサインインで起動します（または `vtype` を実行）。動いている間にもう一度起動すると、

@@ -12,7 +12,9 @@ vtype comes in two forms. They are separate programs, and each works without the
   faint little mic just outside its right edge; press it and talk, and the words appear in that
   field at the caret while you are still speaking. A search box, a contact form, a rich-text
   message body: if you can type in it, this works in it.
-- **[vtype desktop](#desktop)** for Windows, macOS and Linux, whose release is in progress.
+- **[vtype desktop](#desktop)** for Windows, macOS and Linux, on
+  [GitHub Releases](https://github.com/ishizakahiroshi/vtype/releases), npm and Homebrew (a
+  Microsoft Store version is coming).
   **It works in any app on your computer, browsers included.** Press a shortcut in any app (a
   text editor, a chat client, a terminal) and what you say is typed there.
 
@@ -25,7 +27,7 @@ Which one works where:
 | An app outside the browser (a text editor, a chat client, a terminal) | ❌ | ✅ |
 | How you start | Press the mic beside the field | Press the shortcut, or the mic icon |
 | What you need | Chrome 116 or newer | Google Chrome installed (it runs in the background) |
-| Status | On the Chrome Web Store | Release in progress |
+| Status | On the Chrome Web Store | 0.1.0 on GitHub Releases, npm and Homebrew; Microsoft Store coming |
 
 Neither brings a speech recognizer of its own. Chrome has speech recognition built in (the Web
 Speech API), and vtype borrows it (the desktop app runs Chrome in the background to do so), so
@@ -83,13 +85,24 @@ app in front. **Google Chrome must be installed.**
 
 ### Install
 
-The release is in progress: npm, the Microsoft Store, Homebrew and GitHub Releases are being
-prepared in parallel. Once it is out, you can get it from:
+vtype desktop 0.1.0 is out. Pick one way for your system:
 
-- Windows: the Microsoft Store
-- macOS: a Homebrew tap (`brew install ishizakahiroshi/tap/vtype`)
-- Linux: a `.deb` on GitHub Releases
-- Any of them: npm (`npm i -g @ishizakahiroshi/vtype`)
+- **Windows** (x64): `npm i -g @ishizakahiroshi/vtype` if you have Node.js, or the zip from
+  [GitHub Releases](https://github.com/ishizakahiroshi/vtype/releases) (unzip it and double-click
+  `vtype.exe`; it runs from wherever you put it). A Microsoft Store version is coming.
+- **macOS** (Apple silicon and Intel): `brew install ishizakahiroshi/tap/vtype` with Homebrew, or
+  `npm i -g @ishizakahiroshi/vtype`, or the `macos-universal` tar.gz from GitHub Releases.
+- **Linux** (x64): on Debian and Ubuntu, the `.deb` from GitHub Releases
+  (`sudo apt install ./vtype_0.1.0_amd64.deb`); elsewhere, `npm i -g @ishizakahiroshi/vtype` or the
+  `linux-x64` tar.gz.
+
+What differs between them:
+
+- The binaries are not signed: Windows SmartScreen and macOS may ask you to confirm the first time.
+- The `.deb` starts vtype at sign-in for every user (each user can switch that off); with the
+  others, the first-run screen asks (see below).
+- Nothing updates itself yet. Quit vtype first (**Quit vtype** in the tray menu), then run the npm
+  command again, run `brew upgrade vtype`, or download the new release.
 
 How the packages are made is in [`packages/native/README.md`](packages/native/README.md).
 
@@ -115,7 +128,7 @@ please tell me in an [issue](https://github.com/ishizakahiroshi/vtype/issues).
 
 ### The first time
 
-1. Start vtype. From the Microsoft Store: open it from the Start menu. From the zip: double-click
+1. Start vtype. From the Microsoft Store (once it is out): open it from the Start menu. From the zip: double-click
    `vtype.exe` (or run `vtype`). From npm, Homebrew or the tar.gz: run `vtype` in a terminal
    (`./vtype` in the unpacked folder for the tar.gz). From the `.deb`: it starts at your next
    sign-in, or run `vtype`. Starting it again while it runs opens the settings page.

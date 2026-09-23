@@ -16,8 +16,10 @@ from it. Releasing turns `## [Unreleased]` into `## [X.Y.Z] - YYYY-MM-DD` and op
   full-width katakana with a dictionary shipped in the package). The mode stays until changed,
   also across restarts. A replacement table ("write B for A") applies after recognition. The
   conversion lives in `vtype-core`, so the extension and the desktop app share it.
-- vtype desktop (`packages/native`, 0.1.0, not published yet): one Rust program for Windows,
-  macOS and Linux for voice input into any app, without the extension. It starts Google Chrome
+- vtype desktop (`packages/native`), 0.1.0, published on 2026-09-24 on GitHub Releases (tag
+  `native-v0.1.0`), npm (`@ishizakahiroshi/vtype`) and Homebrew (`ishizakahiroshi/tap/vtype`); a
+  Microsoft Store version is coming. One Rust program for Windows, macOS and Linux for voice
+  input into any app, without the extension. It starts Google Chrome
   (which must be installed) in a profile of its own, off screen, on a speech page it serves on
   127.0.0.1, and types what Chrome recognises into the app in front. Before the first recording it
   asks for consent in a small Chrome window, then allows the microphone in that profile itself.

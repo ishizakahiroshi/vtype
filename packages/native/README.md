@@ -45,6 +45,11 @@ CI (the `rust` job in `.github/workflows/ci.yml`) runs these on Windows, macOS a
 
 ## Releasing
 
+0.1.0 went out on 2026-09-24 on GitHub Releases (tag `native-v0.1.0`), npm
+(`@ishizakahiroshi/vtype` and the four per-platform packages) and Homebrew (`Formula/vtype.rb` in
+[`ishizakahiroshi/homebrew-tap`](https://github.com/ishizakahiroshi/homebrew-tap)). The Microsoft
+Store submission has not been made yet.
+
 Nothing is published automatically. The steps, in order:
 
 1. Set the version in `Cargo.toml` (and `Cargo.lock` follows with `cargo build`), in the five

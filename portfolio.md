@@ -3,15 +3,15 @@ schemaVersion: 1
 color: "#6366f1"
 initials: "vt"
 cat:
-  ja: "Chrome拡張 / 音声入力"
-  en: "Chrome Extension / Voice input"
+  ja: "Chrome拡張 / デスクトップアプリ / 音声入力"
+  en: "Chrome Extension / Desktop app / Voice input"
 tagline:
-  ja: "Web のどの入力欄にも、声で書ける。回数制限も、アカウントも無い。"
-  en: "Speak into any text field on the web. No quota, no account."
+  ja: "Web でも、パソコンのどのアプリでも、声で書ける。回数制限も、アカウントも無い。"
+  en: "Speak into any text field, on the web or in any app. No quota, no account."
 short:
-  ja: "画面上のテキスト欄に薄いマイクを出し、話した言葉をその場でカーソル位置へ入れる Chrome 拡張。"
-  en: "A Chrome extension that puts a faint mic on every text field and types what you say, at the caret."
-tech: ["TypeScript", "Chrome Extension", "MV3", "Web Speech API", "pnpm"]
+  ja: "画面上のテキスト欄に薄いマイクを出し、話した言葉をその場でカーソル位置へ入れる Chrome 拡張と、どのアプリにも声で入力できるデスクトップ版（Windows・macOS・Linux）。"
+  en: "A Chrome extension that puts a faint mic on every text field and types what you say at the caret, and a desktop app (Windows, macOS, Linux) that types it into any app."
+tech: ["TypeScript", "Chrome Extension", "MV3", "Web Speech API", "pnpm", "Rust"]
 store: "https://chromewebstore.google.com/detail/vtype/nngfilimeplngdjdmgkddlhbdjpmikgn"
 live: null
 guide: null
@@ -27,6 +27,9 @@ features:
   - icon: "⚑"
     title: { ja: "許可は一度きり", en: "Asked once, never again" }
     desc:  { ja: "認識を拡張自身のページで回すので、訪れたサイトごとにマイクの確認が出ない。", en: "Recognition runs in the extension's own page, so no site ever shows a microphone dialog." }
+  - icon: "⌨"
+    title: { ja: "ブラウザの外でも", en: "Outside the browser too" }
+    desc:  { ja: "デスクトップ版は、どのアプリでもショートカットを押して話すと、そこへ文字が入る。GitHub Releases・npm・Homebrew で配布。", en: "The desktop app types what you say into any app at a shortcut. On GitHub Releases, npm and Homebrew." }
 shots:
   - path: portfolio/mic.png
     caption: { ja: "見えている入力欄のすぐ右に、薄いマイクが並ぶ。欄の見た目は変えない。", en: "A faint mic just right of every visible field; the fields themselves look the same." }
@@ -45,6 +48,8 @@ Web ページのテキスト入力欄に、声で文字を入れる Chrome 拡�
 
 サイトのボタンとマイクが重なるときはドラッグしてずらせて、その位置をサイトごとに覚えます。合わないサイトはツールバーのアイコンで 1 押しで切れます。表示は日本語と英語に対応していて、言語を足すときはメッセージファイルを 1 本置くだけです。
 
+デスクトップ版（Windows・macOS・Linux）もあります。拡張とは別のプログラムで、ブラウザの外のアプリ（テキストエディタ、チャット、ターミナル）でも、ショートカットを押して話すとその場へ文字が入ります。認識は同じく Chrome の音声認識で、Chrome を専用のプロフィールで裏で動かします（Google Chrome が必要）。0.1.0 を GitHub Releases、npm（`npm i -g @ishizakahiroshi/vtype`）、Homebrew（`brew install ishizakahiroshi/tap/vtype`）で配っていて、Microsoft Store 版は準備中です。macOS 版と Linux 版は、作者はまだ実機で動かしていません。
+
 ## en
 
 A Chrome extension that puts your voice into the text fields of web pages. Every text field you can see carries a faint little mic; press it and speak, and the words appear in that field at the caret while you are still talking. Search boxes, contact forms, rich-text message bodies — if you can type in it, this works in it.
@@ -54,3 +59,5 @@ It exists because nearly every voice-input extension meters you — so many minu
 The microphone is allowed once, right after you install it. Recognition runs in the extension's own offscreen document, which structurally avoids the permission dialog appearing on every site you visit. Password fields are excluded (the input types it works on are an allowlist, and password is not in it). No audio is ever sent to the developer; recognition is left to the browser, and in Chrome the browser itself sends the audio to its recognition service.
 
 Where the mic collides with a button of the site's own, drag it aside — it stays there for that site. Where the extension does not belong, the toolbar icon switches it off for that site in one press. The interface speaks English and Japanese, and adding a language is adding one message file.
+
+There is also a desktop app for Windows, macOS and Linux. It is a separate program: in any app outside the browser (a text editor, a chat client, a terminal), press a shortcut and speak, and the words are typed there. It uses the same Chrome speech recognition, running Chrome in the background in a profile of its own (Google Chrome must be installed). Version 0.1.0 is on GitHub Releases, npm (`npm i -g @ishizakahiroshi/vtype`) and Homebrew (`brew install ishizakahiroshi/tap/vtype`); a Microsoft Store version is coming. The author has not yet run the macOS and Linux versions on real machines.

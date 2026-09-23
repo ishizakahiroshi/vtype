@@ -1,7 +1,9 @@
 # Homebrew formula (vtype desktop)
 
-`vtype.rb` is a template. Nothing here publishes it: the tap repository does not exist yet, and
-creating it is a release step taken by hand.
+`vtype.rb` is a template. Nothing here publishes it: copying the release's formula into the tap
+is a release step taken by hand. The tap is
+[`ishizakahiroshi/homebrew-tap`](https://github.com/ishizakahiroshi/homebrew-tap), and the formula
+is its `Formula/vtype.rb` (0.1.0 since 2026-09-24).
 
 ## How the formula gets its values
 
@@ -10,10 +12,11 @@ The release workflow (`.github/workflows/native-release.yml`, on a `native-v*` t
 attaches the result to the draft GitHub Release as `vtype.rb`. Check that `@@` no longer appears
 in it.
 
-## Setting up the tap (once)
+## The tap
 
-1. Create the public repository `ishizakahiroshi/homebrew-tap` on GitHub (empty, MIT).
-2. Add a `Formula/` folder to it.
+`ishizakahiroshi/homebrew-tap` is a public repository shared with other tools (goreleaser updates
+the `many-ai-cli` cask in `Casks/`). vtype's formula lives in its `Formula/` folder, added by hand
+for 0.1.0.
 
 ## Each release
 
