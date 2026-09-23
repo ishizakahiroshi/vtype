@@ -82,6 +82,11 @@ const SETUP_HOLD: Duration = Duration::from_secs(30);
 const HINT_DELAY: Duration = Duration::from_millis(700);
 const HINT_HOLD: Duration = Duration::from_secs(10);
 
+/// How long the focus is off the fields before the floating mic that came to one goes back to the
+/// corner. Measured on the development machine: of 48 times the focus came back to a field, 13
+/// were within 0.6 s (passing through, e.g. Tab over a button) and the rest 1.2 s or more.
+const HOME_DELAY: Duration = Duration::from_millis(700);
+
 pub struct Core {
     platform: Arc<dyn Platform>,
     config: NativeConfig,
@@ -105,6 +110,11 @@ pub struct Core {
     /// The field the floating mic came to last (app and bounds), so that the focus coming back
     /// to it (a template menu closing, a window switched back to) does not move the mic again.
     followed_field: Option<(Option<String>, Option<Rect>)>,
+    /// The focus left the fields after the floating mic came to one: it goes back to the corner at
+    /// this time, or once a recording ends or the pointer leaves it, if that is later.
+    home_at: Option<Instant>,
+    /// The pointer is on the floating mic (it may be held).
+    mic_hovered: bool,
     /// The daemon's own speech page (speech_host.rs), when it could listen.
     speech_page: Option<String>,
     /// The daemon's own Chrome profile (chrome_launch.rs).
@@ -155,6 +165,8 @@ impl Core {
             deleted_template: None,
             beside_shown: false,
             followed_field: None,
+            home_at: None,
+            mic_hovered: false,
             speech_page: None,
             profile_dir: chrome_launch::profile_dir(),
             launched: None,
@@ -271,11 +283,15 @@ impl Core {
         let pending = self.pending.as_ref().and_then(|p| p.deadline);
         let relaunch = self.relaunch.map(|(at, _)| at);
         let hint = self.hint_due.map(|(_, at)| at);
-        pending.into_iter().chain(relaunch).chain(hint).chain(self.silence_stop_at).min()
+        // Held by a recording or the pointer: those ending say when, not the clock (a time
+        // already past would wake the loop again and again).
+        let home = self.home_at.filter(|_| self.mic_free());
+        pending.into_iter().chain(relaunch).chain(hint).chain(self.silence_stop_at).chain(home).min()
     }
 
     pub fn tick(&mut self) {
         let now = (self.now)();
+        self.go_home_if_due();
         if self.silence_stop_at.is_some_and(|at| now >= at) {
             tracing::info!(seconds = self.config.silence_stop_sec, "no new words; stopping the recording");
             // As the mic does: the send key is pressed only by the send button.
@@ -397,6 +413,10 @@ impl Core {
                 self.send(&ToExtension::NativeConfig { config: self.config.clone() });
                 Some(Reply::Config { config: self.config.clone() })
             }
+            Request::OpenLink { link } => Some(match self.platform.open_url(&link.url(env!("CARGO_PKG_VERSION"))) {
+                Ok(()) => Reply::Ok,
+                Err(e) => Reply::error("open_failed", e.to_string()),
+            }),
             Request::Quit => {
                 let _ = out.send(Reply::Ok);
                 return Flow::Quit;
@@ -671,14 +691,15 @@ impl Core {
         self.open_settings_at(None)
     }
 
-    /// The settings page, with the template at `template` open for editing when there is one.
-    fn open_settings_at(&mut self, template: Option<usize>) -> Reply {
+    /// The settings page at `part` when there is one: `template-<index>` opens that template for
+    /// editing, `about` shows "About vtype".
+    fn open_settings_at(&mut self, part: Option<&str>) -> Reply {
         let Some(page) = self.speech_page.as_deref() else {
             return Reply::error("speech_page_unavailable", "the settings page is not being served");
         };
         let mut url = chrome_launch::settings_url(page);
-        if let Some(i) = template {
-            url.push_str(&format!("#template-{i}"));
+        if let Some(part) = part {
+            url.push_str(&format!("#{part}"));
         }
         let args = chrome_launch::settings_args(&self.profile_dir, &url);
         match self.platform.launch_chrome(&args) {
@@ -802,6 +823,8 @@ impl Core {
         self.stop_sent = false;
         self.platform.hide_bubble();
         self.show_icon(IconState::Idle);
+        // The focus left the fields during the recording: the mic goes back now.
+        self.go_home_if_due();
     }
 
     /// New words (or the recognizer hearing speech again after them): the recording stops
@@ -945,6 +968,7 @@ impl Core {
         if beside_changed {
             self.platform.watch_fields(&self.config.beside_field);
             self.followed_field = None;
+            self.home_at = None;
             if (!self.config.beside_field.enabled || self.icon_follows_fields()) && self.beside_shown {
                 self.beside_shown = false;
                 self.platform.hide_beside();
@@ -976,13 +1000,35 @@ impl Core {
         self.config.beside_field.trigger == BesideFieldTrigger::Focus && self.platform.icon_follows_fields()
     }
 
+    /// Neither recording nor under the pointer: the floating mic may go back to the corner.
+    fn mic_free(&self) -> bool {
+        !self.recording && !self.mic_hovered
+    }
+
+    /// The focus has been off the fields long enough: the floating mic goes back to the corner.
+    /// The same field taking the focus again then brings it back without a click.
+    fn go_home_if_due(&mut self) {
+        if self.home_at.is_some_and(|at| (self.now)() >= at) && self.mic_free() {
+            self.home_at = None;
+            self.followed_field = None;
+            self.platform.icon_home();
+        }
+    }
+
     /// The mic beside the field follows the focus (or the pointer): shown, moved or hidden. Or the
-    /// floating mic comes to the field, and stays when the focus leaves it.
+    /// floating mic comes to the field, and goes back to the corner once the focus has been off
+    /// the fields for `HOME_DELAY`.
     fn field_changed(&mut self, probe: &FieldProbe, at: Instant) {
         if self.icon_follows_fields() {
             let Some(anchor) = beside_field::anchor(&self.config.beside_field, probe) else {
+                // Only a mic that came to a field goes back; one the focus never brought stays
+                // where it started.
+                if self.followed_field.is_some() && self.home_at.is_none() {
+                    self.home_at = Some((self.now)() + HOME_DELAY);
+                }
                 return;
             };
+            self.home_at = None;
             let field = (probe.app_id.clone(), probe.bounds);
             // The focus coming back to the field the mic is at: only a click moves it again.
             if self.followed_field.as_ref() == Some(&field) && !matches!(anchor, Anchor::Pointer(..)) {
@@ -1017,6 +1063,10 @@ impl Core {
             PlatformEvent::MicHover(part) => {
                 self.drop_hint();
                 self.hint_due = part.map(|p| (p, (self.now)() + HINT_DELAY));
+                // The focus left the fields while the pointer was on the mic: it goes back once
+                // the pointer is off it.
+                self.mic_hovered = part.is_some();
+                self.go_home_if_due();
             }
             PlatformEvent::ToggleRequested => {
                 let _ = self.toggle(None);
@@ -1060,7 +1110,7 @@ impl Core {
                 }
                 MenuAction::InsertTemplate(index) => self.insert_template(index),
                 MenuAction::EditTemplate(index) => {
-                    let _ = self.open_settings_at(Some(index));
+                    let _ = self.open_settings_at(Some(&format!("template-{index}")));
                 }
                 MenuAction::DeleteTemplate(index) => self.delete_template(index),
                 MenuAction::UndoDeleteTemplate => self.undo_delete_template(),
@@ -1083,6 +1133,9 @@ impl Core {
                     if let Err(e) = self.platform.copy_to_clipboard(&text) {
                         tracing::warn!(error = %e, "could not copy the diagnostic info");
                     }
+                }
+                MenuAction::About => {
+                    let _ = self.open_settings_at(Some("about"));
                 }
                 MenuAction::Quit => return Flow::Quit,
             },
@@ -1345,6 +1398,9 @@ pub mod tests {
         }
         fn icon_to_field(&self, anchor: Anchor, _reported_at: Instant) {
             self.log(format!("icon to {anchor:?}"));
+        }
+        fn icon_home(&self) {
+            self.log("icon home".into());
         }
     }
 
@@ -2234,6 +2290,25 @@ pub mod tests {
     }
 
     #[test]
+    fn about_opens_the_settings_page_at_about_vtype() {
+        let mut h = Harness::new();
+        h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::About)));
+        let settings = "http://127.0.0.1:47213/t/0123456789abcdef0123456789abcdef/settings#about";
+        let expected = format!("chrome {}", chrome_launch::settings_args(Path::new("/p"), settings).join(" "));
+        assert_eq!(h.fake.take(), vec![expected]);
+    }
+
+    #[test]
+    fn the_settings_page_has_its_links_opened_in_the_usual_browser() {
+        let mut h = Harness::new();
+        assert_eq!(h.cli(Request::OpenLink { link: crate::about::AboutLink::Homepage }), Reply::Ok);
+        assert_eq!(h.fake.take(), vec!["open https://ishizakahiroshi.com/".to_string()]);
+        h.cli(Request::OpenLink { link: crate::about::AboutLink::Notices });
+        let notices = format!("native-v{}/THIRD_PARTY_NOTICES.txt", env!("CARGO_PKG_VERSION"));
+        assert!(h.fake.take()[0].ends_with(&notices));
+    }
+
+    #[test]
     fn diagnostics_carry_no_transcript() {
         let mut h = Harness::new();
         h.connect();
@@ -2300,8 +2375,9 @@ pub mod tests {
         assert!(calls.contains(&"hide beside".to_string()));
     }
 
-    #[test]
-    fn on_windows_the_floating_mic_comes_to_the_field_and_stays() {
+    /// Acts like Windows with the mic beside the field switched on: the floating mic comes to
+    /// fields.
+    fn following_fields() -> Harness {
         let mut h = Harness::new();
         *h.fake.icon_follows.lock().unwrap() = true;
         h.connect();
@@ -2309,15 +2385,34 @@ pub mod tests {
         cfg.beside_field.enabled = true;
         h.ext(json!({"type": "set-native-config", "config": cfg}));
         h.fake.take();
-        let field = FieldProbe { bounds: Some(Rect { x: 50, y: 190, width: 400, height: 40 }), ..text_field() };
+        h
+    }
+
+    fn field_with_bounds() -> FieldProbe {
+        FieldProbe { bounds: Some(Rect { x: 50, y: 190, width: 400, height: 40 }), ..text_field() }
+    }
+
+    fn clicked_field() -> FieldProbe {
+        FieldProbe { pointer: Some((300, 210)), ..field_with_bounds() }
+    }
+
+    fn went_home(calls: &[String]) -> bool {
+        calls.iter().any(|c| c == "icon home")
+    }
+
+    #[test]
+    fn on_windows_the_floating_mic_comes_to_the_field_the_focus_is_in() {
+        let mut h = following_fields();
+        let mut cfg = h.core.config().clone();
+        let field = field_with_bounds();
 
         // Clicked into: by the pointer, and no small mic.
-        focus(&mut h, FieldProbe { pointer: Some((300, 210)), ..field.clone() });
+        focus(&mut h, clicked_field());
         assert_eq!(h.fake.take(), vec!["icon to Pointer(300, 210)".to_string()]);
-        // The focus leaves for something that is not a field: the mic stays.
+        // The focus leaves for something that is not a field, and comes back to the same field
+        // without a click before HOME_DELAY (a menu closed): the mic stays.
         focus(&mut h, FieldProbe::default());
         assert!(h.fake.take().is_empty());
-        // The focus comes back to the same field without a click (a menu closed): it stays too.
         focus(&mut h, FieldProbe { pointer: Some((10, 10)), ..field.clone() });
         assert!(h.fake.take().is_empty());
         // A click somewhere else in the same field moves it again.
@@ -2349,5 +2444,153 @@ pub mod tests {
         cfg.beside_field.trigger = BesideFieldTrigger::Focus;
         h.ext(json!({"type": "set-native-config", "config": cfg}));
         assert!(h.fake.take().contains(&"hide beside".to_string()));
+    }
+
+    #[test]
+    fn the_floating_mic_goes_back_to_the_corner_once_the_focus_is_off_the_fields_for_a_moment() {
+        let mut h = following_fields();
+        focus(&mut h, clicked_field());
+        h.fake.take();
+
+        // Off the fields, and into another one before HOME_DELAY (Tab over a button): it goes to
+        // that field, not to the corner.
+        focus(&mut h, FieldProbe::default());
+        h.advance(HOME_DELAY - Duration::from_millis(1));
+        h.core.tick();
+        assert!(h.fake.take().is_empty());
+        let caret = Rect { x: 60, y: 300, width: 1, height: 18 };
+        let next = FieldProbe {
+            caret: Some(caret),
+            bounds: Some(Rect { x: 50, y: 290, width: 400, height: 40 }),
+            pointer: Some((10, 10)),
+            ..text_field()
+        };
+        focus(&mut h, next);
+        assert_eq!(h.fake.take(), vec![format!("icon to {:?}", Anchor::Caret(caret))]);
+        h.advance(Duration::from_millis(1));
+        h.core.tick();
+        assert!(h.fake.take().is_empty());
+        assert!(h.core.next_deadline().is_none());
+
+        // Off the fields for HOME_DELAY: to the corner, once. The focus moving on off the fields
+        // (a password field is not one) does not put it off.
+        focus(&mut h, FieldProbe::default());
+        assert_eq!(h.core.next_deadline(), Some(now(&h) + HOME_DELAY));
+        h.advance(HOME_DELAY / 2);
+        focus(&mut h, FieldProbe { is_password: Some(true), ..clicked_field() });
+        h.advance(HOME_DELAY / 2);
+        h.core.tick();
+        assert_eq!(h.fake.take(), vec!["icon home".to_string()]);
+        assert!(h.core.next_deadline().is_none());
+        focus(&mut h, FieldProbe::default());
+        h.advance(HOME_DELAY);
+        h.core.tick();
+        assert!(h.fake.take().is_empty());
+    }
+
+    #[test]
+    fn a_recording_holds_the_floating_mic_until_it_ends() {
+        let mut h = following_fields();
+        focus(&mut h, clicked_field());
+        session(&mut h, json!({"kind":"started"}));
+        focus(&mut h, FieldProbe::default());
+        h.advance(HOME_DELAY * 3);
+        h.core.tick();
+        assert!(!went_home(&h.fake.take()));
+        session(&mut h, json!({"kind":"ended","reason":"stopped"}));
+        assert!(went_home(&h.fake.take()));
+
+        // Ended back in a field: it stays by that field.
+        focus(&mut h, clicked_field());
+        session(&mut h, json!({"kind":"started"}));
+        focus(&mut h, FieldProbe::default());
+        h.advance(HOME_DELAY);
+        focus(&mut h, clicked_field());
+        session(&mut h, json!({"kind":"ended","reason":"stopped"}));
+        assert!(!went_home(&h.fake.take()));
+    }
+
+    #[test]
+    fn the_pointer_on_the_floating_mic_holds_it_until_it_leaves() {
+        let mut h = following_fields();
+        focus(&mut h, clicked_field());
+        focus(&mut h, FieldProbe::default());
+        // On the mic (or holding it) past HOME_DELAY: it stays under the hand.
+        hover(&mut h, Some(MicPart::Mic));
+        h.advance(HOME_DELAY);
+        h.core.tick();
+        hover(&mut h, Some(MicPart::Button(MicButton::Templates)));
+        assert!(!went_home(&h.fake.take()));
+        hover(&mut h, None);
+        assert!(went_home(&h.fake.take()));
+
+        // Left before HOME_DELAY: it goes at HOME_DELAY, not when the pointer left.
+        focus(&mut h, clicked_field());
+        focus(&mut h, FieldProbe::default());
+        hover(&mut h, Some(MicPart::Mic));
+        h.advance(HOME_DELAY / 2);
+        hover(&mut h, None);
+        assert!(!went_home(&h.fake.take()));
+        h.advance(HOME_DELAY / 2);
+        h.core.tick();
+        assert!(went_home(&h.fake.take()));
+    }
+
+    #[test]
+    fn a_held_floating_mic_does_not_wake_the_loop_again_and_again() {
+        let mut h = following_fields();
+        focus(&mut h, clicked_field());
+        focus(&mut h, FieldProbe::default());
+        session(&mut h, json!({"kind":"started"}));
+        h.advance(HOME_DELAY * 2);
+        assert!(h.core.next_deadline().is_none_or(|at| at > now(&h)), "recording");
+        session(&mut h, json!({"kind":"ended","reason":"stopped"}));
+
+        focus(&mut h, clicked_field());
+        focus(&mut h, FieldProbe::default());
+        hover(&mut h, Some(MicPart::Mic));
+        h.advance(HOME_DELAY * 2);
+        h.core.tick(); // the hint, which was due
+        assert!(h.core.next_deadline().is_none_or(|at| at > now(&h)), "pointer on the mic");
+    }
+
+    #[test]
+    fn after_going_back_the_same_field_brings_it_again_without_a_click() {
+        let mut h = following_fields();
+        focus(&mut h, clicked_field());
+        focus(&mut h, FieldProbe::default());
+        h.advance(HOME_DELAY);
+        h.core.tick();
+        h.fake.take();
+        // Alt+Tab back to the window: the focus is in the same field, the pointer elsewhere.
+        focus(&mut h, FieldProbe { pointer: Some((10, 10)), ..field_with_bounds() });
+        assert_eq!(
+            h.fake.take(),
+            vec![format!("icon to {:?}", Anchor::Caret(Rect { x: 100, y: 200, width: 1, height: 18 }))]
+        );
+    }
+
+    #[test]
+    fn a_floating_mic_the_focus_did_not_bring_stays_where_it_is() {
+        // Just started: the mic is where it was put, not at a field.
+        let mut h = following_fields();
+        focus(&mut h, FieldProbe::default());
+        assert!(h.core.next_deadline().is_none());
+        h.advance(HOME_DELAY);
+        h.core.tick();
+        assert!(h.fake.take().is_empty());
+
+        // Switched to hover on the way: the small mic's rules, and nothing left to go back.
+        focus(&mut h, clicked_field());
+        focus(&mut h, FieldProbe::default());
+        let mut cfg = h.core.config().clone();
+        cfg.beside_field.trigger = BesideFieldTrigger::Hover;
+        h.ext(json!({"type": "set-native-config", "config": cfg}));
+        focus(&mut h, clicked_field());
+        focus(&mut h, FieldProbe::default());
+        h.advance(HOME_DELAY);
+        h.core.tick();
+        assert!(!went_home(&h.fake.take()));
+        assert!(h.core.next_deadline().is_none());
     }
 }

@@ -198,6 +198,10 @@ impl Platform for WindowsPlatform {
     fn icon_to_field(&self, anchor: crate::platform::Anchor, reported_at: Instant) {
         self.shared.run(move |ui| ui.icon_to_field(anchor, reported_at));
     }
+
+    fn icon_home(&self) {
+        self.shared.run(|ui| ui.icon_home());
+    }
 }
 
 /// A daemon started from the Run key or by double-click gets a console window of its own

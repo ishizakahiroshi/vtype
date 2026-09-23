@@ -17,6 +17,7 @@
 // BroadcastChannel, and the older ones hand it what they hold unsaved and close.
 
 import { isInputMode, type InputMode } from "vtype-core";
+import { renderAbout, type AboutLink } from "../shared/about";
 import { translator } from "../shared/i18n";
 import { isNativeConfig, type NativeConfig } from "../shared/native-messages";
 import { formatReplacementText, parseReplacementText } from "../shared/replacement-text";
@@ -76,6 +77,8 @@ function isChannelMessage(data: unknown): data is ChannelMessage {
 export interface SettingsPage {
   /** Resolves once the current settings were read (or could not be). */
   readonly loaded: Promise<void>;
+  /** Resolves once "About vtype" is shown (with the version, or without when it was not read). */
+  readonly about: Promise<void>;
 }
 
 /** Same limits as the desktop app's config.rs (`MAX_TEMPLATES`, `MAX_TEMPLATE_CHARS`). */
@@ -92,9 +95,9 @@ export function normalizeTemplates(items: readonly string[]): string[] {
   return out;
 }
 
-/** `…/t/<token>/api/config` for a page at `…/t/<token>/settings`. */
-export function apiUrl(href: string): string {
-  const url = new URL("api/config", href);
+/** `…/t/<token>/api/<name>` (`config` by default) for a page at `…/t/<token>/settings`. */
+export function apiUrl(href: string, name = "config"): string {
+  const url = new URL(`api/${name}`, href);
   url.search = "";
   url.hash = "";
   return url.toString();
@@ -476,6 +479,40 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
     }
   })();
 
+  // About vtype. This window is a Chrome profile of its own, so its links are opened by the
+  // desktop app in the usual browser (`api/open`, by name); the page opens a link itself only
+  // when that fails. The tray's "About vtype" opens the page at `#about`.
+  const aboutSection = doc.getElementById("about");
+  const openElsewhere = async (link: AboutLink): Promise<boolean> => {
+    try {
+      const res = await fetchJson(apiUrl(href, "open"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ link }),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  };
+  const about = (async () => {
+    if (aboutSection === null) return;
+    let version = "";
+    try {
+      const res = await fetchJson(apiUrl(href, "about"));
+      const got = res.ok ? await res.json() : null;
+      const v = typeof got === "object" && got !== null ? (got as { version?: unknown }).version : undefined;
+      if (typeof v === "string") version = v;
+    } catch {
+      // Shown without the version.
+    }
+    renderAbout(aboutSection, t, { version, voice: t("speech_consent_lead"), desktop: true, open: openElsewhere });
+  })();
+  if (/#about$/.test(href)) {
+    // After both: the templates above change the page's height when they come.
+    void Promise.all([loaded, about]).then(() => aboutSection?.scrollIntoView?.({ block: "start" }));
+  }
+
   /** What this window holds that is not saved; null when nothing. */
   function draft(): SettingsDraft | null {
     if (config === null) return null;
@@ -550,7 +587,7 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
     channel.postMessage({ type: "opened", id: me.id, at: me.at });
   }
 
-  return { loaded };
+  return { loaded, about };
 }
 
 if (typeof document !== "undefined" && document.getElementById("nc-form") !== null) {

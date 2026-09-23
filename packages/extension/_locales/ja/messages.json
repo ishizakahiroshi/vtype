@@ -315,6 +315,10 @@
     "message": "診断情報をコピー",
     "description": "Desktop app: tray menu item that copies the diagnostic information (no transcripts)"
   },
+  "native_trayAbout": {
+    "message": "vtype について",
+    "description": "Desktop app: tray menu item that opens the settings page at About vtype (version, where the voice goes, developer, source, licenses)"
+  },
   "native_trayQuit": {
     "message": "vtype を終了",
     "description": "Desktop app: tray menu item that ends the desktop app"
@@ -689,5 +693,57 @@
   "settings_templatesCount": {
     "message": "{count} / {max} 件",
     "description": "Desktop app settings page: how many templates are stored. {count} and {max} are numbers"
+  },
+  "about_title": {
+    "message": "vtype について",
+    "description": "Options page and desktop app settings page: title of the last section (version, where the voice goes, developer, source, licenses)"
+  },
+  "about_version": {
+    "message": "版",
+    "description": "About vtype: label of the version row"
+  },
+  "about_versionValue": {
+    "message": "vtype {version}",
+    "description": "About vtype: the version row. {version} is the version number, e.g. 0.2.0"
+  },
+  "about_voice": {
+    "message": "声の行き先",
+    "description": "About vtype: label of the row that says the voice is sent to Google by Chrome's speech recognition"
+  },
+  "about_privacy": {
+    "message": "プライバシーポリシー",
+    "description": "About vtype: link to the privacy policy"
+  },
+  "about_developer": {
+    "message": "開発者",
+    "description": "About vtype: label of the row whose value is a link to the developer's website"
+  },
+  "about_source": {
+    "message": "ソースコード",
+    "description": "About vtype: label of the row whose value is a link to the GitHub repository"
+  },
+  "about_license": {
+    "message": "ライセンス",
+    "description": "About vtype: label of vtype's own license row"
+  },
+  "about_licenseMit": {
+    "message": "MIT ライセンス",
+    "description": "About vtype: link to vtype's LICENSE file"
+  },
+  "about_notices": {
+    "message": "同梱しているオープンソース",
+    "description": "About vtype: label of the row that links to the licenses of the open-source software inside vtype"
+  },
+  "about_noticesDesktop": {
+    "message": "デスクトップ版の部品のライセンス一覧（テキストファイル）",
+    "description": "About vtype (desktop app only): link to THIRD_PARTY_NOTICES.txt attached to the desktop app's release"
+  },
+  "about_noticesKuromoji": {
+    "message": "kuromoji のライセンス（Apache License 2.0）",
+    "description": "About vtype: link to the license of kuromoji, which the katakana mode uses to read kanji"
+  },
+  "about_noticesDictionary": {
+    "message": "kuromoji と辞書 mecab-ipadic の告知",
+    "description": "About vtype: link to kuromoji's NOTICE, which carries the terms of the mecab-ipadic dictionary"
   }
 }

@@ -1,8 +1,8 @@
 //! The mic beside the text field (child plan C8, experimental, off by default: parent plan D18).
 //! When a text field takes the focus (or, by choice, the pointer rests on one), a small mic
 //! appears next to it; pressing it starts recording. Where the platform can move the floating mic
-//! (Windows), a field taking the focus brings the floating mic itself there instead, and it stays
-//! when the focus leaves.
+//! (Windows), a field taking the focus brings the floating mic itself there instead, and it goes
+//! back to the corner of the screen the pointer is on a moment after the focus leaves the fields.
 //!
 //! What to show and where is decided here, the same on every OS; the platform code only reports
 //! what the focused (or pointed-at) element is and puts the window where it is told.
@@ -101,7 +101,9 @@ pub fn decide(config: &BesideFieldConfig, probe: &FieldProbe) -> Option<(i32, i3
 /// The floating mic's top-left when it comes to a field (`size` is its window), on the screen the
 /// user is at: above the line, so it covers neither the text nor the IME's candidates below it;
 /// below the line when there is no room above (a browser's address bar at the top of a screen).
-/// Right of the pointer or the caret; with only the field, at the field's start.
+/// Right of the pointer or the caret; with only the field, at the field's start. Only Windows
+/// moves the floating mic to fields (`Platform::icon_follows_fields`).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn follow_position(anchor: Anchor, size: i32, work_areas: &[Rect], primary: Rect) -> (i32, i32) {
     let (at, above, below) = match anchor {
         Anchor::Pointer(x, y) => {
@@ -112,6 +114,13 @@ pub fn follow_position(anchor: Anchor, size: i32, work_areas: &[Rect], primary: 
     };
     let area = area_at(at, work_areas, primary);
     clamp_into(if above.1 >= area.y { above } else { below }, size, area)
+}
+
+/// The floating mic's top-left when the focus has left the fields: the bottom-right corner of the
+/// screen the pointer is on (the one the user is looking at), or of the nearest one.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn home_position(pointer: (i32, i32), size: i32, work_areas: &[Rect], primary: Rect) -> (i32, i32) {
+    crate::overlay_logic::default_position(area_at(pointer, work_areas, primary), size)
 }
 
 /// Moves `pos` so the mic lies inside the work area it is (mostly) on, or the nearest one.
@@ -308,6 +317,22 @@ mod tests {
         assert_eq!(follow(Anchor::Pointer(-1009, 600)), (-1009 + POINTER_GAP, 600 - 118 - POINTER_GAP));
         // At the right edge of the left screen: kept on the left screen.
         assert_eq!(follow(Anchor::Pointer(-20, 600)), (-118, 600 - 118 - POINTER_GAP));
+    }
+
+    #[test]
+    fn the_floating_mic_goes_home_to_the_corner_of_the_screen_the_pointer_is_on() {
+        use crate::overlay_logic::default_position;
+        // The left screen is not the primary one.
+        let left = Rect { x: -2560, y: 0, width: 2560, height: 1032 };
+        let right = Rect { x: 0, y: 0, width: 1920, height: 1032 };
+        let home = |pointer: (i32, i32)| home_position(pointer, 118, &[left, right], right);
+        assert_eq!(home((-1200, 500)), default_position(left, 118));
+        assert_eq!(home((800, 500)), default_position(right, 118));
+        // Just off the top of the left screen: the nearest one, not the primary one.
+        assert_eq!(home((-1200, -40)), default_position(left, 118));
+        assert_eq!(home((2500, 500)), default_position(right, 118));
+        // No screens known: the primary one.
+        assert_eq!(home_position((-1200, 500), 118, &[], right), default_position(right, 118));
     }
 
     #[test]

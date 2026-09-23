@@ -91,6 +91,8 @@ pub enum MenuAction {
     OpenSettings,
     ReportBug,
     CopyDiagnostics,
+    /// Open the settings page at "About vtype".
+    About,
     Quit,
 }
 
@@ -229,9 +231,13 @@ pub trait Platform: Send + Sync {
     fn icon_follows_fields(&self) -> bool {
         false
     }
-    /// Brings the floating mic to the field the user is at; it stays there after. Nothing while
-    /// the mic is off screen, held, or under the pointer. `reported_at` as for `show_beside`.
+    /// Brings the floating mic to the field the user is at, until `icon_home`. Nothing while the
+    /// mic is off screen, held, or under the pointer. `reported_at` as for `show_beside`.
     fn icon_to_field(&self, _anchor: Anchor, _reported_at: Instant) {}
+    /// The focus left the fields: the floating mic goes back to the bottom-right corner of the
+    /// screen the pointer is on, not saved as its position. Nothing when it is off screen, held,
+    /// or under the pointer.
+    fn icon_home(&self) {}
 }
 
 /// The implementation for the OS this binary was built for.

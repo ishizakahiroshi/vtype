@@ -27,6 +27,7 @@ use tungstenite::handshake::derive_accept_key;
 use tungstenite::protocol::Role;
 use tungstenite::{Message, WebSocket};
 
+use crate::about::AboutLink;
 use crate::daemon::{Event, NEXT_CONN};
 use crate::protocol::{Reply, Request};
 use crate::speech_assets::asset;
@@ -202,11 +203,19 @@ fn serve(mut stream: TcpStream, token: &str, origin: &str, tx: Sender<Event>) ->
     if name == "api/config" {
         return serve_config(stream, head, origin, tx);
     }
+    if name == "api/open" {
+        return serve_open(stream, head, origin, tx);
+    }
     if head.method != "GET" || name.contains("..") {
         return not_found(&mut stream);
     }
     if name == "ws" {
         return serve_socket(stream, head, origin, tx);
+    }
+    if name == "api/about" {
+        let body = serde_json::to_vec(&serde_json::json!({ "version": env!("CARGO_PKG_VERSION") }))
+            .map_err(io::Error::other)?;
+        return respond(&mut stream, "200 OK", "application/json; charset=utf-8", &body);
     }
     let name = match name {
         "speech" => "speech.html",
@@ -219,33 +228,55 @@ fn serve(mut stream: TcpStream, token: &str, origin: &str, tx: Sender<Event>) ->
     }
 }
 
-/// `GET` / `POST /t/<token>/api/config`: the settings page reads and changes the desktop app's
-/// settings. A change is accepted only from the page itself (`Origin`), as JSON, up to
-/// `CONFIG_LIMIT` bytes.
-fn serve_config(mut stream: TcpStream, head: Head, origin: &str, tx: Sender<Event>) -> io::Result<()> {
+/// The body of a `POST` the settings page sent: accepted only from the page itself (`Origin`), as
+/// JSON, up to `CONFIG_LIMIT` bytes. `None` when it was refused (the refusal is answered).
+fn page_post_body(stream: &mut TcpStream, head: &Head, origin: &str) -> io::Result<Option<Vec<u8>>> {
     let header = |name: &str| head.headers.get(name).map(String::as_str).unwrap_or_default();
+    if header("origin") != origin {
+        refuse(stream, "403 Forbidden", b"forbidden")?;
+        return Ok(None);
+    }
+    if !header("content-type").to_ascii_lowercase().starts_with("application/json") {
+        refuse(stream, "415 Unsupported Media Type", b"json only")?;
+        return Ok(None);
+    }
+    let Ok(len) = header("content-length").parse::<usize>() else {
+        refuse(stream, "411 Length Required", b"length required")?;
+        return Ok(None);
+    };
+    if len > CONFIG_LIMIT {
+        refuse(stream, "413 Payload Too Large", b"too large")?;
+        return Ok(None);
+    }
+    let mut body = head.rest.clone();
+    body.truncate(len);
+    if body.len() < len {
+        let mut more = vec![0u8; len - body.len()];
+        stream.read_exact(&mut more)?;
+        body.extend_from_slice(&more);
+    }
+    Ok(Some(body))
+}
+
+/// `req` to the daemon, and its reply; `None` when it is gone or does not answer in time.
+fn ask(tx: &Sender<Event>, req: Request) -> Option<Reply> {
+    let (out, answer) = mpsc::channel::<Reply>();
+    let conn = NEXT_CONN.fetch_add(1, Ordering::Relaxed);
+    tx.send(Event::Request { conn, req, out }).ok()?;
+    answer.recv_timeout(CONFIG_WAIT).ok()
+}
+
+fn unavailable(stream: &mut TcpStream) -> io::Result<()> {
+    respond(stream, "503 Service Unavailable", "text/plain; charset=utf-8", b"unavailable")
+}
+
+/// `GET` / `POST /t/<token>/api/config`: the settings page reads and changes the desktop app's
+/// settings.
+fn serve_config(mut stream: TcpStream, head: Head, origin: &str, tx: Sender<Event>) -> io::Result<()> {
     let req = match head.method.as_str() {
         "GET" => Request::GetConfig,
         "POST" => {
-            if header("origin") != origin {
-                return refuse(&mut stream, "403 Forbidden", b"forbidden");
-            }
-            if !header("content-type").to_ascii_lowercase().starts_with("application/json") {
-                return refuse(&mut stream, "415 Unsupported Media Type", b"json only");
-            }
-            let Ok(len) = header("content-length").parse::<usize>() else {
-                return refuse(&mut stream, "411 Length Required", b"length required");
-            };
-            if len > CONFIG_LIMIT {
-                return refuse(&mut stream, "413 Payload Too Large", b"too large");
-            }
-            let mut body = head.rest.clone();
-            body.truncate(len);
-            if body.len() < len {
-                let mut more = vec![0u8; len - body.len()];
-                stream.read_exact(&mut more)?;
-                body.extend_from_slice(&more);
-            }
+            let Some(body) = page_post_body(&mut stream, &head, origin)? else { return Ok(()) };
             match serde_json::from_slice(&body) {
                 Ok(config) => Request::SetConfig { config },
                 Err(_) => return respond(&mut stream, "400 Bad Request", "text/plain; charset=utf-8", b"bad config"),
@@ -253,17 +284,32 @@ fn serve_config(mut stream: TcpStream, head: Head, origin: &str, tx: Sender<Even
         }
         _ => return not_found(&mut stream),
     };
-    let (out, answer) = mpsc::channel::<Reply>();
-    let conn = NEXT_CONN.fetch_add(1, Ordering::Relaxed);
-    if tx.send(Event::Request { conn, req, out }).is_err() {
-        return respond(&mut stream, "503 Service Unavailable", "text/plain; charset=utf-8", b"unavailable");
-    }
-    match answer.recv_timeout(CONFIG_WAIT) {
-        Ok(Reply::Config { config }) => {
+    match ask(&tx, req) {
+        Some(Reply::Config { config }) => {
             let body = serde_json::to_vec(&config).map_err(io::Error::other)?;
             respond(&mut stream, "200 OK", "application/json; charset=utf-8", &body)
         }
-        _ => respond(&mut stream, "503 Service Unavailable", "text/plain; charset=utf-8", b"unavailable"),
+        _ => unavailable(&mut stream),
+    }
+}
+
+/// `POST /t/<token>/api/open` with `{"link": "<name>"}`: a link of the settings page's "About
+/// vtype", which the daemon opens in the usual browser. Only the names of `AboutLink` exist.
+fn serve_open(mut stream: TcpStream, head: Head, origin: &str, tx: Sender<Event>) -> io::Result<()> {
+    #[derive(serde::Deserialize)]
+    struct Open {
+        link: AboutLink,
+    }
+    if head.method != "POST" {
+        return not_found(&mut stream);
+    }
+    let Some(body) = page_post_body(&mut stream, &head, origin)? else { return Ok(()) };
+    let Ok(Open { link }) = serde_json::from_slice(&body) else {
+        return respond(&mut stream, "400 Bad Request", "text/plain; charset=utf-8", b"bad link");
+    };
+    match ask(&tx, Request::OpenLink { link }) {
+        Some(Reply::Ok) => respond(&mut stream, "204 No Content", "text/plain; charset=utf-8", b""),
+        _ => unavailable(&mut stream),
     }
 }
 
@@ -508,10 +554,14 @@ mod tests {
     }
 
     fn post(h: &SpeechHost, token: &str, origin: &str, content_type: &str, body: &str) -> (String, Vec<u8>) {
+        post_to(h, &format!("/t/{token}/api/config"), origin, content_type, body)
+    }
+
+    fn post_to(h: &SpeechHost, path: &str, origin: &str, content_type: &str, body: &str) -> (String, Vec<u8>) {
         raw(
             h,
             &format!(
-                "POST /t/{token}/api/config HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {origin}\r\n\
+                "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {origin}\r\n\
                  Content-Type: {content_type}\r\nContent-Length: {}\r\n\r\n{body}",
                 body.len()
             ),
@@ -554,6 +604,43 @@ mod tests {
         assert!(head.starts_with("HTTP/1.1 404"), "{head}");
         // None of them reached the daemon.
         assert!(rx.recv_timeout(Duration::from_millis(300)).is_err());
+    }
+
+    #[test]
+    fn the_settings_page_reads_the_version() {
+        let (h, _rx) = host();
+        let (head, body) = get(&h, &format!("/t/{}/api/about", h.token));
+        assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+        let about: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(about["version"], env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn the_settings_page_has_a_link_opened_by_its_name_only() {
+        let (tx, rx) = mpsc::channel();
+        let h = start_on(&[0], tx).unwrap();
+        let core = thread::spawn(move || {
+            let mut asked = Vec::new();
+            while let Ok(ev) = rx.recv_timeout(Duration::from_secs(3)) {
+                if let Event::Request { req, out, .. } = ev {
+                    asked.push(req);
+                    let _ = out.send(Reply::Ok);
+                }
+            }
+            asked
+        });
+        let path = format!("/t/{}/api/open", h.token);
+        let (head, _) = post_to(&h, &path, &h.origin(), "application/json", r#"{"link":"source"}"#);
+        assert!(head.starts_with("HTTP/1.1 204"), "{head}");
+        // A URL is not a link name; a foreign page may not ask.
+        let (head, _) = post_to(&h, &path, &h.origin(), "application/json", r#"{"link":"https://example.com"}"#);
+        assert!(head.starts_with("HTTP/1.1 400"), "{head}");
+        let (head, _) = post_to(&h, &path, "https://example.com", "application/json", r#"{"link":"source"}"#);
+        assert!(head.starts_with("HTTP/1.1 403"), "{head}");
+        let (head, _) = get(&h, &path);
+        assert!(head.starts_with("HTTP/1.1 404"), "{head}");
+        drop(h);
+        assert_eq!(core.join().unwrap(), vec![Request::OpenLink { link: AboutLink::Source }]);
     }
 
     #[test]

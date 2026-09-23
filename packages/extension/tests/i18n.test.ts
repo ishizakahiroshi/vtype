@@ -21,6 +21,7 @@ const sources = [
   "src/desktop-settings/settings.ts",
   "src/options/options.ts",
   "src/permission/permission.ts",
+  "src/shared/about.ts",
   "src/speech/speech.ts",
   "src/ui/toolbar.ts",
 ].map((path) => readFileSync(join(extensionRoot, path), "utf8"));

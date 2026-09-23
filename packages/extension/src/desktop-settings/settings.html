@@ -39,7 +39,11 @@
   #status { margin-top: 16px; font-weight: 600; min-height: 1.6em; }
   #status.ok { color: #16a34a; }
   #status.err { color: #dc2626; }
+  dl.about { margin: 8px 0 0; }
+  dl.about dt { font-weight: 600; margin-top: 10px; }
+  dl.about dd { margin: 2px 0 0; overflow-wrap: anywhere; }
   @media (prefers-color-scheme: dark) {
+    dl.about a { color: #a5b4fc; }
     body { background: #0e0f12; color: #e2e8f0; }
     fieldset { border-color: #334155; }
     .choice .hint, .lead-hint, .hint, #repl-count, #tpl-count { color: #94a3b8; }
@@ -99,6 +103,7 @@
   </fieldset>
 </form>
 <p id="status" role="status"></p>
+<section id="about"></section>
 <script src="settings.js"></script>
 </body>
 </html>

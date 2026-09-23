@@ -9,6 +9,8 @@ import { translate } from "../src/shared/i18n";
 
 const PAGE = "http://127.0.0.1:47213/t/0123456789abcdef0123456789abcdef/settings";
 const API = "http://127.0.0.1:47213/t/0123456789abcdef0123456789abcdef/api/config";
+const ABOUT_API = "http://127.0.0.1:47213/t/0123456789abcdef0123456789abcdef/api/about";
+const OPEN_API = "http://127.0.0.1:47213/t/0123456789abcdef0123456789abcdef/api/open";
 
 const CONFIG = {
   hotkey: null,
@@ -22,14 +24,23 @@ const CONFIG = {
 
 type Call = { url: string; method: string; body: unknown };
 
-/** A desktop app that stores what it is sent and answers with it (or fails). */
+/**
+ * A desktop app that stores what it is sent and answers with it (or fails). "About vtype" is
+ * answered aside: its version, and the links it was asked to open in `opened`, not in `calls`.
+ */
 function fakeApp(initial: unknown = CONFIG) {
   let stored: unknown = structuredClone(initial);
   const calls: Call[] = [];
+  const opened: unknown[] = [];
   let failing = false;
   const fetch = async (url: string, init?: { method?: string; body?: string }) => {
     const method = init?.method ?? "GET";
     const body = init?.body === undefined ? undefined : (JSON.parse(init.body) as unknown);
+    if (url === ABOUT_API) return { ok: !failing, json: async () => ({ version: "9.8.7" }) };
+    if (url === OPEN_API) {
+      if (!failing) opened.push(body);
+      return { ok: !failing, json: async () => ({}) };
+    }
     calls.push({ url, method, body });
     if (failing) return { ok: false, json: async () => ({}) };
     if (method === "POST") stored = body;
@@ -38,6 +49,7 @@ function fakeApp(initial: unknown = CONFIG) {
   return {
     fetch,
     calls,
+    opened,
     fail: () => {
       failing = true;
     },
@@ -443,5 +455,45 @@ describe("one settings window at a time", () => {
     await settle();
     expect(closed).toBe(1);
     expect(second.querySelector<HTMLTextAreaElement>("#tpl-list .tpl-edit")?.value).toBe("two");
+  });
+});
+
+describe("About vtype on the desktop settings page", () => {
+  const rows = (): Record<string, HTMLElement> =>
+    Object.fromEntries([...document.querySelectorAll("#about dt")].map((dt) => [dt.textContent, dt.nextElementSibling as HTMLElement]));
+
+  it("shows the desktop app's version, the consent's words and its own parts' licenses", async () => {
+    const app = fakeApp();
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "en" }).about;
+    expect($("about").querySelector("h2")?.textContent).toBe(translate("about_title", "en"));
+    const row = rows();
+    expect(row[translate("about_version", "en")]?.textContent).toBe("vtype 9.8.7");
+    expect(row[translate("about_voice", "en")]?.textContent).toContain(translate("speech_consent_lead", "en"));
+    const notices = [...row[translate("about_notices", "en")]!.querySelectorAll("a")].map((a) => a.href);
+    expect(notices[0]).toBe("https://github.com/ishizakahiroshi/vtype/releases/download/native-v9.8.7/THIRD_PARTY_NOTICES.txt");
+    expect(notices).toHaveLength(3);
+    // Reading the version is not a settings call.
+    expect(app.calls).toEqual([{ url: API, method: "GET", body: undefined }]);
+  });
+
+  it("has its links opened by the desktop app, by name", async () => {
+    const app = fakeApp();
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "en" }).about;
+    const privacy = [...document.querySelectorAll<HTMLAnchorElement>("#about a")].find(
+      (a) => a.textContent === translate("about_privacy", "en"),
+    )!;
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+    privacy.dispatchEvent(click);
+    await flush();
+    expect(click.defaultPrevented).toBe(true);
+    expect(app.opened).toEqual([{ link: "privacy" }]);
+  });
+
+  it("is shown without the version when the desktop app does not answer", async () => {
+    const app = fakeApp();
+    app.fail();
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "en" }).about;
+    expect(rows()[translate("about_version", "en")]).toBeUndefined();
+    expect($("about").querySelectorAll("a").length).toBeGreaterThan(0);
   });
 });

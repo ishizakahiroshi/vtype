@@ -1,0 +1,10 @@
+{
+  "version": "1.2.3",
+  "links": {
+    "privacy": "https://github.com/ishizakahiroshi/vtype/blob/main/PRIVACY.md",
+    "homepage": "https://ishizakahiroshi.com/",
+    "source": "https://github.com/ishizakahiroshi/vtype",
+    "license": "https://github.com/ishizakahiroshi/vtype/blob/main/LICENSE",
+    "notices": "https://github.com/ishizakahiroshi/vtype/releases/download/native-v1.2.3/THIRD_PARTY_NOTICES.txt"
+  }
+}

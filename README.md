@@ -132,6 +132,9 @@ either: it asks for your consent before the first recording, then uses Chrome's 
 the same way (so what you say reaches Google through Chrome), and it talks only to that Chrome on
 your own computer. The full text is in [PRIVACY.md](PRIVACY.md).
 
+**About vtype**, at the end of the extension's settings page and in the desktop app's tray menu,
+says this again, with the version, the developer, the source and the licenses.
+
 ## Repository layout
 
 | Path | What it is |

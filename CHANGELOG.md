@@ -34,6 +34,11 @@ from it. Releasing turns `## [Unreleased]` into `## [X.Y.Z] - YYYY-MM-DD` and op
   form with the version, OS and browser filled in, and sends nothing itself. A bug report issue
   template goes with it. "Copy diagnostic info" in the desktop app's menu never includes audio or
   transcripts.
+- "About vtype" at the end of the settings page, and in the desktop app's tray menu: the version,
+  where the voice goes (the words shown before the first recording) with a link to the privacy
+  policy, the developer's website, the source, the MIT license and the licenses of the open-source
+  software inside. The desktop app opens these links in the usual browser, not in its settings
+  window's own Chrome profile.
 - Release tooling for the desktop app (nothing is published by it): a workflow that builds all
   three systems on a `native-v*` tag into a draft GitHub Release (zip, universal macOS tar.gz,
   `.deb`, unsigned MSIX, third-party notices, checksums, Homebrew formula), and the npm package

@@ -33,7 +33,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WM_TIMER, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
-use crate::beside_field::{follow_position, keep_on_screen, Anchor, BESIDE_SIZE};
+use crate::beside_field::{follow_position, home_position, keep_on_screen, Anchor, BESIDE_SIZE};
 use crate::icon_draw::{draw_floating, draw_icon, draw_rounded_panel, to_premultiplied_bgra};
 use crate::overlay_logic::{
     bubble_position, button_at, button_shown, fits, part_at, resized_position, resolve_position, scaled_size, tail,
@@ -81,6 +81,9 @@ struct IconShared {
     percent: Cell<u16>,
     /// Still where it goes by default (never dragged): a new size keeps it in the corner.
     at_default: Cell<bool>,
+    /// Beside the field the focus is in (`Overlay::follow`): a new size there is not saved, or
+    /// the next start would put the mic beside a field that is not there.
+    at_field: Cell<bool>,
     wheel: Cell<WheelSteps>,
 }
 
@@ -298,6 +301,7 @@ unsafe extern "system" fn icon_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
                     },
                     Gesture::Drag => {
                         s.at_default.set(false);
+                        s.at_field.set(false);
                         let (x, y) = s.pos.get();
                         PlatformEvent::IconMoved { x, y }
                     }
@@ -407,6 +411,7 @@ impl Overlay {
             size: Cell::new(scaled_size(SCALE_DEFAULT, 1.0)),
             percent: Cell::new(SCALE_DEFAULT),
             at_default: Cell::new(true),
+            at_field: Cell::new(false),
             wheel: Cell::new(WheelSteps::default()),
         });
         ICON.with(|slot| *slot.borrow_mut() = Some(icon.clone()));
@@ -426,6 +431,7 @@ impl Overlay {
             let (areas, primary) = work_areas();
             self.icon.pos.set(resolve_position(saved, size, &areas, primary));
             self.icon.at_default.set(saved.is_none_or(|p| !fits(p, size, &areas)));
+            self.icon.at_field.set(false);
         }
         self.icon.set_look(look);
         self.icon.render();
@@ -443,7 +449,7 @@ impl Overlay {
     }
 
     /// The mic's size in percent. On screen it changes around its centre (or stays in the
-    /// corner); a moved mic reports where it went so the position is saved.
+    /// corner); a mic the user moved reports where it went so the position is saved.
     pub fn set_scale(&mut self, percent: u16) {
         if self.icon.percent.replace(percent) == percent || !self.shown {
             return;
@@ -457,7 +463,7 @@ impl Overlay {
         self.icon.size.set(new);
         self.icon.pos.set(pos);
         self.icon.render();
-        if !at_default {
+        if !at_default && !self.icon.at_field.get() {
             let _ = self.icon.events.send(PlatformEvent::IconMoved { x: pos.0, y: pos.1 });
         }
     }
@@ -485,32 +491,61 @@ impl Overlay {
         self.hide_bubble();
     }
 
-    /// Brings the mic to the field the user clicked or tabbed into, and reports whether it moved.
-    /// It stays there after; the saved position is left alone, so the next start is where the
-    /// user put it. Not while it is held, nor while the pointer is on it: the focus coming back
-    /// from a template menu must not pull it away from under the hand.
-    pub fn follow(&mut self, anchor: Anchor) -> bool {
+    /// Whether the mic may be moved for the user: it is on screen, not held, and the pointer is
+    /// not on it (the focus coming back from a template menu must not pull it from under the hand).
+    fn free_to_move(&self) -> bool {
         if !self.shown || self.icon.press.get().is_some() {
             return false;
         }
         let size = self.icon.size.get();
         let (x, y) = self.icon.pos.get();
         let (cx, cy) = cursor();
-        if cx >= x && cx < x + size && cy >= y && cy < y + size {
-            return false;
-        }
-        let (areas, primary) = work_areas();
-        let pos = follow_position(anchor, size, &areas, primary);
-        if pos == (x, y) {
+        !(cx >= x && cx < x + size && cy >= y && cy < y + size)
+    }
+
+    /// Puts the mic at `pos`, and reports whether it moved.
+    fn move_to(&mut self, pos: (i32, i32)) -> bool {
+        if pos == self.icon.pos.get() {
             return false;
         }
         // The bubble was placed over the old spot; the next words place it over the new one.
         self.hide_bubble();
         self.icon.pos.set(pos);
-        // A later resize keeps it here instead of sending it back to the corner.
-        self.icon.at_default.set(false);
         unsafe { SetWindowPos(self.icon.hwnd.get(), HWND_TOPMOST, pos.0, pos.1, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE) };
         true
+    }
+
+    /// Brings the mic to the field the user clicked or tabbed into, and reports whether it moved.
+    /// It stays there until `go_home`; the saved position is left alone, so the next start is
+    /// where the user put it. Not while it is held, nor while the pointer is on it.
+    pub fn follow(&mut self, anchor: Anchor) -> bool {
+        if !self.free_to_move() {
+            return false;
+        }
+        let (areas, primary) = work_areas();
+        let pos = follow_position(anchor, self.icon.size.get(), &areas, primary);
+        if !self.move_to(pos) {
+            return false;
+        }
+        // A later resize keeps it here instead of sending it back to the corner, unsaved.
+        self.icon.at_default.set(false);
+        self.icon.at_field.set(true);
+        true
+    }
+
+    /// Sends the mic back to the bottom-right corner of the screen the pointer is on (the focus
+    /// left the fields), and reports whether it moved. Not saved: the next start is where the user
+    /// put it. A later resize keeps it in that corner. Not while it is held, nor while the pointer
+    /// is on it.
+    pub fn go_home(&mut self) -> bool {
+        if !self.free_to_move() {
+            return false;
+        }
+        let (areas, primary) = work_areas();
+        let pos = home_position(cursor(), self.icon.size.get(), &areas, primary);
+        self.icon.at_default.set(true);
+        self.icon.at_field.set(false);
+        self.move_to(pos)
     }
 
     pub fn is_shown(&self) -> bool {

@@ -305,6 +305,12 @@ impl Ui {
         }
     }
 
+    pub fn icon_home(&mut self) {
+        if self.overlay.go_home() {
+            tracing::info!("mic went back to the corner");
+        }
+    }
+
     /// Hides the mic while a full-screen app (a game, a video, a presentation) is in front.
     fn check_fullscreen(&mut self) {
         if !self.hide_on_fullscreen || !self.icon_wanted {

@@ -1,6 +1,7 @@
 //! vtype desktop. Chrome's speech recognition, in a Chrome that vtype starts itself, turns speech
 //! into text; this program types it into whatever app is in front.
 
+mod about;
 mod beside_field;
 mod chrome_launch;
 mod cli;

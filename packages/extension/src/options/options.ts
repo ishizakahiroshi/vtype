@@ -14,6 +14,7 @@
 // The text itself lives in `_locales/` (one file per language) and is read through shared/i18n.
 
 import { isInputMode, type InputMode } from "vtype-core";
+import { renderAbout } from "../shared/about";
 import { translator } from "../shared/i18n";
 import { bugReportUrl, describeBrowser, describeOs } from "../shared/report";
 import { clearDiagLog, formatDiagLog, readDiagLog, watchDiagLog, type DiagEntry } from "../shared/diagnostics";
@@ -384,6 +385,13 @@ export function initOptionsPage(options: OptionsPageOptions = {}): void {
       setText(doc, "status", count === 0 ? t("optionsResetNone") : t(count === 1 ? "optionsResetDoneOne" : "optionsResetDoneMany", { count }), "ok");
     });
   });
+
+  // About vtype: the version, where the voice goes (the words of the microphone page), the
+  // developer, the source and the licences.
+  const about = doc.getElementById("about");
+  if (about !== null) {
+    renderAbout(about, t, { version: options.version ?? manifestVersion(), voice: t("permissionPrivacy") });
+  }
 }
 
 if (typeof document !== "undefined" && document.getElementById("click") !== null) initOptionsPage();

@@ -53,6 +53,10 @@ pub enum Request {
     SetConfig {
         config: crate::config::NativeConfig,
     },
+    /// The settings page's "About vtype": open this link in the usual browser.
+    OpenLink {
+        link: crate::about::AboutLink,
+    },
     /// A recognizer connected: the speech page, with `origin` `http://127.0.0.1:<port>`.
     HostHello {
         origin: String,
@@ -205,6 +209,10 @@ mod tests {
         round_trip_request(Request::Status, json!({"type":"status"}));
         round_trip_request(Request::OpenSettings, json!({"type":"open-settings"}));
         round_trip_request(Request::Quit, json!({"type":"quit"}));
+        round_trip_request(
+            Request::OpenLink { link: crate::about::AboutLink::Privacy },
+            json!({"type":"open-link","link":"privacy"}),
+        );
         round_trip_request(
             Request::HostHello { origin: "chrome-extension://abc/".into() },
             json!({"type":"host-hello","origin":"chrome-extension://abc/"}),

@@ -55,6 +55,7 @@ pub fn menu_items(state: &TrayState, with_record_item: bool) -> Vec<MenuItem> {
         MenuItem::Action { action: MenuAction::OpenSettings, label: t("native_trayOpenSettings") },
         MenuItem::Action { action: MenuAction::ReportBug, label: t("native_trayReportBug") },
         MenuItem::Action { action: MenuAction::CopyDiagnostics, label: t("native_trayCopyDiagnostics") },
+        MenuItem::Action { action: MenuAction::About, label: t("native_trayAbout") },
         MenuItem::Separator,
         MenuItem::Action { action: MenuAction::Quit, label: t("native_trayQuit") },
     ]);
@@ -333,6 +334,8 @@ mod tests {
             .collect();
         assert_eq!(checked, vec![MenuAction::ToggleIconVisible, MenuAction::SetMode(InputMode::Kana)]);
         assert!(matches!(menu.last(), Some(MenuItem::Action { action: MenuAction::Quit, .. })));
+        // "About vtype" closes the group above Quit.
+        assert!(matches!(menu[menu.len() - 3], MenuItem::Action { action: MenuAction::About, .. }));
     }
 
     #[test]
