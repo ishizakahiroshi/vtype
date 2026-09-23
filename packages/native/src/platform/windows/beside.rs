@@ -15,8 +15,9 @@ use windows::Win32::System::Ole::{SafeArrayAccessData, SafeArrayDestroy, SafeArr
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationFocusChangedEventHandler,
     IUIAutomationFocusChangedEventHandler_Impl, IUIAutomationTextPattern2, IUIAutomationTextRange,
-    IUIAutomationValuePattern, TextUnit_Character, UIA_DocumentControlTypeId, UIA_EditControlTypeId,
-    UIA_TextPattern2Id, UIA_ValuePatternId,
+    IUIAutomationValuePattern, TextUnit_Character, UIA_ComboBoxControlTypeId, UIA_DocumentControlTypeId,
+    UIA_EditControlTypeId, UIA_TextControlTypeId, UIA_TextPattern2Id, UIA_TextPatternId, UIA_ValuePatternId,
+    UIA_CONTROLTYPE_ID,
 };
 
 use crate::beside_field::{FieldProbe, HoverChange, HoverTracker, Pointed, HOVER_POLL};
@@ -64,19 +65,38 @@ unsafe fn caret_rect(element: &IUIAutomationElement) -> Option<Rect> {
     first_rect(&wider).filter(|r| r.height > 0).map(|r| Rect { width: 1, ..r })
 }
 
+/// Windows Terminal's text area: a Text element, not an Edit.
+const TERMINAL_CLASS: &str = "TermControl";
+
+/// Whether an element takes typed text, from what UI Automation says about it: an edit or a
+/// document; a combo box that has a text pattern (Chrome gives Google's search box as one; a
+/// drop-down list has none); Windows Terminal's text area. Not when read-only or unfocusable.
+fn takes_text(kind: UIA_CONTROLTYPE_ID, class: &str, has_text: bool, focusable: bool, read_only: bool) -> bool {
+    let typed_into = kind == UIA_EditControlTypeId
+        || kind == UIA_DocumentControlTypeId
+        || (kind == UIA_ComboBoxControlTypeId && has_text)
+        || (kind == UIA_TextControlTypeId && class == TERMINAL_CLASS);
+    typed_into && focusable && !read_only
+}
+
 /// What an element is, for the beside mic. `with_caret` is false for hover (the pointer, not the
 /// caret, says where the user is looking).
 pub fn probe(element: &IUIAutomationElement, with_caret: bool) -> FieldProbe {
     unsafe {
-        let kind = element.CurrentControlType().ok();
-        let is_edit_kind = kind == Some(UIA_EditControlTypeId) || kind == Some(UIA_DocumentControlTypeId);
+        let kind = element.CurrentControlType().unwrap_or_default();
+        let class = if kind == UIA_TextControlTypeId {
+            element.CurrentClassName().map(|s| s.to_string()).unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let has_text = kind == UIA_ComboBoxControlTypeId && element.GetCurrentPattern(UIA_TextPatternId).is_ok();
         let focusable = element.CurrentIsKeyboardFocusable().map(|b| b.as_bool()).unwrap_or(false);
         let read_only = element
             .GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
             .ok()
             .and_then(|v| v.CurrentIsReadOnly().ok())
             .is_some_and(|b| b.as_bool());
-        let is_text_field = is_edit_kind && focusable && !read_only;
+        let is_text_field = takes_text(kind, &class, has_text, focusable, read_only);
         FieldProbe {
             is_text_field,
             is_password: element.CurrentIsPassword().ok().map(|b| b.as_bool()),
@@ -208,5 +228,27 @@ impl Drop for Watcher {
         if let Some(t) = self.thread.take() {
             let _ = t.join();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows::Win32::UI::Accessibility::{UIA_ButtonControlTypeId, UIA_WindowControlTypeId};
+
+    #[test]
+    fn what_takes_typed_text() {
+        // Measured on the development machine (Chrome, Windows Terminal).
+        assert!(takes_text(UIA_EditControlTypeId, "OmniboxViewViews", true, true, false));
+        assert!(takes_text(UIA_ComboBoxControlTypeId, "truncate", true, true, false), "Google's search box");
+        assert!(takes_text(UIA_TextControlTypeId, TERMINAL_CLASS, true, true, false), "Windows Terminal");
+        assert!(!takes_text(UIA_DocumentControlTypeId, "", true, true, true), "a web page itself is read-only");
+        assert!(!takes_text(UIA_ButtonControlTypeId, "card", false, true, false));
+        assert!(!takes_text(UIA_WindowControlTypeId, "CASCADIA_HOSTING_WINDOW_CLASS", false, true, false));
+        // A drop-down list has no text pattern; other text is a label.
+        assert!(!takes_text(UIA_ComboBoxControlTypeId, "", false, true, false));
+        assert!(!takes_text(UIA_TextControlTypeId, "", true, true, false));
+        assert!(!takes_text(UIA_EditControlTypeId, "", true, false, false), "not focusable");
+        assert!(!takes_text(UIA_ComboBoxControlTypeId, "", true, true, true), "read-only");
     }
 }

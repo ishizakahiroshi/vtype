@@ -500,7 +500,7 @@ impl Overlay {
             return false;
         }
         let (areas, primary) = work_areas();
-        let pos = keep_on_screen(follow_position(anchor, size), size, &areas, primary);
+        let pos = follow_position(anchor, size, &areas, primary);
         if pos == (x, y) {
             return false;
         }

@@ -98,25 +98,43 @@ pub fn decide(config: &BesideFieldConfig, probe: &FieldProbe) -> Option<(i32, i3
     anchor(config, probe).map(beside_position)
 }
 
-/// The floating mic's top-left when it comes to a field (`size` is its window), before keeping it
-/// on a screen: above the line, so it covers neither the text nor the IME's candidates below it.
-/// Right of the pointer or the caret; with only the field, over the field's start.
-pub fn follow_position(anchor: Anchor, size: i32) -> (i32, i32) {
-    match anchor {
-        Anchor::Pointer(x, y) => (x + POINTER_GAP, y - size - POINTER_GAP),
-        Anchor::Caret(c) => (c.x + GAP, c.y - size),
-        Anchor::Field(b) => (b.x, b.y - size),
-    }
+/// The floating mic's top-left when it comes to a field (`size` is its window), on the screen the
+/// user is at: above the line, so it covers neither the text nor the IME's candidates below it;
+/// below the line when there is no room above (a browser's address bar at the top of a screen).
+/// Right of the pointer or the caret; with only the field, at the field's start.
+pub fn follow_position(anchor: Anchor, size: i32, work_areas: &[Rect], primary: Rect) -> (i32, i32) {
+    let (at, above, below) = match anchor {
+        Anchor::Pointer(x, y) => {
+            ((x, y), (x + POINTER_GAP, y - size - POINTER_GAP), (x + POINTER_GAP, y + POINTER_GAP))
+        }
+        Anchor::Caret(c) => ((c.x, c.y), (c.x + GAP, c.y - size), (c.x + GAP, c.y + c.height + GAP)),
+        Anchor::Field(b) => ((b.x, b.y), (b.x, b.y - size), (b.x, b.y + b.height + GAP)),
+    };
+    let area = area_at(at, work_areas, primary);
+    clamp_into(if above.1 >= area.y { above } else { below }, size, area)
 }
 
-/// Moves `pos` so the mic lies inside the work area it is (mostly) on, or the primary one.
+/// Moves `pos` so the mic lies inside the work area it is (mostly) on, or the nearest one.
 pub fn keep_on_screen(pos: (i32, i32), size: i32, work_areas: &[Rect], primary: Rect) -> (i32, i32) {
-    let (cx, cy) = (pos.0 + size / 2, pos.1 + size / 2);
-    let area = work_areas
+    let area = area_at((pos.0 + size / 2, pos.1 + size / 2), work_areas, primary);
+    clamp_into(pos, size, area)
+}
+
+/// The work area `point` is on, else the nearest one (a point just off the top of the left
+/// screen belongs to the left screen, not to the primary one); the primary one when none is known.
+fn area_at(point: (i32, i32), work_areas: &[Rect], primary: Rect) -> Rect {
+    let off = |from: i32, start: i32, len: i32| i64::from((start - from).max(from - (start + len - 1)).max(0));
+    work_areas
         .iter()
         .copied()
-        .find(|a| cx >= a.x && cx < a.x + a.width && cy >= a.y && cy < a.y + a.height)
-        .unwrap_or(primary);
+        .min_by_key(|a| {
+            let (dx, dy) = (off(point.0, a.x, a.width), off(point.1, a.y, a.height));
+            dx * dx + dy * dy
+        })
+        .unwrap_or(primary)
+}
+
+fn clamp_into(pos: (i32, i32), size: i32, area: Rect) -> (i32, i32) {
     let x = pos.0.clamp(area.x, (area.x + area.width - size).max(area.x));
     let y = pos.1.clamp(area.y, (area.y + area.height - size).max(area.y));
     (x, y)
@@ -248,12 +266,14 @@ mod tests {
     #[test]
     fn the_floating_mic_comes_above_the_line_by_the_pointer_the_caret_or_the_field() {
         let size = 112;
+        let screen = Rect { x: 0, y: 0, width: 1920, height: 1040 };
+        let follow = |a: Anchor| follow_position(a, size, &[screen], screen);
         let clicked = anchor(&on(), &FieldProbe { pointer: Some((300, 210)), ..field() }).unwrap();
         assert_eq!(clicked, Anchor::Pointer(300, 210));
-        assert_eq!(follow_position(clicked, size), (300 + POINTER_GAP, 210 - size - POINTER_GAP));
+        assert_eq!(follow(clicked), (300 + POINTER_GAP, 210 - size - POINTER_GAP));
         // Tab: the pointer is elsewhere; by the caret.
         let tabbed = anchor(&on(), &FieldProbe { pointer: Some((10, 10)), ..field() }).unwrap();
-        assert_eq!(follow_position(tabbed, size), (100 + GAP, 200 - size));
+        assert_eq!(follow(tabbed), (100 + GAP, 200 - size));
         // Tab into Chrome (no caret): over the field's start.
         let chrome = FieldProbe {
             app_id: Some("chrome.exe".into()),
@@ -264,10 +284,30 @@ mod tests {
         };
         let tabbed_chrome = anchor(&on(), &chrome).unwrap();
         assert_eq!(tabbed_chrome, Anchor::Field(Rect { x: 379, y: 873, width: 877, height: 24 }));
-        assert_eq!(follow_position(tabbed_chrome, size), (379, 873 - size));
+        assert_eq!(follow(tabbed_chrome), (379, 873 - size));
         // Nothing to go by, or no mic wanted there: no anchor.
         assert_eq!(anchor(&on(), &FieldProbe { caret: None, bounds: None, ..field() }), None);
         assert_eq!(anchor(&on(), &FieldProbe { is_password: Some(true), ..field() }), None);
+    }
+
+    #[test]
+    fn at_the_top_of_the_left_screen_the_floating_mic_goes_below_the_line_on_that_screen() {
+        // Measured on the development machine: the left screen is not the primary one, and the
+        // mic (118 px) went to the primary screen's corner (0, 0) from both of these.
+        let left = Rect { x: -2560, y: 0, width: 2560, height: 1032 };
+        let right = Rect { x: 0, y: 0, width: 1920, height: 1032 };
+        let follow = |a: Anchor| follow_position(a, 118, &[left, right], right);
+        // Clicked into Chrome's address bar.
+        assert_eq!(follow(Anchor::Pointer(-1009, 57)), (-1009 + POINTER_GAP, 57 + POINTER_GAP));
+        // Focus moved there without a click.
+        let bar = Rect { x: -2394, y: 51, width: 817, height: 24 };
+        assert_eq!(follow(Anchor::Field(bar)), (-2394, 51 + 24 + GAP));
+        let caret = Rect { x: -500, y: 30, width: 1, height: 18 };
+        assert_eq!(follow(Anchor::Caret(caret)), (-500 + GAP, 30 + 18 + GAP));
+        // Room above: above, as anywhere else.
+        assert_eq!(follow(Anchor::Pointer(-1009, 600)), (-1009 + POINTER_GAP, 600 - 118 - POINTER_GAP));
+        // At the right edge of the left screen: kept on the left screen.
+        assert_eq!(follow(Anchor::Pointer(-20, 600)), (-118, 600 - 118 - POINTER_GAP));
     }
 
     #[test]
@@ -311,6 +351,10 @@ mod tests {
         assert_eq!(keep_on_screen((300, 300), BESIDE_SIZE, &[screen], screen), (300, 300));
         let second = Rect { x: 1920, y: 0, width: 1280, height: 1024 };
         assert_eq!(keep_on_screen((3180, 500), BESIDE_SIZE, &[screen, second], screen), (3200 - BESIDE_SIZE, 500));
+        // Off every screen: onto the nearest one, not the primary one.
+        let left = Rect { x: -2560, y: 0, width: 2560, height: 1032 };
+        assert_eq!(keep_on_screen((-999, -71), 118, &[left, screen], screen), (-999, 0));
+        assert_eq!(keep_on_screen((-999, -71), 118, &[], screen), (0, 0));
     }
 
     #[test]
