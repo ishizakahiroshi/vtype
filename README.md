@@ -14,7 +14,17 @@ them is the point of this one.
 
 ## Install
 
-Not on the Chrome Web Store yet. Until it is, load it unpacked:
+Get it from the [Chrome Web Store](https://chromewebstore.google.com/detail/vtype/nngfilimeplngdjdmgkddlhbdjpmikgn)
+and press **Add to Chrome**. A tab then asks for the microphone once; allow it there, and no site
+will ask you again. Chrome keeps it up to date.
+
+Chrome 116 or newer. Firefox is not supported yet: it ships with `SpeechRecognition` disabled and
+has no offscreen documents, so it needs a recognition engine of its own.
+
+### From source
+
+To try a change of your own, or a fix that has not reached the store yet, build it and load it
+unpacked:
 
 ```sh
 pnpm install
@@ -23,12 +33,9 @@ pnpm -F vtype-extension build
 ```
 
 Then open `chrome://extensions`, turn on **Developer mode**, press **Load unpacked** and choose
-`packages/extension/dist`. A tab asks for the microphone once; allow it there, and no site will
-ask you again. Step-by-step instructions, and what to check once it is loaded, are in
+`packages/extension/dist`. Turn the store version off first, so that only one vtype is running.
+Step-by-step instructions, and what to check once it is loaded, are in
 [`packages/extension/README.md`](packages/extension/README.md).
-
-Chrome 116 or newer. Firefox is not supported yet: it ships with `SpeechRecognition` disabled and
-has no offscreen documents, so it needs a recognition engine of its own.
 
 ## What it does
 

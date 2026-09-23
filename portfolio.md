@@ -12,9 +12,10 @@ short:
   ja: "画面上のテキスト欄に薄いマイクを出し、話した言葉をその場でカーソル位置へ入れる Chrome 拡張。"
   en: "A Chrome extension that puts a faint mic on every text field and types what you say, at the caret."
 tech: ["TypeScript", "Chrome Extension", "MV3", "Web Speech API", "pnpm"]
-store: null
+store: "https://chromewebstore.google.com/detail/vtype/nngfilimeplngdjdmgkddlhbdjpmikgn"
 live: null
 guide: null
+privacy: "https://github.com/ishizakahiroshi/vtype/blob/main/PRIVACY.md"
 featured: false
 features:
   - icon: "◎"
@@ -26,6 +27,13 @@ features:
   - icon: "⚑"
     title: { ja: "許可は一度きり", en: "Asked once, never again" }
     desc:  { ja: "認識を拡張自身のページで回すので、訪れたサイトごとにマイクの確認が出ない。", en: "Recognition runs in the extension's own page, so no site ever shows a microphone dialog." }
+shots:
+  - path: portfolio/mic.png
+    caption: { ja: "見えている入力欄のすぐ右に、薄いマイクが並ぶ。欄の見た目は変えない。", en: "A faint mic just right of every visible field; the fields themselves look the same." }
+  - path: portfolio/recording.png
+    caption: { ja: "押して話すと、話しながらその欄のカーソル位置へ文字が入る。", en: "Press and speak: the words land at the caret while you are still talking." }
+  - path: portfolio/settings.png
+    caption: { ja: "録音の始め方とマイクを出す場所を選べる。合わないサイトはここで切れる。", en: "Choose how recording starts and which fields get a mic, and switch sites off." }
 ---
 ## ja
 

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "install": [],
+  "run": [],
+  "steps": {
+    "ja": [
+      "Chrome ウェブストアの vtype のページで「Chrome に追加」を押す。Chrome 116 以降が必要。",
+      "追加すると「vtype にマイクの使用を許可してください」というタブが開く。声が Google の音声認識へ送られることの説明を読み、「マイクを許可する」を押して Chrome の確認でも許可する。許可はこの 1 回だけで、サイトごとには聞かれない。",
+      "文字を打てる欄があるページを開くと、欄のすぐ右に薄いマイクが出る。押して話すと、話しながらその欄のカーソル位置へ文字が入る。もう一度押すと止まる。",
+      "マイクがサイトのボタンと重なるときはドラッグしてずらす。合わないサイトはツールバーの vtype のボタンで切る。録音の始め方とマイクを出す場所は設定ページで選べる。"
+    ],
+    "en": [
+      "Open vtype on the Chrome Web Store and press Add to Chrome. Chrome 116 or newer.",
+      "A tab titled \"vtype needs the microphone\" opens. Read what it says about your voice going to Google's speech recognition, press Allow the microphone, and allow it in Chrome's dialog too. That is the only time it is asked; no site asks again.",
+      "Open any page with a text field: a faint mic sits just right of it. Press it and speak, and the words appear at the caret while you talk. Press it again to stop.",
+      "Drag the mic aside where it covers a button of the site's own. Switch vtype off for a site from its toolbar button, and choose how recording starts and which fields get a mic on the settings page."
+    ]
+  },
+  "guideUrl": null
+}

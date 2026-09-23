@@ -19,7 +19,9 @@ Recognition is the browser's own (Web Speech API), run in the extension's offscr
 so the microphone is allowed once for the extension (a page opens for that on install) and no
 site ever asks. There is no keyboard shortcut in v1.
 
-Not published to npm. The extension is loaded from `dist/`.
+Not published to npm. Users install it from the
+[Chrome Web Store](https://chromewebstore.google.com/detail/vtype/nngfilimeplngdjdmgkddlhbdjpmikgn);
+this page is about building it and loading it from `dist/` yourself.
 
 ## Build
 
