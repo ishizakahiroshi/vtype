@@ -602,6 +602,22 @@
     "message": "{min}〜{max}%。マイクの上で Ctrl を押しながらマウスのホイールを回しても変えられます（macOS は ⌘ でも）。",
     "description": "Desktop app settings page: hint under the floating mic's size. {min} and {max} are the limits in percent"
   },
+  "settings_silenceStop": {
+    "message": "話し終えてから自動で止めるまで",
+    "description": "Desktop app settings page: label of how long after the last new words the recording stops by itself"
+  },
+  "settings_silenceStopOff": {
+    "message": "オフ",
+    "description": "Desktop app settings page: choice that never stops the recording after the words stop"
+  },
+  "settings_silenceStopSeconds": {
+    "message": "{sec} 秒",
+    "description": "Desktop app settings page: one choice of how long after the last new words the recording stops. {sec} is the number of seconds (1-10)"
+  },
+  "settings_silenceStopHint": {
+    "message": "話している途中で新しい文字が出なくなってから、この秒数で録音を止めます。話し始める前は数えません。止まるだけで送信はしません。",
+    "description": "Desktop app settings page: hint under the stop-after-speaking choice. Silence before speaking does not count; stopping does not send"
+  },
   "settings_templatesTitle": {
     "message": "テンプレート",
     "description": "Desktop app settings page: title of the templates section"

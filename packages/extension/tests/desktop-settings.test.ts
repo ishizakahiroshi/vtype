@@ -203,6 +203,9 @@ describe("the desktop settings page", () => {
     // A config without sendKey (an older desktop app) shows Enter.
     expect($<HTMLSelectElement>("nc-send-key").value).toBe("enter");
     $<HTMLSelectElement>("nc-send-key").value = "ctrl-enter";
+    // A config without silenceStopSec (an older desktop app) shows 3 s.
+    expect($<HTMLSelectElement>("nc-silence-stop").value).toBe("3");
+    $<HTMLSelectElement>("nc-silence-stop").value = "0";
     $<HTMLInputElement>("nc-beside").checked = true;
     $("nc-form").dispatchEvent(new Event("submit", { cancelable: true }));
     await flush();
@@ -213,8 +216,30 @@ describe("the desktop settings page", () => {
       icon: { ...CONFIG.icon, scale: 100 },
       inject: "paste",
       sendKey: "ctrl-enter",
+      silenceStopSec: 0,
       besideField: { enabled: true, trigger: "focus" },
     });
+  });
+
+  it("offers off and 1-10 s to stop after speaking, shows the saved one and saves the chosen one", async () => {
+    const app = fakeApp({ ...CONFIG, silenceStopSec: 7 });
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "en" }).loaded;
+    const select = $<HTMLSelectElement>("nc-silence-stop");
+    expect(select.value).toBe("7");
+    const choices = [...select.options].map((o) => [o.value, o.textContent]);
+    expect(choices).toEqual([
+      ["0", translate("settings_silenceStopOff", "en")],
+      ...Array.from({ length: 10 }, (_, i) => [String(i + 1), translate("settings_silenceStopSeconds", "en", { sec: i + 1 })]),
+    ]);
+    expect(choices[3]![1]).not.toContain("{");
+    expect($("nc-silence-stop-label").textContent).toBe(translate("settings_silenceStop", "en"));
+    expect($("nc-silence-stop-hint").textContent).toBe(translate("settings_silenceStopHint", "en"));
+
+    select.value = "10";
+    $("nc-form").dispatchEvent(new Event("submit", { cancelable: true }));
+    await flush();
+    expect(app.calls.at(-1)!.body).toMatchObject({ silenceStopSec: 10 });
+    expect(select.value).toBe("10");
   });
 
   it("saves the mic's size at once, within 50-200 %, and puts it back to 100 %", async () => {
@@ -342,6 +367,21 @@ describe("one settings window at a time", () => {
     expect(at<HTMLTextAreaElement>("tpl-new").value).toBe("three");
     expect(second.querySelector<HTMLTextAreaElement>("#tpl-list .tpl-edit")?.value).toBe("ONE");
     // Handed over, not saved: the user still decides.
+    expect(app.calls.filter((c) => c.method === "POST")).toEqual([]);
+  });
+
+  it("a changed time to stop after speaking alone is handed over too", async () => {
+    const app = fakeApp();
+    const channel = channels();
+    let closed = 0;
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "en", channel: channel(), openedAt: 1, close: () => closed++ })
+      .loaded;
+    $<HTMLSelectElement>("nc-silence-stop").value = "5";
+    const second = secondWindow();
+    await initSettingsPage({ doc: second, href: PAGE, fetch: app.fetch, language: "en", channel: channel(), openedAt: 2 }).loaded;
+    await settle();
+    expect(closed).toBe(1);
+    expect((second.getElementById("nc-silence-stop") as HTMLSelectElement).value).toBe("5");
     expect(app.calls.filter((c) => c.method === "POST")).toEqual([]);
   });
 

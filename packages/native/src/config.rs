@@ -72,6 +72,10 @@ pub struct NativeConfig {
     pub replacements: Vec<ReplacementRule>,
     /// What the floating mic's send button presses.
     pub send_key: SendKey,
+    /// Stop the recording this many seconds after the last new words (0 = off). Nothing is sent:
+    /// only the send button sends.
+    #[serde(deserialize_with = "lenient_silence_stop")]
+    pub silence_stop_sec: u8,
     /// Texts the user saved to put in with one click (the floating mic's top-left button).
     #[serde(deserialize_with = "lenient_templates")]
     pub templates: Vec<String>,
@@ -114,6 +118,17 @@ pub enum SendKey {
     CtrlEnter,
 }
 
+/// "Stop after you finish speaking", in seconds: 0 is off, at most `SILENCE_STOP_MAX`. The same
+/// range as vtype-core's Whisper auto-stop.
+pub const SILENCE_STOP_DEFAULT: u8 = 3;
+pub const SILENCE_STOP_MAX: u8 = 10;
+
+/// Out of range is pulled into it (below 0 is off); not a number is the default.
+fn lenient_silence_stop<'de, D: Deserializer<'de>>(d: D) -> Result<u8, D::Error> {
+    let value = Value::deserialize(d)?;
+    Ok(value.as_f64().map_or(SILENCE_STOP_DEFAULT, |s| (s.round() as i64).clamp(0, SILENCE_STOP_MAX.into()) as u8))
+}
+
 fn is_false(v: &bool) -> bool {
     !v
 }
@@ -130,6 +145,7 @@ impl Default for NativeConfig {
             input_mode: InputMode::Normal,
             replacements: Vec::new(),
             send_key: SendKey::Enter,
+            silence_stop_sec: SILENCE_STOP_DEFAULT,
             templates: Vec::new(),
             template_send_immediate: false,
         }
@@ -279,8 +295,24 @@ mod tests {
         assert!(!cfg.consented);
         assert_eq!(cfg.effective_hotkey(), default_hotkey());
         assert_eq!(cfg.send_key, SendKey::Enter);
+        assert_eq!(cfg.silence_stop_sec, 3);
         assert!(cfg.templates.is_empty());
         assert!(!cfg.template_send_immediate);
+    }
+
+    #[test]
+    fn the_seconds_before_stopping_after_speech_stay_in_range_and_old_files_read_as_3() {
+        let old: NativeConfig = serde_json::from_str(r#"{"inject":"auto"}"#).unwrap();
+        assert_eq!(old.silence_stop_sec, SILENCE_STOP_DEFAULT);
+        let read = |json: &str| serde_json::from_str::<NativeConfig>(json).unwrap().silence_stop_sec;
+        assert_eq!(read(r#"{"silenceStopSec":0}"#), 0);
+        assert_eq!(read(r#"{"silenceStopSec":7}"#), 7);
+        assert_eq!(read(r#"{"silenceStopSec":1.6}"#), 2);
+        assert_eq!(read(r#"{"silenceStopSec":-4}"#), 0);
+        assert_eq!(read(r#"{"silenceStopSec":90}"#), SILENCE_STOP_MAX);
+        assert_eq!(read(r#"{"silenceStopSec":"soon"}"#), SILENCE_STOP_DEFAULT);
+        assert_eq!(read(r#"{"silenceStopSec":null}"#), SILENCE_STOP_DEFAULT);
+        assert_eq!(serde_json::to_value(NativeConfig::default()).unwrap()["silenceStopSec"], 3);
     }
 
     #[test]
@@ -325,6 +357,7 @@ mod tests {
         cfg.inject = InjectMethod::Paste;
         cfg.beside_field.trigger = BesideFieldTrigger::Hover;
         cfg.extra_extension_ids = vec!["a".repeat(32)];
+        cfg.silence_stop_sec = 0;
         save(&path, &cfg).unwrap();
         assert_eq!(load(&path), (cfg, LoadOutcome::Loaded));
         let _ = fs::remove_dir_all(&dir);

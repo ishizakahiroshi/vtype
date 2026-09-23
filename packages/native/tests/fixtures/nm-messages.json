@@ -18,6 +18,7 @@
         "inputMode": "normal",
         "replacements": [],
         "sendKey": "enter",
+        "silenceStopSec": 3,
         "templates": [],
         "templateSendImmediate": false
       }
@@ -45,6 +46,7 @@
         "inputMode": "kana",
         "replacements": [{ "from": "ブイタイプ", "to": "vtype" }],
         "sendKey": "ctrl-enter",
+        "silenceStopSec": 0,
         "templates": ["お世話になっております。", "よろしくお願いします。"],
         "templateSendImmediate": true
       }

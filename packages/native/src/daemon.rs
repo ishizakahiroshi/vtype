@@ -125,6 +125,13 @@ pub struct Core {
     hint_due: Option<(MicPart, Instant)>,
     /// A hint is in the bubble until this time (leaving the mic takes it away sooner).
     hint_until: Option<Instant>,
+    /// No new words since: the recording stops at this time ("stop after you finish speaking").
+    /// Set by the first words of a recording, not before, so a user who has not started speaking
+    /// is left to the speech page's own end.
+    silence_stop_at: Option<Instant>,
+    /// A stop was sent for this recording: words still arriving (the page waits for the last
+    /// one) do not set `silence_stop_at` again, so the stop is not sent twice.
+    stop_sent: bool,
 }
 
 impl Core {
@@ -155,6 +162,8 @@ impl Core {
             relaunch: None,
             hint_due: None,
             hint_until: None,
+            silence_stop_at: None,
+            stop_sent: false,
         }
     }
 
@@ -258,11 +267,16 @@ impl Core {
         let pending = self.pending.as_ref().and_then(|p| p.deadline);
         let relaunch = self.relaunch.map(|(at, _)| at);
         let hint = self.hint_due.map(|(_, at)| at);
-        pending.into_iter().chain(relaunch).chain(hint).min()
+        pending.into_iter().chain(relaunch).chain(hint).chain(self.silence_stop_at).min()
     }
 
     pub fn tick(&mut self) {
         let now = (self.now)();
+        if self.silence_stop_at.is_some_and(|at| now >= at) {
+            tracing::info!(seconds = self.config.silence_stop_sec, "no new words; stopping the recording");
+            // As the mic does: the send key is pressed only by the send button.
+            let _ = self.stop_recording();
+        }
         if let Some((part, at)) = self.hint_due {
             if now >= at {
                 self.hint_due = None;
@@ -623,6 +637,8 @@ impl Core {
     }
 
     fn stop_recording(&mut self) -> Reply {
+        self.silence_stop_at = None;
+        self.stop_sent = true;
         if self.pending.take().is_some() {
             self.relaunch = None;
             self.platform.hide_bubble(); // "connecting…"
@@ -778,8 +794,19 @@ impl Core {
 
     fn end_recording_ui(&mut self) {
         self.recording = false;
+        self.silence_stop_at = None;
+        self.stop_sent = false;
         self.platform.hide_bubble();
         self.show_icon(IconState::Idle);
+    }
+
+    /// New words (or the recognizer hearing speech again after them): the recording stops
+    /// `silence_stop_sec` from now, unless it is off or a stop was sent already.
+    fn words_heard(&mut self) {
+        let seconds = self.config.silence_stop_sec;
+        if seconds > 0 && self.recording && !self.stop_sent {
+            self.silence_stop_at = Some((self.now)() + Duration::from_secs(seconds.into()));
+        }
     }
 
     fn session_event(&mut self, event: SessionEvent) {
@@ -787,6 +814,8 @@ impl Core {
             SessionEvent::Started => {
                 self.recording = true;
                 self.last_char = None;
+                self.silence_stop_at = None;
+                self.stop_sent = false;
                 self.show_icon(IconState::Recording);
                 self.update_tray();
             }
@@ -795,15 +824,27 @@ impl Core {
                     self.platform.voice_cue(VoiceCue::Text);
                     self.platform.show_bubble(&text);
                 }
+                if !text.trim().is_empty() {
+                    self.words_heard();
+                }
             }
             SessionEvent::Activity { activity } => {
                 if let (true, Some(cue)) = (self.config.icon.visible, VoiceCue::from_activity(&activity)) {
                     self.platform.voice_cue(cue);
                 }
+                // Speech again after words: the words it brings take a moment to show. Not before
+                // the first words, which would count the silence before speaking.
+                if activity == "speechstart" && self.silence_stop_at.is_some() {
+                    self.words_heard();
+                }
             }
             SessionEvent::Final { text } => {
                 self.platform.hide_bubble();
                 let _ = self.insert(&text);
+                // Chrome sends an empty final for silence: that is not words.
+                if !text.trim().is_empty() {
+                    self.words_heard();
+                }
             }
             SessionEvent::Ended { reason, code } => {
                 tracing::info!(reason = %reason, code = ?code, "session ended");
@@ -893,6 +934,10 @@ impl Core {
         let scale_changed = new.icon.scale != self.config.icon.scale;
         let beside_changed = new.beside_field != self.config.beside_field;
         self.config = new;
+        // Turned off during a recording: the stop already counting does not come either.
+        if self.config.silence_stop_sec == 0 {
+            self.silence_stop_at = None;
+        }
         if beside_changed {
             self.platform.watch_fields(&self.config.beside_field);
             if !self.config.beside_field.enabled && self.beside_shown {
@@ -1705,6 +1750,175 @@ pub mod tests {
         // Only once.
         h.ext(json!({"type":"session","event":{"kind":"ended","reason":"user"}}));
         assert!(!h.fake.take().iter().any(|c| c.starts_with("keys")));
+    }
+
+    /// Connected, and a recording under way (with the default 3 seconds to stop after speech).
+    fn recording(h: &mut Harness) {
+        h.connect();
+        h.ext(json!({"type":"session","event":{"kind":"started"}}));
+        h.sent();
+        h.fake.take();
+    }
+
+    fn session(h: &mut Harness, event: Value) {
+        h.ext(json!({"type":"session","event": event}));
+    }
+
+    /// How many stops went to the page since the last look.
+    fn stops_sent(h: &Harness) -> usize {
+        h.sent().iter().filter(|m| m["type"] == "stop").count()
+    }
+
+    fn now(h: &Harness) -> Instant {
+        *h.clock.lock().unwrap()
+    }
+
+    #[test]
+    fn stops_the_set_seconds_after_the_last_words_and_not_before() {
+        let mut h = Harness::new();
+        recording(&mut h);
+        session(&mut h, json!({"kind":"interim","text":"hel"}));
+        assert_eq!(h.core.next_deadline(), Some(now(&h) + Duration::from_secs(3)));
+        h.advance(Duration::from_millis(2999));
+        h.core.tick();
+        assert_eq!(stops_sent(&h), 0);
+        h.advance(Duration::from_millis(1));
+        h.core.tick();
+        assert_eq!(stops_sent(&h), 1);
+        assert!(h.core.next_deadline().is_none());
+        // Another setting, another wait.
+        let mut h = Harness::new();
+        h.core.config.silence_stop_sec = 7;
+        recording(&mut h);
+        session(&mut h, json!({"kind":"final","text":"hello"}));
+        assert_eq!(h.core.next_deadline(), Some(now(&h) + Duration::from_secs(7)));
+    }
+
+    #[test]
+    fn new_words_start_the_count_again() {
+        let mut h = Harness::new();
+        recording(&mut h);
+        session(&mut h, json!({"kind":"interim","text":"hel"}));
+        h.advance(Duration::from_secs(2));
+        session(&mut h, json!({"kind":"final","text":"hello"}));
+        h.advance(Duration::from_secs(2));
+        h.core.tick();
+        assert_eq!(stops_sent(&h), 0);
+        // Speech heard again after the words: counted from there, as its words take a moment.
+        session(&mut h, json!({"kind":"activity","activity":"speechstart"}));
+        h.advance(Duration::from_millis(2500));
+        h.core.tick();
+        assert_eq!(stops_sent(&h), 0);
+        h.advance(Duration::from_millis(500));
+        h.core.tick();
+        assert_eq!(stops_sent(&h), 1);
+    }
+
+    #[test]
+    fn no_stop_before_the_user_starts_speaking() {
+        let mut h = Harness::new();
+        recording(&mut h);
+        // Sound and speech without words yet, and the empty finals Chrome sends for silence.
+        session(&mut h, json!({"kind":"activity","activity":"speechstart"}));
+        session(&mut h, json!({"kind":"final","text":""}));
+        session(&mut h, json!({"kind":"interim","text":"  "}));
+        assert!(h.core.next_deadline().is_none());
+        h.advance(Duration::from_secs(60));
+        h.core.tick();
+        assert_eq!(stops_sent(&h), 0);
+        // Nor do empty finals after words start the count again.
+        session(&mut h, json!({"kind":"final","text":"hello"}));
+        h.advance(Duration::from_secs(2));
+        session(&mut h, json!({"kind":"final","text":""}));
+        h.advance(Duration::from_secs(1));
+        h.core.tick();
+        assert_eq!(stops_sent(&h), 1);
+    }
+
+    #[test]
+    fn no_stop_when_the_setting_is_off() {
+        let mut h = Harness::new();
+        h.core.config.silence_stop_sec = 0;
+        recording(&mut h);
+        session(&mut h, json!({"kind":"final","text":"hello"}));
+        session(&mut h, json!({"kind":"activity","activity":"speechstart"}));
+        assert!(h.core.next_deadline().is_none());
+        h.advance(Duration::from_secs(60));
+        h.core.tick();
+        assert_eq!(stops_sent(&h), 0);
+    }
+
+    #[test]
+    fn turning_it_off_during_a_recording_drops_the_stop_counting() {
+        let mut h = Harness::new();
+        recording(&mut h);
+        session(&mut h, json!({"kind":"final","text":"hello"}));
+        assert!(h.core.next_deadline().is_some());
+        let mut c = h.core.config.clone();
+        c.silence_stop_sec = 0;
+        h.ext(json!({"type":"set-native-config","config": c}));
+        assert!(h.core.next_deadline().is_none());
+        h.advance(Duration::from_secs(10));
+        h.core.tick();
+        assert_eq!(stops_sent(&h), 0);
+    }
+
+    #[test]
+    fn words_after_a_stop_do_not_send_it_again() {
+        let mut h = Harness::new();
+        recording(&mut h);
+        session(&mut h, json!({"kind":"interim","text":"hel"}));
+        h.advance(Duration::from_secs(3));
+        h.core.tick();
+        assert_eq!(stops_sent(&h), 1);
+        // The page waits for the last words before it ends.
+        session(&mut h, json!({"kind":"final","text":"hello"}));
+        session(&mut h, json!({"kind":"activity","activity":"speechstart"}));
+        assert!(h.core.next_deadline().is_none());
+        h.advance(Duration::from_secs(10));
+        h.core.tick();
+        assert_eq!(stops_sent(&h), 0);
+        // The same after the user stopped.
+        session(&mut h, json!({"kind":"ended","reason":"user"}));
+        session(&mut h, json!({"kind":"started"}));
+        session(&mut h, json!({"kind":"interim","text":"hel"}));
+        h.cli(Request::Stop);
+        assert_eq!(stops_sent(&h), 1);
+        session(&mut h, json!({"kind":"final","text":"hello"}));
+        assert!(h.core.next_deadline().is_none());
+        // The next recording counts again.
+        session(&mut h, json!({"kind":"ended","reason":"user"}));
+        session(&mut h, json!({"kind":"started"}));
+        session(&mut h, json!({"kind":"final","text":"again"}));
+        assert!(h.core.next_deadline().is_some());
+    }
+
+    #[test]
+    fn the_end_of_the_recording_or_of_the_page_forgets_the_stop() {
+        let mut h = Harness::new();
+        recording(&mut h);
+        session(&mut h, json!({"kind":"final","text":"hello"}));
+        session(&mut h, json!({"kind":"ended","reason":"silence"}));
+        assert!(h.core.next_deadline().is_none());
+        session(&mut h, json!({"kind":"started"}));
+        session(&mut h, json!({"kind":"final","text":"hello"}));
+        h.core.handle(Event::Closed { conn: 1 });
+        assert!(h.core.next_deadline().is_none());
+    }
+
+    #[test]
+    fn stopping_on_silence_does_not_press_the_send_key() {
+        let mut h = Harness::new();
+        recording(&mut h);
+        session(&mut h, json!({"kind":"interim","text":"hel"}));
+        h.advance(Duration::from_secs(3));
+        h.core.tick();
+        assert_eq!(stops_sent(&h), 1);
+        session(&mut h, json!({"kind":"final","text":"hello"}));
+        session(&mut h, json!({"kind":"ended","reason":"user"}));
+        let calls = h.fake.take();
+        assert!(calls.contains(&"inject hello Auto".to_string()), "{calls:?}");
+        assert!(!calls.iter().any(|c| c.starts_with("keys")), "{calls:?}");
     }
 
     #[test]

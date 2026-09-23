@@ -29,6 +29,8 @@ export interface NativeConfig {
   readonly replacements?: readonly ReplacementRule[];
   /** What the floating mic's send button presses (Ctrl+Enter is ⌘+Enter on macOS). */
   readonly sendKey?: "enter" | "ctrl-enter";
+  /** Stop recording this many seconds after the last new words (0 = off, at most 10). */
+  readonly silenceStopSec?: number;
   /** Texts put in with one click from the floating mic's top-left button. */
   readonly templates?: readonly string[];
   /** Press the send key right after a template went in. */
@@ -119,6 +121,7 @@ export function isNativeConfig(v: unknown): v is NativeConfig {
     (r.inputMode === undefined || isInputMode(r.inputMode)) &&
     (r.replacements === undefined || Array.isArray(r.replacements)) &&
     (r.sendKey === undefined || r.sendKey === "enter" || r.sendKey === "ctrl-enter") &&
+    (r.silenceStopSec === undefined || typeof r.silenceStopSec === "number") &&
     (r.templates === undefined || (Array.isArray(r.templates) && r.templates.every((s) => typeof s === "string"))) &&
     (r.templateSendImmediate === undefined || typeof r.templateSendImmediate === "boolean")
   );

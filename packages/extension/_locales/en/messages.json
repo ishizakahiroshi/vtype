@@ -602,6 +602,22 @@
     "message": "{min}–{max}%. You can also hold Ctrl and turn the mouse wheel over the mic (⌘ works too on macOS).",
     "description": "Desktop app settings page: hint under the floating mic's size. {min} and {max} are the limits in percent"
   },
+  "settings_silenceStop": {
+    "message": "Stop after you finish speaking",
+    "description": "Desktop app settings page: label of how long after the last new words the recording stops by itself"
+  },
+  "settings_silenceStopOff": {
+    "message": "Off",
+    "description": "Desktop app settings page: choice that never stops the recording after the words stop"
+  },
+  "settings_silenceStopSeconds": {
+    "message": "{sec} s",
+    "description": "Desktop app settings page: one choice of how long after the last new words the recording stops. {sec} is the number of seconds (1-10)"
+  },
+  "settings_silenceStopHint": {
+    "message": "Stops recording when no new words have come for this long. Silence before you start speaking does not count. It only stops; nothing is sent.",
+    "description": "Desktop app settings page: hint under the stop-after-speaking choice. Silence before speaking does not count; stopping does not send"
+  },
   "settings_templatesTitle": {
     "message": "Templates",
     "description": "Desktop app settings page: title of the templates section"

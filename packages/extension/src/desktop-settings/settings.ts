@@ -60,7 +60,7 @@ export interface SettingsDraft {
 }
 
 /** The form's fields for the desktop app's own settings (saved with its button). */
-const NATIVE_FIELDS = ["nc-hotkey", "nc-icon-visible", "nc-icon-fullscreen", "nc-inject", "nc-send-key", "nc-beside", "nc-beside-trigger"];
+const NATIVE_FIELDS = ["nc-hotkey", "nc-icon-visible", "nc-icon-fullscreen", "nc-inject", "nc-send-key", "nc-silence-stop", "nc-beside", "nc-beside-trigger"];
 
 type ChannelMessage =
   | { type: "opened"; id: string; at: number }
@@ -113,6 +113,12 @@ export function templateFromHref(href: string): number | null {
 export const ICON_SCALE_MIN = 50;
 export const ICON_SCALE_MAX = 200;
 export const ICON_SCALE_DEFAULT = 100;
+
+/**
+ * Seconds from the last new words to the recording stopping (0 = off), when the config has none:
+ * the desktop app's config.rs `SILENCE_STOP_DEFAULT`. The choices (off, 1–10) are settings.html's.
+ */
+export const SILENCE_STOP_DEFAULT = 3;
 
 /** A typed size, whole and within the limits; null when it is not a number (keep what was). */
 export function clampIconScale(typed: string): number | null {
@@ -168,6 +174,12 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
   setText("nc-send-enter", t("optionsNativeSendKeyEnter"));
   setText("nc-send-ctrl-enter", t("optionsNativeSendKeyCtrlEnter"));
   setText("nc-send-key-hint", t("optionsNativeSendKeyHint"));
+  setText("nc-silence-stop-label", t("settings_silenceStop"));
+  for (const option of el("nc-silence-stop", HTMLSelectElement)?.options ?? []) {
+    option.textContent =
+      option.value === "0" ? t("settings_silenceStopOff") : t("settings_silenceStopSeconds", { sec: option.value });
+  }
+  setText("nc-silence-stop-hint", t("settings_silenceStopHint"));
   setText("nc-beside-label", t("optionsNativeBeside"));
   setText("nc-beside-hint", t("optionsNativeBesideHint"));
   setText("nc-beside-trigger-label", t("optionsNativeBesideTrigger"));
@@ -300,6 +312,8 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
     if (inject !== null) inject.value = c.inject;
     const sendKey = el("nc-send-key", HTMLSelectElement);
     if (sendKey !== null) sendKey.value = c.sendKey ?? "enter";
+    const silenceStop = el("nc-silence-stop", HTMLSelectElement);
+    if (silenceStop !== null) silenceStop.value = String(c.silenceStopSec ?? SILENCE_STOP_DEFAULT);
     const beside = el("nc-beside", HTMLInputElement);
     if (beside !== null) beside.checked = c.besideField.enabled;
     const trigger = el("nc-beside-trigger", HTMLSelectElement);
@@ -315,6 +329,7 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
     const inject = el("nc-inject", HTMLSelectElement)?.value;
     const trigger = el("nc-beside-trigger", HTMLSelectElement)?.value;
     const sendKey = el("nc-send-key", HTMLSelectElement)?.value;
+    const silenceStop = Number.parseInt(el("nc-silence-stop", HTMLSelectElement)?.value ?? "", 10);
     return {
       ...base,
       hotkey: hotkey === "" ? null : hotkey,
@@ -326,6 +341,7 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
       },
       inject: inject === "type" || inject === "paste" || inject === "auto" ? inject : base.inject,
       sendKey: sendKey === "enter" || sendKey === "ctrl-enter" ? sendKey : (base.sendKey ?? "enter"),
+      silenceStopSec: Number.isInteger(silenceStop) ? silenceStop : (base.silenceStopSec ?? SILENCE_STOP_DEFAULT),
       besideField: {
         enabled: el("nc-beside", HTMLInputElement)?.checked ?? base.besideField.enabled,
         trigger: trigger === "hover" || trigger === "focus" ? trigger : base.besideField.trigger,
@@ -469,6 +485,7 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
       form.icon.hideOnFullscreen !== config.icon.hideOnFullscreen ||
       form.inject !== config.inject ||
       form.sendKey !== (config.sendKey ?? "enter") ||
+      form.silenceStopSec !== (config.silenceStopSec ?? SILENCE_STOP_DEFAULT) ||
       form.besideField.enabled !== config.besideField.enabled ||
       form.besideField.trigger !== config.besideField.trigger;
     if (nativeEdited) {
