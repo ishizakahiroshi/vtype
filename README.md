@@ -1,18 +1,40 @@
 # vtype
 
-Speak into any text field on the web.
+English | [日本語](README.ja.md)
 
-vtype is a browser extension. Every text field you can see on a page carries a faint little mic
-just outside its right edge; press it and talk, and the words appear in that field at the caret
-while you are still speaking. A search box, a contact form, a rich-text message body: if you can
-type in it, this works in it.
+Speak into any text field: on a web page, or in any app on your computer.
 
-The recognition is the browser's own. Chrome has speech recognition built in (the Web Speech
-API), and vtype borrows it, so there is no API key, no account, and no cap on how many minutes
-you may dictate. Extensions that meter your minutes and sell you more do exist; not being one of
-them is the point of this one.
+vtype comes in two forms. They are separate programs, and each works without the other.
 
-## Install
+- **[The browser extension](#browser-extension)** for Chrome, on the
+  [Chrome Web Store](https://chromewebstore.google.com/detail/vtype/nngfilimeplngdjdmgkddlhbdjpmikgn).
+  **It works only inside Chrome, on web pages.** Every text field you can see on a page carries a
+  faint little mic just outside its right edge; press it and talk, and the words appear in that
+  field at the caret while you are still speaking. A search box, a contact form, a rich-text
+  message body: if you can type in it, this works in it.
+- **[vtype desktop](#desktop)** for Windows, macOS and Linux, whose release is in progress.
+  **It works in any app on your computer, browsers included.** Press a shortcut in any app (a
+  text editor, a chat client, a terminal) and what you say is typed there.
+
+Which one works where:
+
+| Where you want to type | Browser extension | vtype desktop |
+|---|---|---|
+| A web page in Chrome | ✅ | ✅ |
+| A web page in another browser (Firefox and others) | ❌ Chrome only | ✅ |
+| An app outside the browser (a text editor, a chat client, a terminal) | ❌ | ✅ |
+| How you start | Press the mic beside the field | Press the shortcut, or the mic icon |
+| What you need | Chrome 116 or newer | Google Chrome installed (it runs in the background) |
+| Status | On the Chrome Web Store | Release in progress |
+
+Neither brings a speech recognizer of its own. Chrome has speech recognition built in (the Web
+Speech API), and vtype borrows it (the desktop app runs Chrome in the background to do so), so
+there is no API key, no account, and no cap on how many minutes you may dictate. Extensions that
+meter your minutes and sell you more do exist; not being one of them is the point of vtype.
+
+## Browser extension
+
+### Install
 
 Get it from the [Chrome Web Store](https://chromewebstore.google.com/detail/vtype/nngfilimeplngdjdmgkddlhbdjpmikgn)
 and press **Add to Chrome**. A tab then asks for the microphone once; allow it there, and no site
@@ -37,7 +59,7 @@ Then open `chrome://extensions`, turn on **Developer mode**, press **Load unpack
 Step-by-step instructions, and what to check once it is loaded, are in
 [`packages/extension/README.md`](packages/extension/README.md).
 
-## What it does
+### What it does
 
 - A faint mic on every visible text field, or only on the field you are using — your choice
 - Words land in the field as you speak, at the caret, leaving what is around them intact
@@ -57,8 +79,27 @@ vtype desktop (Windows, macOS, Linux) takes the same recognition out of the brow
 shortcut in any app (a text editor, a chat client, a terminal) and what you say is typed there.
 It does not need the extension. It starts Google Chrome in the background, in a Chrome profile of
 its own (never your usual one), and uses Chrome's speech recognition; the text is typed into the
-app in front. **Google Chrome must be installed.** The extension and the desktop app are separate
-programs, and each works without the other.
+app in front. **Google Chrome must be installed.**
+
+### Install
+
+The release is in progress: npm, the Microsoft Store, Homebrew and GitHub Releases are being
+prepared in parallel. Once it is out, you can get it from:
+
+- Windows: the Microsoft Store
+- macOS: a Homebrew tap (`brew install ishizakahiroshi/tap/vtype`)
+- Linux: a `.deb` on GitHub Releases
+- Any of them: npm (`npm i -g @ishizakahiroshi/vtype`)
+
+How the packages are made is in [`packages/native/README.md`](packages/native/README.md).
+
+**Mac and Linux users: help wanted.** To be honest, and I am sorry about this: on macOS and Linux
+I have only checked vtype desktop by reading the code for bugs and by the automated builds and
+tests (CI). I have not been able to run it on a real Mac or Linux machine. If you have one and
+could try it, that would help a great deal and I would be very glad. Whether it works or not,
+please tell me in an [issue](https://github.com/ishizakahiroshi/vtype/issues).
+
+### What it does
 
 - A shortcut from anywhere: Ctrl+Alt+Space on Windows and Linux, Control+Option+V on macOS
   (change it with `vtype settings`)
@@ -71,15 +112,6 @@ programs, and each works without the other.
 - Nothing is typed into password fields (on Linux, wherever the desktop's accessibility service
   can tell that it is one)
 - Experimental, off by default (Windows and macOS): a mic beside the text field you are in
-
-It is not published yet. When it is, it comes from the Microsoft Store on Windows, a Homebrew tap
-on macOS (`brew install ishizakahiroshi/tap/vtype`), a `.deb` on GitHub Releases for Linux, and
-npm everywhere (`npm i -g @ishizakahiroshi/vtype`). How the packages are made is in
-[`packages/native/README.md`](packages/native/README.md).
-
-The macOS and Linux versions are built and tested automatically (CI), but the author has not run
-them on a real Mac or Linux machine. If something does not work there, please
-[open an issue](https://github.com/ishizakahiroshi/vtype/issues).
 
 ### The first time
 
@@ -138,12 +170,13 @@ itself); a shortcut of your own under **Settings > Keyboard > Custom Shortcuts**
   text on the clipboard and tells you to paste it. There is no floating mic icon on Wayland; use
   the top bar icon.
 
-### Reporting a problem
+## Reporting a problem
 
-**Report a problem** in the tray menu (and on the extension's settings page) opens a new GitHub
-issue in your browser with the OS and version filled in. Nothing is sent until you submit it
-yourself. **Copy diagnostic info** puts the OS, version, settings and recent errors on the clipboard
-for you to paste; it never includes audio or what you said.
+**Report a problem**, on the extension's settings page and in the desktop app's tray menu, opens a
+new GitHub issue in your browser with the OS and version filled in. Nothing is sent until you
+submit it yourself. In the desktop app, **Copy diagnostic info** in the tray menu puts the OS,
+version, settings and recent errors on the clipboard for you to paste; it never includes audio or
+what you said.
 
 ## Privacy
 

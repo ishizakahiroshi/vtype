@@ -107,7 +107,7 @@ path and do not silently fall back to `docs/local` when the entry is missing.
 
 | 項目 | パス |
 |---|---|
-| ユーザー向け README | `README.md` |
+| ユーザー向け README（正本は英語。直したら日本語訳も直す） | `README.md` / `README.ja.md` |
 | Codex/他 AI 用入口 | `AGENTS.md` |
 | 変更履歴（版の正本は manifest.json） | `CHANGELOG.md` |
 | プライバシーポリシー（ストアの Privacy URL） | `PRIVACY.md`（正本は `docs/store/privacy-policy.ja.md`） |
