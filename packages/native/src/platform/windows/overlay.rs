@@ -33,7 +33,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WM_TIMER, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
-use crate::beside_field::{keep_on_screen, BESIDE_SIZE};
+use crate::beside_field::{follow_position, keep_on_screen, Anchor, BESIDE_SIZE};
 use crate::icon_draw::{draw_floating, draw_icon, draw_rounded_panel, to_premultiplied_bgra};
 use crate::overlay_logic::{
     bubble_position, button_at, button_shown, fits, part_at, resized_position, resolve_position, scaled_size, tail,
@@ -483,6 +483,34 @@ impl Overlay {
         unsafe { ShowWindow(self.icon.hwnd.get(), SW_HIDE) };
         self.shown = false;
         self.hide_bubble();
+    }
+
+    /// Brings the mic to the field the user clicked or tabbed into, and reports whether it moved.
+    /// It stays there after; the saved position is left alone, so the next start is where the
+    /// user put it. Not while it is held, nor while the pointer is on it: the focus coming back
+    /// from a template menu must not pull it away from under the hand.
+    pub fn follow(&mut self, anchor: Anchor) -> bool {
+        if !self.shown || self.icon.press.get().is_some() {
+            return false;
+        }
+        let size = self.icon.size.get();
+        let (x, y) = self.icon.pos.get();
+        let (cx, cy) = cursor();
+        if cx >= x && cx < x + size && cy >= y && cy < y + size {
+            return false;
+        }
+        let (areas, primary) = work_areas();
+        let pos = keep_on_screen(follow_position(anchor, size), size, &areas, primary);
+        if pos == (x, y) {
+            return false;
+        }
+        // The bubble was placed over the old spot; the next words place it over the new one.
+        self.hide_bubble();
+        self.icon.pos.set(pos);
+        // A later resize keeps it here instead of sending it back to the corner.
+        self.icon.at_default.set(false);
+        unsafe { SetWindowPos(self.icon.hwnd.get(), HWND_TOPMOST, pos.0, pos.1, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE) };
+        true
     }
 
     pub fn is_shown(&self) -> bool {

@@ -22,7 +22,12 @@ export interface NativeConfig {
     readonly scale?: number;
   };
   readonly inject: "auto" | "type" | "paste";
-  readonly besideField: { readonly enabled: boolean; readonly trigger: "focus" | "hover" };
+  readonly besideField: {
+    readonly enabled: boolean;
+    readonly trigger: "focus" | "hover";
+    /** Also in Chrome's fields; older desktop apps leave it out (they never showed it there). */
+    readonly inChrome?: boolean;
+  };
   readonly extraExtensionIds: readonly string[];
   /** The desktop app's own input mode and replacement table (standalone plan C5). */
   readonly inputMode?: InputMode;
@@ -116,6 +121,7 @@ export function isNativeConfig(v: unknown): v is NativeConfig {
     (r.inject === "auto" || r.inject === "type" || r.inject === "paste") &&
     typeof beside.enabled === "boolean" &&
     (beside.trigger === "focus" || beside.trigger === "hover") &&
+    (beside.inChrome === undefined || typeof beside.inChrome === "boolean") &&
     Array.isArray(r.extraExtensionIds) &&
     r.extraExtensionIds.every((id) => typeof id === "string") &&
     (r.inputMode === undefined || isInputMode(r.inputMode)) &&

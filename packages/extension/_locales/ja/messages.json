@@ -563,7 +563,7 @@
     "description": "Options page: experimental mic beside text fields of other apps"
   },
   "optionsNativeBesideHint": {
-    "message": "Windows と macOS だけです。アプリによっては出ません。",
+    "message": "Windows と macOS だけです。アプリによっては出ません。Windows で「入力欄にカーソルが入ったとき」にすると、いつものマイクがクリックした所や Tab で移った欄の近くへ動き、欄から離れてもそこに残ります。",
     "description": "Options page: explains the experimental mic beside fields"
   },
   "optionsNativeBesideTrigger": {
@@ -577,6 +577,14 @@
   "optionsNativeTriggerHover": {
     "message": "入力欄にマウスを乗せたとき",
     "description": "Options page: the mic appears when the mouse is over a field"
+  },
+  "optionsNativeBesideChrome": {
+    "message": "Chrome の入力欄にも出す",
+    "description": "Desktop settings: the mic beside fields also shows in Chrome"
+  },
+  "optionsNativeBesideChromeHint": {
+    "message": "Chrome に vtype の拡張機能も入れているときは、マイクが 2 つ出ないようにオフにしてください。",
+    "description": "Desktop settings: hint under the Chrome switch of the mic beside fields"
   },
   "optionsNativeSave": {
     "message": "デスクトップ版の設定を保存",

@@ -1,6 +1,8 @@
 //! The mic beside the text field (child plan C8, experimental, off by default: parent plan D18).
 //! When a text field takes the focus (or, by choice, the pointer rests on one), a small mic
-//! appears next to it; pressing it starts recording.
+//! appears next to it; pressing it starts recording. Where the platform can move the floating mic
+//! (Windows), a field taking the focus brings the floating mic itself there instead, and it stays
+//! when the focus leaves.
 //!
 //! What to show and where is decided here, the same on every OS; the platform code only reports
 //! what the focused (or pointed-at) element is and puts the window where it is told.
@@ -16,6 +18,8 @@ use crate::platform::Rect;
 pub const BESIDE_SIZE: i32 = 26;
 /// Space between the caret (or the field's edge) and the mic.
 const GAP: i32 = 4;
+/// Space between the pointer and the mic, so the I-beam stays clear of it.
+const POINTER_GAP: i32 = 10;
 
 /// Hover: the pointer must rest on the same field this long before the mic shows…
 pub const HOVER_SHOW_AFTER: Duration = Duration::from_millis(300);
@@ -34,29 +38,75 @@ pub struct FieldProbe {
     pub app_id: Option<String>,
     pub caret: Option<Rect>,
     pub bounds: Option<Rect>,
+    /// Where the pointer was when the field took the focus (screen pixels). Inside the field it
+    /// is where the user clicked.
+    pub pointer: Option<(i32, i32)>,
 }
 
-/// Chrome shows its own mic beside fields (the extension); two would be one too many.
+fn contains(r: Rect, (x, y): (i32, i32)) -> bool {
+    x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+}
+
+/// The vtype extension shows its own mic beside Chrome's fields; with it installed, two would be
+/// one too many (the `in_chrome` setting).
 pub fn is_chrome(app_id: &str) -> bool {
     app_id.eq_ignore_ascii_case("chrome.exe") || app_id.starts_with("com.google.Chrome")
 }
 
-/// Where the mic goes (top-left, before keeping it on a screen), or `None` for no mic.
-pub fn decide(config: &BesideFieldConfig, probe: &FieldProbe) -> Option<(i32, i32)> {
+/// Where the user is in a field, which the mic goes by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Anchor {
+    /// Clicked into: where the pointer was. Chrome gives no caret, and the field's end can be far
+    /// from where the hand is.
+    Pointer(i32, i32),
+    /// The caret. Apps give it as 0 or 1 px wide, one character, or even the whole line; its left
+    /// edge is where the caret is in every case.
+    Caret(Rect),
+    /// Only the field (Chrome after Tab).
+    Field(Rect),
+}
+
+/// Where the user is in the field, or `None` when no mic belongs there.
+pub fn anchor(config: &BesideFieldConfig, probe: &FieldProbe) -> Option<Anchor> {
     if !config.enabled || !probe.is_text_field || probe.is_password == Some(true) {
         return None;
     }
-    if probe.app_id.as_deref().is_some_and(is_chrome) {
+    if !config.in_chrome && probe.app_id.as_deref().is_some_and(is_chrome) {
         return None;
     }
-    // Just above and right of the caret; without one, inside the field's right end, centred.
-    // Apps give the caret as 0 or 1 px wide, one character, or even the whole line; its left
-    // edge is where the caret is in every case.
-    if let Some(c) = probe.caret.filter(|c| c.height > 0) {
-        return Some((c.x + GAP, c.y - BESIDE_SIZE));
+    if let Some((x, y)) = probe.pointer.filter(|&p| probe.bounds.is_some_and(|b| contains(b, p))) {
+        return Some(Anchor::Pointer(x, y));
     }
-    let b = probe.bounds.filter(|b| b.width > 0 && b.height > 0)?;
-    Some((b.x + b.width - BESIDE_SIZE - GAP, b.y + b.height / 2 - BESIDE_SIZE / 2))
+    if let Some(c) = probe.caret.filter(|c| c.height > 0) {
+        return Some(Anchor::Caret(c));
+    }
+    probe.bounds.filter(|b| b.width > 0 && b.height > 0).map(Anchor::Field)
+}
+
+/// The small mic's top-left (before keeping it on a screen): just above and right of the pointer
+/// or the caret; with only the field, inside its right end, centred.
+pub fn beside_position(anchor: Anchor) -> (i32, i32) {
+    match anchor {
+        Anchor::Pointer(x, y) => (x + POINTER_GAP, y - BESIDE_SIZE - POINTER_GAP),
+        Anchor::Caret(c) => (c.x + GAP, c.y - BESIDE_SIZE),
+        Anchor::Field(b) => (b.x + b.width - BESIDE_SIZE - GAP, b.y + b.height / 2 - BESIDE_SIZE / 2),
+    }
+}
+
+/// Where the small mic goes (top-left, before keeping it on a screen), or `None` for no mic.
+pub fn decide(config: &BesideFieldConfig, probe: &FieldProbe) -> Option<(i32, i32)> {
+    anchor(config, probe).map(beside_position)
+}
+
+/// The floating mic's top-left when it comes to a field (`size` is its window), before keeping it
+/// on a screen: above the line, so it covers neither the text nor the IME's candidates below it.
+/// Right of the pointer or the caret; with only the field, over the field's start.
+pub fn follow_position(anchor: Anchor, size: i32) -> (i32, i32) {
+    match anchor {
+        Anchor::Pointer(x, y) => (x + POINTER_GAP, y - size - POINTER_GAP),
+        Anchor::Caret(c) => (c.x + GAP, c.y - size),
+        Anchor::Field(b) => (b.x, b.y - size),
+    }
 }
 
 /// Moves `pos` so the mic lies inside the work area it is (mostly) on, or the primary one.
@@ -151,7 +201,7 @@ mod tests {
     use crate::config::BesideFieldTrigger;
 
     fn on() -> BesideFieldConfig {
-        BesideFieldConfig { enabled: true, trigger: BesideFieldTrigger::Focus }
+        BesideFieldConfig { enabled: true, trigger: BesideFieldTrigger::Focus, in_chrome: true }
     }
 
     fn field() -> FieldProbe {
@@ -161,6 +211,7 @@ mod tests {
             app_id: Some("notepad.exe".into()),
             caret: Some(Rect { x: 100, y: 200, width: 1, height: 18 }),
             bounds: Some(Rect { x: 50, y: 190, width: 400, height: 40 }),
+            pointer: None,
         }
     }
 
@@ -170,6 +221,53 @@ mod tests {
         // Measured on Windows: an empty box gave its whole line as the caret; still its left edge.
         let wide = FieldProbe { caret: Some(Rect { x: 72, y: 95, width: 376, height: 19 }), ..field() };
         assert_eq!(decide(&on(), &wide), Some((72 + GAP, 95 - BESIDE_SIZE)));
+    }
+
+    #[test]
+    fn a_click_puts_the_mic_by_the_pointer() {
+        // Measured on Windows: Chrome gives no caret, and its chat box was 877 px wide.
+        let chat = FieldProbe {
+            app_id: Some("chrome.exe".into()),
+            caret: None,
+            bounds: Some(Rect { x: 379, y: 873, width: 877, height: 24 }),
+            pointer: Some((420, 885)),
+            ..field()
+        };
+        assert_eq!(decide(&on(), &chat), Some((420 + POINTER_GAP, 885 - BESIDE_SIZE - POINTER_GAP)));
+        // Ahead of the caret too: the hand is where the user is.
+        let clicked = FieldProbe { pointer: Some((300, 210)), ..field() };
+        assert_eq!(decide(&on(), &clicked), Some((300 + POINTER_GAP, 210 - BESIDE_SIZE - POINTER_GAP)));
+        // The pointer outside the field (Tab moved the focus), or no field to check it against:
+        // by the caret as before.
+        let tabbed = FieldProbe { pointer: Some((10, 10)), ..field() };
+        assert_eq!(decide(&on(), &tabbed), Some((100 + GAP, 200 - BESIDE_SIZE)));
+        let unbounded = FieldProbe { pointer: Some((300, 210)), bounds: None, ..field() };
+        assert_eq!(decide(&on(), &unbounded), Some((100 + GAP, 200 - BESIDE_SIZE)));
+    }
+
+    #[test]
+    fn the_floating_mic_comes_above_the_line_by_the_pointer_the_caret_or_the_field() {
+        let size = 112;
+        let clicked = anchor(&on(), &FieldProbe { pointer: Some((300, 210)), ..field() }).unwrap();
+        assert_eq!(clicked, Anchor::Pointer(300, 210));
+        assert_eq!(follow_position(clicked, size), (300 + POINTER_GAP, 210 - size - POINTER_GAP));
+        // Tab: the pointer is elsewhere; by the caret.
+        let tabbed = anchor(&on(), &FieldProbe { pointer: Some((10, 10)), ..field() }).unwrap();
+        assert_eq!(follow_position(tabbed, size), (100 + GAP, 200 - size));
+        // Tab into Chrome (no caret): over the field's start.
+        let chrome = FieldProbe {
+            app_id: Some("chrome.exe".into()),
+            caret: None,
+            bounds: Some(Rect { x: 379, y: 873, width: 877, height: 24 }),
+            pointer: Some((10, 10)),
+            ..field()
+        };
+        let tabbed_chrome = anchor(&on(), &chrome).unwrap();
+        assert_eq!(tabbed_chrome, Anchor::Field(Rect { x: 379, y: 873, width: 877, height: 24 }));
+        assert_eq!(follow_position(tabbed_chrome, size), (379, 873 - size));
+        // Nothing to go by, or no mic wanted there: no anchor.
+        assert_eq!(anchor(&on(), &FieldProbe { caret: None, bounds: None, ..field() }), None);
+        assert_eq!(anchor(&on(), &FieldProbe { is_password: Some(true), ..field() }), None);
     }
 
     #[test]
@@ -186,10 +284,24 @@ mod tests {
         assert_eq!(decide(&off, &field()), None);
         assert_eq!(decide(&on(), &FieldProbe { is_password: Some(true), ..field() }), None);
         assert_eq!(decide(&on(), &FieldProbe { is_text_field: false, ..field() }), None);
-        assert_eq!(decide(&on(), &FieldProbe { app_id: Some("chrome.exe".into()), ..field() }), None);
-        assert_eq!(decide(&on(), &FieldProbe { app_id: Some("com.google.Chrome".into()), ..field() }), None);
         // Unknown password state still shows (the typing itself checks again).
         assert!(decide(&on(), &FieldProbe { is_password: None, ..field() }).is_some());
+    }
+
+    #[test]
+    fn chrome_gets_the_mic_unless_turned_off() {
+        // Measured on Windows: Chrome's fields are text fields with no caret; the field's right end.
+        let chrome = FieldProbe {
+            app_id: Some("chrome.exe".into()),
+            caret: None,
+            bounds: Some(Rect { x: -1209, y: 215, width: 387, height: 45 }),
+            ..field()
+        };
+        assert_eq!(decide(&on(), &chrome), Some((-1209 + 387 - BESIDE_SIZE - GAP, 215 + 22 - BESIDE_SIZE / 2)));
+        let no_chrome = BesideFieldConfig { in_chrome: false, ..on() };
+        assert_eq!(decide(&no_chrome, &chrome), None);
+        assert_eq!(decide(&no_chrome, &FieldProbe { app_id: Some("com.google.Chrome".into()), ..field() }), None);
+        assert!(decide(&no_chrome, &field()).is_some());
     }
 
     #[test]

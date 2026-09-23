@@ -217,8 +217,22 @@ describe("the desktop settings page", () => {
       inject: "paste",
       sendKey: "ctrl-enter",
       silenceStopSec: 0,
-      besideField: { enabled: true, trigger: "focus" },
+      // A config without inChrome (an older desktop app) shows the Chrome switch on.
+      besideField: { enabled: true, trigger: "focus", inChrome: true },
     });
+  });
+
+  it("shows the Chrome switch of the mic beside fields as saved and saves it off", async () => {
+    const app = fakeApp({ ...CONFIG, besideField: { enabled: true, trigger: "focus", inChrome: true } });
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "ja" }).loaded;
+    expect($("nc-beside-chrome-label").textContent).toBe(translate("optionsNativeBesideChrome", "ja"));
+    expect($("nc-beside-chrome-hint").textContent).toBe(translate("optionsNativeBesideChromeHint", "ja"));
+    expect($<HTMLInputElement>("nc-beside-chrome").checked).toBe(true);
+    $<HTMLInputElement>("nc-beside-chrome").checked = false;
+    $("nc-form").dispatchEvent(new Event("submit", { cancelable: true }));
+    await flush();
+    expect((app.calls[1]!.body as typeof CONFIG).besideField).toEqual({ enabled: true, trigger: "focus", inChrome: false });
+    expect($<HTMLInputElement>("nc-beside-chrome").checked).toBe(false);
   });
 
   it("offers off and 1-10 s to stop after speaking, shows the saved one and saves the chosen one", async () => {
@@ -384,6 +398,21 @@ describe("one settings window at a time", () => {
     await settle();
     expect(closed).toBe(1);
     expect((second.getElementById("nc-silence-stop") as HTMLSelectElement).value).toBe("5");
+    expect(app.calls.filter((c) => c.method === "POST")).toEqual([]);
+  });
+
+  it("a changed Chrome switch of the mic beside fields alone is handed over too", async () => {
+    const app = fakeApp();
+    const channel = channels();
+    let closed = 0;
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "en", channel: channel(), openedAt: 1, close: () => closed++ })
+      .loaded;
+    $<HTMLInputElement>("nc-beside-chrome").checked = false;
+    const second = secondWindow();
+    await initSettingsPage({ doc: second, href: PAGE, fetch: app.fetch, language: "en", channel: channel(), openedAt: 2 }).loaded;
+    await settle();
+    expect(closed).toBe(1);
+    expect((second.getElementById("nc-beside-chrome") as HTMLInputElement).checked).toBe(false);
     expect(app.calls.filter((c) => c.method === "POST")).toEqual([]);
   });
 

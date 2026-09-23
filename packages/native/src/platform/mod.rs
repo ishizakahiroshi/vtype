@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
-pub use crate::beside_field::FieldProbe;
+pub use crate::beside_field::{Anchor, FieldProbe};
 use crate::config::{BesideFieldConfig, InjectMethod};
 pub use crate::overlay_logic::{MicButton, MicPart};
 use crate::protocol::InputMode;
@@ -224,6 +224,14 @@ pub trait Platform: Send + Sync {
     fn show_beside(&self, _pos: (i32, i32), _look: IconState, _reported_at: Instant) {}
     fn hide_beside(&self) {}
     fn set_beside_look(&self, _look: IconState) {}
+    /// Whether a field taking the focus brings the floating mic itself there (Windows), rather
+    /// than showing the beside mic.
+    fn icon_follows_fields(&self) -> bool {
+        false
+    }
+    /// Brings the floating mic to the field the user is at; it stays there after. Nothing while
+    /// the mic is off screen, held, or under the pointer. `reported_at` as for `show_beside`.
+    fn icon_to_field(&self, _anchor: Anchor, _reported_at: Instant) {}
 }
 
 /// The implementation for the OS this binary was built for.

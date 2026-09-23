@@ -276,7 +276,8 @@ mod tests {
             trigger
         }
         let mut c = BesideControl::new(start);
-        let on = BesideFieldConfig { enabled: true, trigger: BesideFieldTrigger::Hover };
+        let on =
+            BesideFieldConfig { enabled: true, trigger: BesideFieldTrigger::Hover, ..BesideFieldConfig::default() };
         c.set_config(&on);
         assert!(c.watcher.is_none(), "no sender yet");
         let (tx, _rx) = std::sync::mpsc::channel();

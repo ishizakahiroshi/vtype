@@ -32,7 +32,7 @@ use super::template_menu;
 use crate::hotkey::HotkeySpec;
 use crate::menu::{tooltip, TemplateList};
 use crate::platform::desktop::{build_menu, to_global_hotkey, tray_icons, update_checks, Timing};
-use crate::platform::{IconState, MenuAction, PlatformError, PlatformEvent, TrayState, VoiceCue, LIVE_LINES};
+use crate::platform::{Anchor, IconState, MenuAction, PlatformError, PlatformEvent, TrayState, VoiceCue, LIVE_LINES};
 
 pub const WM_APP_RUN: u32 = WM_APP + 1;
 pub const WM_APP_MENU: u32 = WM_APP + 2;
@@ -295,6 +295,14 @@ impl Ui {
 
     pub fn set_beside_look(&mut self, look: IconState) {
         self.beside.set_look(look);
+    }
+
+    pub fn icon_to_field(&mut self, anchor: Anchor, reported_at: Instant) {
+        if self.overlay.follow(anchor) {
+            let ms = reported_at.elapsed().as_millis();
+            tracing::info!(ms, "mic moved to the field");
+            self.shared.beside_timing.lock().unwrap_or_else(|e| e.into_inner()).record(ms);
+        }
     }
 
     /// Hides the mic while a full-screen app (a game, a video, a presentation) is in front.

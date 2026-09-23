@@ -74,6 +74,7 @@ pub fn probe(element: &AXUIElement, with_caret: bool) -> FieldProbe {
         app_id: bundle_id(element),
         caret: if is_text_field && with_caret { caret_rect(element) } else { None },
         bounds: position.zip(size).map(|(p, s)| to_rect(p, s)),
+        pointer: None,
     }
 }
 

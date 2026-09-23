@@ -188,12 +188,21 @@ pub enum InjectMethod {
     Paste,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct BesideFieldConfig {
     /// Experimental; off by default (parent plan D18).
     pub enabled: bool,
     pub trigger: BesideFieldTrigger,
+    /// Also in Chrome. On by default: the desktop app no longer talks to the extension, so it
+    /// cannot tell whether the extension's own mic is there; whoever has both turns this off.
+    pub in_chrome: bool,
+}
+
+impl Default for BesideFieldConfig {
+    fn default() -> Self {
+        BesideFieldConfig { enabled: false, trigger: BesideFieldTrigger::Focus, in_chrome: true }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -291,6 +300,7 @@ mod tests {
         assert_eq!(cfg.inject, InjectMethod::Auto);
         assert!(!cfg.beside_field.enabled);
         assert_eq!(cfg.beside_field.trigger, BesideFieldTrigger::Focus);
+        assert!(cfg.beside_field.in_chrome);
         assert!(cfg.extra_extension_ids.is_empty());
         assert!(!cfg.consented);
         assert_eq!(cfg.effective_hotkey(), default_hotkey());
@@ -356,6 +366,7 @@ mod tests {
         cfg.icon.scale = 130;
         cfg.inject = InjectMethod::Paste;
         cfg.beside_field.trigger = BesideFieldTrigger::Hover;
+        cfg.beside_field.in_chrome = false;
         cfg.extra_extension_ids = vec!["a".repeat(32)];
         cfg.silence_stop_sec = 0;
         save(&path, &cfg).unwrap();
@@ -368,10 +379,20 @@ mod tests {
         let json = serde_json::to_value(NativeConfig::default()).unwrap();
         assert_eq!(json["icon"]["hideOnFullscreen"], true);
         assert_eq!(json["besideField"]["trigger"], "focus");
+        assert_eq!(json["besideField"]["inChrome"], true);
         assert_eq!(json["inject"], "auto");
         let partial: NativeConfig = serde_json::from_str(r#"{"inject":"type"}"#).unwrap();
         assert_eq!(partial.inject, InjectMethod::Type);
         assert!(partial.icon.visible);
+    }
+
+    #[test]
+    fn files_from_before_the_chrome_switch_show_the_mic_in_chrome() {
+        let old: NativeConfig = serde_json::from_str(r#"{"besideField":{"enabled":true,"trigger":"focus"}}"#).unwrap();
+        assert!(old.beside_field.enabled);
+        assert!(old.beside_field.in_chrome);
+        let off: NativeConfig = serde_json::from_str(r#"{"besideField":{"enabled":true,"inChrome":false}}"#).unwrap();
+        assert!(!off.beside_field.in_chrome);
     }
 
     #[test]

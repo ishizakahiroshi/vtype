@@ -563,7 +563,7 @@
     "description": "Options page: experimental mic beside text fields of other apps"
   },
   "optionsNativeBesideHint": {
-    "message": "Windows and macOS only. It may not appear in every app.",
+    "message": "Windows and macOS only. It may not appear in every app. On Windows, with \"when the cursor enters a field\", the usual mic moves next to where you clicked or to the field Tab moved to, and stays there after you leave the field.",
     "description": "Options page: explains the experimental mic beside fields"
   },
   "optionsNativeBesideTrigger": {
@@ -577,6 +577,14 @@
   "optionsNativeTriggerHover": {
     "message": "when the mouse is over a field",
     "description": "Options page: the mic appears when the mouse is over a field"
+  },
+  "optionsNativeBesideChrome": {
+    "message": "Also in Chrome's fields",
+    "description": "Desktop settings: the mic beside fields also shows in Chrome"
+  },
+  "optionsNativeBesideChromeHint": {
+    "message": "If you also have the vtype extension in Chrome, turn this off so that two mics do not appear.",
+    "description": "Desktop settings: hint under the Chrome switch of the mic beside fields"
   },
   "optionsNativeSave": {
     "message": "Save desktop settings",

@@ -83,6 +83,7 @@ pub fn probe(element: &IUIAutomationElement, with_caret: bool) -> FieldProbe {
             app_id: element.CurrentProcessId().ok().and_then(|pid| super::system_process_name(pid as u32)),
             caret: if is_text_field && with_caret { caret_rect(element) } else { None },
             bounds: element.CurrentBoundingRectangle().ok().map(to_rect),
+            pointer: None,
         }
     }
 }
@@ -99,7 +100,10 @@ impl IUIAutomationFocusChangedEventHandler_Impl for FocusHandler_Impl {
         if let Some(element) = sender.as_ref() {
             let pid = unsafe { element.CurrentProcessId() }.unwrap_or(0) as u32;
             if pid != self.own_pid {
-                let _ = self.events.send(PlatformEvent::FieldChanged { probe: probe(element, true), at });
+                // Where the pointer is now: after a click, where the user clicked.
+                let c = cursor();
+                let probe = FieldProbe { pointer: Some((c.x, c.y)), ..probe(element, true) };
+                let _ = self.events.send(PlatformEvent::FieldChanged { probe, at });
             }
         }
         Ok(())

@@ -60,7 +60,7 @@ export interface SettingsDraft {
 }
 
 /** The form's fields for the desktop app's own settings (saved with its button). */
-const NATIVE_FIELDS = ["nc-hotkey", "nc-icon-visible", "nc-icon-fullscreen", "nc-inject", "nc-send-key", "nc-silence-stop", "nc-beside", "nc-beside-trigger"];
+const NATIVE_FIELDS = ["nc-hotkey", "nc-icon-visible", "nc-icon-fullscreen", "nc-inject", "nc-send-key", "nc-silence-stop", "nc-beside", "nc-beside-trigger", "nc-beside-chrome"];
 
 type ChannelMessage =
   | { type: "opened"; id: string; at: number }
@@ -185,6 +185,8 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
   setText("nc-beside-trigger-label", t("optionsNativeBesideTrigger"));
   setText("nc-trigger-focus", t("optionsNativeTriggerFocus"));
   setText("nc-trigger-hover", t("optionsNativeTriggerHover"));
+  setText("nc-beside-chrome-label", t("optionsNativeBesideChrome"));
+  setText("nc-beside-chrome-hint", t("optionsNativeBesideChromeHint"));
   setText("nc-save", t("optionsNativeSave"));
   const replText = el("repl-text", HTMLTextAreaElement);
   if (replText !== null) replText.placeholder = t("optionsReplPlaceholder");
@@ -318,6 +320,8 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
     if (beside !== null) beside.checked = c.besideField.enabled;
     const trigger = el("nc-beside-trigger", HTMLSelectElement);
     if (trigger !== null) trigger.value = c.besideField.trigger;
+    const inChrome = el("nc-beside-chrome", HTMLInputElement);
+    if (inChrome !== null) inChrome.checked = c.besideField.inChrome ?? true;
     const sendNow = el("tpl-send", HTMLInputElement);
     if (sendNow !== null) sendNow.checked = c.templateSendImmediate ?? false;
     renderTemplates(c.templates ?? []);
@@ -345,6 +349,7 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
       besideField: {
         enabled: el("nc-beside", HTMLInputElement)?.checked ?? base.besideField.enabled,
         trigger: trigger === "hover" || trigger === "focus" ? trigger : base.besideField.trigger,
+        inChrome: el("nc-beside-chrome", HTMLInputElement)?.checked ?? base.besideField.inChrome ?? true,
       },
     };
   }
@@ -487,7 +492,8 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
       form.sendKey !== (config.sendKey ?? "enter") ||
       form.silenceStopSec !== (config.silenceStopSec ?? SILENCE_STOP_DEFAULT) ||
       form.besideField.enabled !== config.besideField.enabled ||
-      form.besideField.trigger !== config.besideField.trigger;
+      form.besideField.trigger !== config.besideField.trigger ||
+      form.besideField.inChrome !== (config.besideField.inChrome ?? true);
     if (nativeEdited) {
       d.native = {};
       for (const id of NATIVE_FIELDS) {

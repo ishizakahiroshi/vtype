@@ -19,15 +19,15 @@ use serde_json::Value;
 
 use crate::beside_field;
 use crate::chrome_launch::{self, WindowPlacement};
-use crate::config::{self, NativeConfig};
+use crate::config::{self, BesideFieldTrigger, NativeConfig};
 use crate::diag::{self, ErrorLog};
 use crate::i18n::{t, t_with};
 use crate::ipc;
 use crate::menu;
 use crate::overlay_logic;
 use crate::platform::{
-    EditKeys, FieldProbe, IconState, InjectOutcome, MenuAction, MicButton, MicPart, Platform, PlatformError,
-    PlatformEvent, TrayState, VoiceCue, MESSAGE_HOLD,
+    Anchor, EditKeys, FieldProbe, IconState, InjectOutcome, MenuAction, MicButton, MicPart, Platform, PlatformError,
+    PlatformEvent, Rect, TrayState, VoiceCue, MESSAGE_HOLD,
 };
 use crate::protocol::{FromExtension, InputMode, Reply, Request, SessionEvent, ToExtension};
 use crate::report::{self, ReportInfo, Surface};
@@ -102,6 +102,9 @@ pub struct Core {
     deleted_template: Option<(usize, String)>,
     /// The mic beside the field is up (child plan C8).
     beside_shown: bool,
+    /// The field the floating mic came to last (app and bounds), so that the focus coming back
+    /// to it (a template menu closing, a window switched back to) does not move the mic again.
+    followed_field: Option<(Option<String>, Option<Rect>)>,
     /// The daemon's own speech page (speech_host.rs), when it could listen.
     speech_page: Option<String>,
     /// The daemon's own Chrome profile (chrome_launch.rs).
@@ -151,6 +154,7 @@ impl Core {
             send_after_stop: false,
             deleted_template: None,
             beside_shown: false,
+            followed_field: None,
             speech_page: None,
             profile_dir: chrome_launch::profile_dir(),
             launched: None,
@@ -940,7 +944,8 @@ impl Core {
         }
         if beside_changed {
             self.platform.watch_fields(&self.config.beside_field);
-            if !self.config.beside_field.enabled && self.beside_shown {
+            self.followed_field = None;
+            if (!self.config.beside_field.enabled || self.icon_follows_fields()) && self.beside_shown {
                 self.beside_shown = false;
                 self.platform.hide_beside();
             }
@@ -966,8 +971,27 @@ impl Core {
         self.update_tray();
     }
 
-    /// The mic beside the field follows the focus (or the pointer): shown, moved or hidden.
+    /// A field taking the focus brings the floating mic there (where the platform can move it).
+    fn icon_follows_fields(&self) -> bool {
+        self.config.beside_field.trigger == BesideFieldTrigger::Focus && self.platform.icon_follows_fields()
+    }
+
+    /// The mic beside the field follows the focus (or the pointer): shown, moved or hidden. Or the
+    /// floating mic comes to the field, and stays when the focus leaves it.
     fn field_changed(&mut self, probe: &FieldProbe, at: Instant) {
+        if self.icon_follows_fields() {
+            let Some(anchor) = beside_field::anchor(&self.config.beside_field, probe) else {
+                return;
+            };
+            let field = (probe.app_id.clone(), probe.bounds);
+            // The focus coming back to the field the mic is at: only a click moves it again.
+            if self.followed_field.as_ref() == Some(&field) && !matches!(anchor, Anchor::Pointer(..)) {
+                return;
+            }
+            self.followed_field = Some(field);
+            self.platform.icon_to_field(anchor, at);
+            return;
+        }
         match beside_field::decide(&self.config.beside_field, probe) {
             Some(pos) => {
                 let look = if self.recording { IconState::Recording } else { IconState::Idle };
@@ -1200,7 +1224,7 @@ pub fn run() -> Result<()> {
 pub mod tests {
     use super::*;
     use crate::config::InjectMethod;
-    use crate::platform::{FieldInfo, Rect};
+    use crate::platform::FieldInfo;
     use serde_json::json;
     use std::path::Path;
     use std::sync::Mutex;
@@ -1215,6 +1239,8 @@ pub mod tests {
         pub chrome: Mutex<Option<Result<(), PlatformError>>>,
         /// What `copy_selection` finds selected.
         pub selection: Mutex<Option<String>>,
+        /// Acts like Windows: the floating mic comes to fields.
+        pub icon_follows: Mutex<bool>,
     }
 
     impl FakePlatform {
@@ -1313,6 +1339,12 @@ pub mod tests {
         }
         fn set_beside_look(&self, look: IconState) {
             self.log(format!("beside look {look:?}"));
+        }
+        fn icon_follows_fields(&self) -> bool {
+            *self.icon_follows.lock().unwrap()
+        }
+        fn icon_to_field(&self, anchor: Anchor, _reported_at: Instant) {
+            self.log(format!("icon to {anchor:?}"));
         }
     }
 
@@ -2217,6 +2249,7 @@ pub mod tests {
             app_id: Some("notepad.exe".into()),
             caret: Some(Rect { x: 100, y: 200, width: 1, height: 18 }),
             bounds: None,
+            pointer: None,
         }
     }
 
@@ -2265,5 +2298,56 @@ pub mod tests {
         let calls = h.fake.take();
         assert!(calls.contains(&"watch false Focus".to_string()));
         assert!(calls.contains(&"hide beside".to_string()));
+    }
+
+    #[test]
+    fn on_windows_the_floating_mic_comes_to_the_field_and_stays() {
+        let mut h = Harness::new();
+        *h.fake.icon_follows.lock().unwrap() = true;
+        h.connect();
+        let mut cfg = NativeConfig::default();
+        cfg.beside_field.enabled = true;
+        h.ext(json!({"type": "set-native-config", "config": cfg}));
+        h.fake.take();
+        let field = FieldProbe { bounds: Some(Rect { x: 50, y: 190, width: 400, height: 40 }), ..text_field() };
+
+        // Clicked into: by the pointer, and no small mic.
+        focus(&mut h, FieldProbe { pointer: Some((300, 210)), ..field.clone() });
+        assert_eq!(h.fake.take(), vec!["icon to Pointer(300, 210)".to_string()]);
+        // The focus leaves for something that is not a field: the mic stays.
+        focus(&mut h, FieldProbe::default());
+        assert!(h.fake.take().is_empty());
+        // The focus comes back to the same field without a click (a menu closed): it stays too.
+        focus(&mut h, FieldProbe { pointer: Some((10, 10)), ..field.clone() });
+        assert!(h.fake.take().is_empty());
+        // A click somewhere else in the same field moves it again.
+        focus(&mut h, FieldProbe { pointer: Some((420, 200)), ..field.clone() });
+        assert_eq!(h.fake.take(), vec!["icon to Pointer(420, 200)".to_string()]);
+        // Tab to another field: by its caret.
+        let next = FieldProbe {
+            caret: Some(Rect { x: 60, y: 300, width: 1, height: 18 }),
+            bounds: Some(Rect { x: 50, y: 290, width: 400, height: 40 }),
+            pointer: Some((10, 10)),
+            ..text_field()
+        };
+        focus(&mut h, next);
+        assert_eq!(
+            h.fake.take(),
+            vec![format!("icon to {:?}", Anchor::Caret(Rect { x: 60, y: 300, width: 1, height: 18 }))]
+        );
+        // A password field: the mic does not come.
+        focus(&mut h, FieldProbe { is_password: Some(true), pointer: Some((300, 210)), ..field.clone() });
+        assert!(h.fake.take().is_empty());
+
+        // Hover still shows the small mic.
+        cfg.beside_field.trigger = BesideFieldTrigger::Hover;
+        h.ext(json!({"type": "set-native-config", "config": cfg}));
+        h.fake.take();
+        focus(&mut h, field);
+        assert_eq!(h.fake.take(), vec![format!("beside Idle {},{}", 100 + 4, 200 - 26)]);
+        // Back to focus: the small mic goes.
+        cfg.beside_field.trigger = BesideFieldTrigger::Focus;
+        h.ext(json!({"type": "set-native-config", "config": cfg}));
+        assert!(h.fake.take().contains(&"hide beside".to_string()));
     }
 }
