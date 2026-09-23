@@ -2,9 +2,9 @@
 //! that either listens for focus changes, or looks at what is under the pointer every 150 ms
 //! (no input hooks), and reports each text field as a `FieldChanged` event.
 
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use windows::core::{implement, Ref};
 use windows::Win32::Foundation::POINT;
@@ -17,7 +17,7 @@ use windows::Win32::UI::Accessibility::{
     IUIAutomationFocusChangedEventHandler_Impl, IUIAutomationTextPattern2, IUIAutomationTextRange,
     IUIAutomationValuePattern, TextUnit_Character, UIA_ComboBoxControlTypeId, UIA_DocumentControlTypeId,
     UIA_EditControlTypeId, UIA_TextControlTypeId, UIA_TextPattern2Id, UIA_TextPatternId, UIA_ValuePatternId,
-    UIA_CONTROLTYPE_ID,
+    UIA_WindowControlTypeId, UIA_CONTROLTYPE_ID,
 };
 
 use crate::beside_field::{FieldProbe, HoverChange, HoverTracker, Pointed, HOVER_POLL};
@@ -108,9 +108,15 @@ pub fn probe(element: &IUIAutomationElement, with_caret: bool) -> FieldProbe {
     }
 }
 
+/// What the watching thread is told: a focus change (from UI Automation's thread), or to stop.
+enum Msg {
+    Focus { probe: FieldProbe, pid: u32, window: bool, at: Instant },
+    Stop,
+}
+
 #[implement(IUIAutomationFocusChangedEventHandler)]
 struct FocusHandler {
-    events: Sender<PlatformEvent>,
+    reports: Sender<Msg>,
     own_pid: u32,
 }
 
@@ -123,21 +129,114 @@ impl IUIAutomationFocusChangedEventHandler_Impl for FocusHandler_Impl {
                 // Where the pointer is now: after a click, where the user clicked.
                 let c = cursor();
                 let probe = FieldProbe { pointer: Some((c.x, c.y)), ..probe(element, true) };
-                let _ = self.events.send(PlatformEvent::FieldChanged { probe, at });
+                let window = unsafe { element.CurrentControlType() }.is_ok_and(|k| k == UIA_WindowControlTypeId);
+                let _ = self.reports.send(Msg::Focus { probe, pid, window, at });
             }
         }
         Ok(())
     }
 }
 
-fn watch_focus(uia: &IUIAutomation, events: Sender<PlatformEvent>, stop: mpsc::Receiver<()>) {
-    let handler: IUIAutomationFocusChangedEventHandler = FocusHandler { events, own_pid: std::process::id() }.into();
+/// Qt apps (LINE) report the focus coming to their window as the window itself, and move it into
+/// their text field a moment later without another report (measured on LINE: the focused element
+/// was still a message 100 ms after the report, and the text field by 300 ms). After such a
+/// report the focused element is looked at again this often…
+const RECHECK_EVERY: Duration = Duration::from_millis(100);
+/// …for this long: less than the daemon's wait before the mic goes home (700 ms), so a mic at a
+/// field is not sent to the corner and back.
+const RECHECK_FOR: Duration = Duration::from_millis(600);
+
+/// Whether a report is the window itself, whose text field may take the focus after it.
+fn waits_for_field(window: bool, probe: &FieldProbe) -> bool {
+    window && !probe.is_text_field
+}
+
+/// One more look at the focused element after a window's report.
+enum Refocused {
+    /// A text field of the same app.
+    Field(FieldProbe),
+    /// Not a text field (yet).
+    NotYet,
+    /// Another app has the focus; its own report tells.
+    Elsewhere,
+}
+
+fn look_again(uia: &IUIAutomation, pid: u32) -> Refocused {
+    let Ok(element) = (unsafe { uia.GetFocusedElement() }) else { return Refocused::NotYet };
+    match unsafe { element.CurrentProcessId() } {
+        Ok(p) if p as u32 == pid => {
+            let probe = probe(&element, true);
+            if probe.is_text_field {
+                Refocused::Field(probe)
+            } else {
+                Refocused::NotYet
+            }
+        }
+        Ok(_) => Refocused::Elsewhere,
+        Err(_) => Refocused::NotYet,
+    }
+}
+
+/// The text field to report after a window's report, or whether to keep looking.
+fn after_look(look: Refocused, now: Instant, until: Instant) -> Result<FieldProbe, bool> {
+    match look {
+        Refocused::Field(probe) => Ok(probe),
+        Refocused::NotYet => Err(now < until),
+        Refocused::Elsewhere => Err(false),
+    }
+}
+
+/// A window's report waiting for its text field.
+struct Waiting {
+    pid: u32,
+    pointer: Option<(i32, i32)>,
+    at: Instant,
+    until: Instant,
+}
+
+fn watch_focus(uia: &IUIAutomation, events: Sender<PlatformEvent>, reports: Sender<Msg>, inbox: Receiver<Msg>) {
+    let handler: IUIAutomationFocusChangedEventHandler = FocusHandler { reports, own_pid: std::process::id() }.into();
     if let Err(e) = unsafe { uia.AddFocusChangedEventHandler(None, &handler) } {
         tracing::warn!(error = %e, "could not listen for focus changes");
         return;
     }
     tracing::info!("beside mic: listening for focus changes");
-    let _ = stop.recv();
+    let mut waiting: Option<Waiting> = None;
+    loop {
+        let msg = match waiting {
+            Some(_) => inbox.recv_timeout(RECHECK_EVERY),
+            None => inbox.recv().map_err(|_| RecvTimeoutError::Disconnected),
+        };
+        match msg {
+            Ok(Msg::Focus { probe, pid, window, at }) => {
+                // Every report goes on as it is; a newer one ends the wait for the last window's field.
+                waiting = waits_for_field(window, &probe).then(|| Waiting {
+                    pid,
+                    pointer: probe.pointer,
+                    at,
+                    until: at + RECHECK_FOR,
+                });
+                let _ = events.send(PlatformEvent::FieldChanged { probe, at });
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                let Some(w) = waiting.take() else { continue };
+                match after_look(look_again(uia, w.pid), Instant::now(), w.until) {
+                    Ok(probe) => {
+                        tracing::info!(
+                            after_ms = w.at.elapsed().as_millis() as u64,
+                            "beside mic: the window's text field took the focus"
+                        );
+                        // The pointer as it was at the report: where the user clicked into the window.
+                        let probe = FieldProbe { pointer: w.pointer, ..probe };
+                        let _ = events.send(PlatformEvent::FieldChanged { probe, at: w.at });
+                    }
+                    Err(true) => waiting = Some(w),
+                    Err(false) => {}
+                }
+            }
+            Ok(Msg::Stop) | Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
     let _ = unsafe { uia.RemoveFocusChangedEventHandler(&handler) };
 }
 
@@ -147,7 +246,7 @@ fn cursor() -> POINT {
     POINT { x: p.x, y: p.y }
 }
 
-fn watch_hover(uia: &IUIAutomation, events: Sender<PlatformEvent>, stop: mpsc::Receiver<()>) {
+fn watch_hover(uia: &IUIAutomation, events: Sender<PlatformEvent>, stop: Receiver<Msg>) {
     let own_pid = std::process::id();
     tracing::info!("beside mic: watching the pointer");
     let mut tracker: HoverTracker<(u32, Rect)> = HoverTracker::default();
@@ -197,34 +296,38 @@ fn watch_hover(uia: &IUIAutomation, events: Sender<PlatformEvent>, stop: mpsc::R
 
 /// The watching thread; dropping it stops it.
 pub struct Watcher {
-    stop: Option<Sender<()>>,
+    stop: Option<Sender<Msg>>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl Watcher {
     pub fn start(trigger: BesideFieldTrigger, events: Sender<PlatformEvent>) -> Watcher {
-        let (stop_tx, stop_rx) = mpsc::channel();
+        let (tx, rx) = mpsc::channel();
+        let reports = tx.clone();
         let thread = thread::Builder::new()
             .name("beside-field".into())
             .spawn(move || unsafe {
                 let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
                 match CoCreateInstance::<_, IUIAutomation>(&CUIAutomation, None, CLSCTX_INPROC_SERVER) {
                     Ok(uia) => match trigger {
-                        BesideFieldTrigger::Focus => watch_focus(&uia, events, stop_rx),
-                        BesideFieldTrigger::Hover => watch_hover(&uia, events, stop_rx),
+                        BesideFieldTrigger::Focus => watch_focus(&uia, events, reports, rx),
+                        BesideFieldTrigger::Hover => watch_hover(&uia, events, rx),
                     },
                     Err(e) => tracing::warn!(error = %e, "UI Automation is not available"),
                 }
                 CoUninitialize();
             })
             .ok();
-        Watcher { stop: Some(stop_tx), thread }
+        Watcher { stop: Some(tx), thread }
     }
 }
 
 impl Drop for Watcher {
     fn drop(&mut self) {
-        self.stop.take();
+        // Told, not just dropped: the focus handler holds a sender of the same channel.
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(Msg::Stop);
+        }
         if let Some(t) = self.thread.take() {
             let _ = t.join();
         }
@@ -234,7 +337,7 @@ impl Drop for Watcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use windows::Win32::UI::Accessibility::{UIA_ButtonControlTypeId, UIA_WindowControlTypeId};
+    use windows::Win32::UI::Accessibility::UIA_ButtonControlTypeId;
 
     #[test]
     fn what_takes_typed_text() {
@@ -250,5 +353,27 @@ mod tests {
         assert!(!takes_text(UIA_TextControlTypeId, "", true, true, false));
         assert!(!takes_text(UIA_EditControlTypeId, "", true, false, false), "not focusable");
         assert!(!takes_text(UIA_ComboBoxControlTypeId, "", true, true, true), "read-only");
+    }
+
+    #[test]
+    fn a_windows_report_waits_for_its_text_field() {
+        // Measured on LINE (Qt): clicking into its text field from another app reports only the
+        // window; the focused element is a message at 0 and 100 ms, and the text field by 300 ms.
+        let window = FieldProbe { is_text_field: false, app_id: Some("line.exe".into()), ..FieldProbe::default() };
+        assert!(waits_for_field(true, &window));
+        let t0 = Instant::now();
+        let until = t0 + RECHECK_FOR;
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        assert_eq!(after_look(Refocused::NotYet, at(100), until), Err(true));
+        assert_eq!(after_look(Refocused::NotYet, at(200), until), Err(true));
+        let field = FieldProbe { is_text_field: true, ..window.clone() };
+        assert_eq!(after_look(Refocused::Field(field.clone()), at(300), until), Ok(field.clone()));
+        // Never a text field: given up, before the mic's wait to go home is over.
+        assert_eq!(after_look(Refocused::NotYet, until, until), Err(false));
+        // Another app took the focus: its own report tells.
+        assert_eq!(after_look(Refocused::Elsewhere, at(100), until), Err(false));
+        // A text field's own report, or anything but a window, goes on as it is.
+        assert!(!waits_for_field(true, &field));
+        assert!(!waits_for_field(false, &window));
     }
 }
