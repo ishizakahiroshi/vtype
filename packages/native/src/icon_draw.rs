@@ -1,6 +1,7 @@
 //! The floating mic, drawn in software so every OS shows the same pixels (child plan C5-C3):
 //! idle is a grey disc at 40 % opacity (opaque under the pointer), recording is orange with a
-//! ring, and "just typed" is green with a check mark.
+//! ring and a white stop square instead of the mic (a click then stops it; the tray keeps the mic,
+//! `draw_tray_recording`), and "just typed" is green with a check mark.
 //!
 //! Its window (`draw_floating`) adds the ripple while the user speaks and four small buttons at
 //! the corners: the templates top left (a list), the input mode top right ("A" English, "カ"
@@ -26,6 +27,8 @@ pub const TEMPLATES_RGB: (u8, u8, u8) = (0x0d, 0x94, 0x88);
 /// this much (still inside the click area, `BUTTON_RADIUS * 1.15`).
 const HOT_LIGHTEN: f32 = 0.3;
 const HOT_GROW: f32 = 1.12;
+/// The stop square's side, as a fraction of the mic.
+const STOP_SIDE: f32 = 0.28;
 
 fn paint(rgb: (u8, u8, u8), alpha: u8) -> Paint<'static> {
     let mut p = Paint::default();
@@ -34,8 +37,33 @@ fn paint(rgb: (u8, u8, u8), alpha: u8) -> Paint<'static> {
     p
 }
 
-/// `size` × `size` pixels, premultiplied RGBA.
+/// `size` × `size` pixels, premultiplied RGBA. While recording the disc shows the stop square,
+/// since a click on the mic then stops it.
 pub fn draw_icon(size: u32, state: IconState, hover: bool) -> Pixmap {
+    let glyph = match state {
+        IconState::Idle => Glyph::Mic,
+        IconState::Recording => Glyph::Stop,
+        IconState::Done => Glyph::Check,
+    };
+    draw_disc(size, state, hover, glyph)
+}
+
+/// The tray's (menu bar's) recording icon, `size` × `size`: the recording disc with the mic kept
+/// on it. A click there opens the menu rather than stopping, so the icon only says "listening",
+/// and a stop square would read as "stopped".
+pub fn draw_tray_recording(size: u32) -> Pixmap {
+    draw_disc(size, IconState::Recording, true, Glyph::Mic)
+}
+
+/// What sits on the disc.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Glyph {
+    Mic,
+    Stop,
+    Check,
+}
+
+fn draw_disc(size: u32, state: IconState, hover: bool, glyph: Glyph) -> Pixmap {
     let mut pm = Pixmap::new(size.max(8), size.max(8)).expect("non-zero size");
     let s = pm.width() as f32;
     let c = s / 2.0;
@@ -62,32 +90,41 @@ pub fn draw_icon(size: u32, state: IconState, hover: bool) -> Pixmap {
 
     let white = paint((255, 255, 255), 255);
     let line = Stroke { width: (s * 0.06).max(1.5), line_cap: LineCap::Round, ..Stroke::default() };
-    if state == IconState::Done {
-        let mut pb = PathBuilder::new();
-        pb.move_to(s * 0.33, s * 0.51);
-        pb.line_to(s * 0.45, s * 0.63);
-        pb.line_to(s * 0.68, s * 0.39);
-        if let Some(check) = pb.finish() {
-            let bold = Stroke { width: (s * 0.08).max(2.0), ..line.clone() };
-            pm.stroke_path(&check, &white, &bold, Transform::identity(), None);
+    match glyph {
+        Glyph::Check => {
+            let mut pb = PathBuilder::new();
+            pb.move_to(s * 0.33, s * 0.51);
+            pb.line_to(s * 0.45, s * 0.63);
+            pb.line_to(s * 0.68, s * 0.39);
+            if let Some(check) = pb.finish() {
+                let bold = Stroke { width: (s * 0.08).max(2.0), ..line.clone() };
+                pm.stroke_path(&check, &white, &bold, Transform::identity(), None);
+            }
         }
-    } else {
-        // Capsule body.
-        let (w, h) = (s * 0.16, s * 0.27);
-        if let Some(body) = rounded_rect(c - w / 2.0, s * 0.25, w, h, w / 2.0) {
-            pm.fill_path(&body, &white, FillRule::Winding, Transform::identity(), None);
+        Glyph::Stop => {
+            let side = s * STOP_SIDE;
+            if let Some(square) = rounded_rect(c - side / 2.0, c - side / 2.0, side, side, side * 0.2) {
+                pm.fill_path(&square, &white, FillRule::Winding, Transform::identity(), None);
+            }
         }
-        // Holder, stem and foot.
-        let mut pb = PathBuilder::new();
-        pb.move_to(c - s * 0.15, s * 0.44);
-        pb.quad_to(c - s * 0.15, s * 0.62, c, s * 0.62);
-        pb.quad_to(c + s * 0.15, s * 0.62, c + s * 0.15, s * 0.44);
-        pb.move_to(c, s * 0.62);
-        pb.line_to(c, s * 0.72);
-        pb.move_to(c - s * 0.09, s * 0.72);
-        pb.line_to(c + s * 0.09, s * 0.72);
-        if let Some(holder) = pb.finish() {
-            pm.stroke_path(&holder, &white, &line, Transform::identity(), None);
+        Glyph::Mic => {
+            // Capsule body.
+            let (w, h) = (s * 0.16, s * 0.27);
+            if let Some(body) = rounded_rect(c - w / 2.0, s * 0.25, w, h, w / 2.0) {
+                pm.fill_path(&body, &white, FillRule::Winding, Transform::identity(), None);
+            }
+            // Holder, stem and foot.
+            let mut pb = PathBuilder::new();
+            pb.move_to(c - s * 0.15, s * 0.44);
+            pb.quad_to(c - s * 0.15, s * 0.62, c, s * 0.62);
+            pb.quad_to(c + s * 0.15, s * 0.62, c + s * 0.15, s * 0.44);
+            pb.move_to(c, s * 0.62);
+            pb.line_to(c, s * 0.72);
+            pb.move_to(c - s * 0.09, s * 0.72);
+            pb.line_to(c + s * 0.09, s * 0.72);
+            if let Some(holder) = pb.finish() {
+                pm.stroke_path(&holder, &white, &line, Transform::identity(), None);
+            }
         }
     }
 
@@ -431,6 +468,30 @@ mod tests {
         let c = center(&pm);
         assert_eq!((c.red(), c.green(), c.blue()), RECORDING_RGB);
         assert_eq!(c.alpha(), 255);
+    }
+
+    /// Where the glyph is: the fully white pixels.
+    fn glyph(pm: &Pixmap) -> Vec<bool> {
+        pm.pixels().iter().map(|p| p.demultiply() == tiny_skia::ColorU8::from_rgba(255, 255, 255, 255)).collect()
+    }
+
+    #[test]
+    fn recording_shows_a_stop_square_instead_of_the_mic() {
+        let stop = draw_icon(40, IconState::Recording, false);
+        assert_eq!(stop.pixel(20, 20).unwrap().demultiply(), tiny_skia::ColorU8::from_rgba(255, 255, 255, 255));
+        // Below the square, where the mic has its stem, the disc shows through.
+        let c = stop.pixel(20, 40 * 68 / 100).unwrap().demultiply();
+        assert_eq!((c.red(), c.green(), c.blue()), RECORDING_RGB);
+        assert_ne!(glyph(&stop), glyph(&draw_icon(40, IconState::Idle, true)));
+    }
+
+    #[test]
+    fn the_tray_keeps_the_mic_while_recording() {
+        let tray = draw_tray_recording(32);
+        let c = center(&tray);
+        assert_eq!((c.red(), c.green(), c.blue()), RECORDING_RGB);
+        assert_eq!(glyph(&tray), glyph(&draw_icon(32, IconState::Idle, true)));
+        assert_ne!(glyph(&tray), glyph(&draw_icon(32, IconState::Recording, true)));
     }
 
     #[test]

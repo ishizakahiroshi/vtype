@@ -10,9 +10,9 @@ use tray_icon::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tray_icon::Icon;
 
 use crate::hotkey::{HotkeySpec, Key};
-use crate::icon_draw::{draw_icon, to_straight_rgba};
+use crate::icon_draw::{draw_tray_recording, to_straight_rgba};
 use crate::menu::{tray_menu, MenuItem as Item};
-use crate::platform::{IconState, MenuAction, TrayState};
+use crate::platform::{MenuAction, TrayState};
 
 fn code_for(key: Key) -> Option<Code> {
     use Code::*;
@@ -90,12 +90,13 @@ pub fn to_global_hotkey(spec: &HotkeySpec) -> Option<HotKey> {
     Some(HotKey::new(Some(mods), code_for(spec.key)?))
 }
 
-/// The tray icon at 32 px: the app's own icon, or the orange mic while recording.
+/// The tray icon at 32 px: the app's own icon, or the orange mic while recording (the mic, not the
+/// floating mic's stop square: clicking the tray opens the menu).
 pub fn tray_icons() -> (Option<Icon>, Option<Icon>) {
     let idle = tiny_skia::Pixmap::decode_png(include_bytes!("../../../../assets/icons/favicon-32.png"))
         .ok()
         .and_then(|pm| Icon::from_rgba(to_straight_rgba(&pm), pm.width(), pm.height()).ok());
-    let rec = draw_icon(32, IconState::Recording, true);
+    let rec = draw_tray_recording(32);
     let recording = Icon::from_rgba(to_straight_rgba(&rec), 32, 32).ok();
     (idle, recording)
 }
