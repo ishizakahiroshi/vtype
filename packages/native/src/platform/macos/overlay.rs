@@ -18,8 +18,9 @@ use std::time::Instant;
 use objc2::rc::Retained;
 use objc2::{define_class, msg_send, AllocAnyThread, DefinedClass};
 use objc2_app_kit::{
-    NSBackingStoreType, NSColor, NSCursor, NSEvent, NSFloatingWindowLevel, NSFont, NSImage, NSPanel, NSScreen,
-    NSTextField, NSTrackingArea, NSTrackingAreaOptions, NSView, NSWindowCollectionBehavior, NSWindowStyleMask,
+    NSBackingStoreType, NSColor, NSCursor, NSEvent, NSEventModifierFlags, NSFloatingWindowLevel, NSFont, NSImage,
+    NSPanel, NSScreen, NSTextField, NSTrackingArea, NSTrackingAreaOptions, NSView, NSWindowCollectionBehavior,
+    NSWindowStyleMask,
 };
 use objc2_foundation::{MainThreadMarker, NSData, NSPoint, NSRect, NSSize, NSString};
 use tiny_skia::Pixmap;
@@ -27,11 +28,16 @@ use tray_icon::menu::{ContextMenu, Menu};
 
 use crate::beside_field::{keep_on_screen, BESIDE_SIZE};
 use crate::icon_draw::{draw_floating, draw_icon, draw_rounded_panel};
-use crate::overlay_logic::{button_at, button_shown, resolve_position, tail, Gesture, MicButton, Press, ICON_SIZE};
+use crate::overlay_logic::{
+    button_at, button_shown, fits, resized_position, resolve_position, scaled_size, tail, Gesture, MicButton, Press,
+    WheelSteps, SCALE_DEFAULT,
+};
 use crate::platform::{IconState, PlatformEvent, Rect, VoiceCue};
 use crate::protocol::InputMode;
 use crate::ripple::Ripple;
 
+/// Trackpad scrolling, in points, that counts as one wheel notch.
+const TRACKPAD_NOTCH: f64 = 20.0;
 const BUBBLE_WIDTH: f64 = 320.0;
 const BUBBLE_PADDING: f64 = 10.0;
 const BUBBLE_FONT_SIZE: f64 = 13.0;
@@ -109,6 +115,18 @@ define_class!(
                     let view = self as *const ImageView as *const c_void;
                     unsafe { menu.show_context_menu_for_nsview(view, None) };
                 }
+            }
+        }
+
+        // Ctrl (or ⌘) + scroll resizes the floating mic.
+        #[unsafe(method(scrollWheel:))]
+        fn scroll_wheel(&self, event: &NSEvent) {
+            let flags = event.modifierFlags();
+            let zoom = flags.contains(NSEventModifierFlags::Control) || flags.contains(NSEventModifierFlags::Command);
+            if self.ivars().role == Role::FloatingMic && zoom {
+                // A trackpad reports points, a mouse wheel lines.
+                let unit = if event.hasPreciseScrollingDeltas() { TRACKPAD_NOTCH } else { 1.0 };
+                with_icon(|s| s.zoom(event.scrollingDeltaY(), unit));
             }
         }
 
@@ -257,6 +275,12 @@ struct IconShared {
     /// The corner button the press started on, if any.
     press_button: Cell<Option<MicButton>>,
     pos: Cell<(i32, i32)>,
+    /// The panel's side in points, and the size the user chose in percent.
+    size: Cell<i32>,
+    percent: Cell<u16>,
+    /// Still where it goes by default (never dragged): a new size keeps it in the corner.
+    at_default: Cell<bool>,
+    wheel: Cell<WheelSteps>,
 }
 
 thread_local! {
@@ -286,15 +310,32 @@ fn with_icon(f: impl FnOnce(&IconShared)) {
 impl IconShared {
     fn render(&self) {
         let scale = self.panel.backingScaleFactor();
-        let px = (ICON_SIZE as f64 * scale).round().max(1.0) as u32;
+        let side = f64::from(self.size.get());
+        let px = (side * scale).round().max(1.0) as u32;
         let rings = self.ripple.borrow().rings();
         let pm = draw_floating(px, self.look.get(), self.hover.get(), self.mode.get(), &rings);
-        let size = NSSize::new(ICON_SIZE as f64, ICON_SIZE as f64);
-        self.view.set_image(image_from(&pm, size));
+        self.view.set_image(image_from(&pm, NSSize::new(side, side)));
     }
 
     fn place(&self) {
-        place(&self.panel, self.mtm, self.pos.get(), ICON_SIZE as f64);
+        place(&self.panel, self.mtm, self.pos.get(), f64::from(self.size.get()));
+    }
+
+    /// Gives the panel the side `size` (points).
+    fn resize(&self, size: i32) {
+        self.size.set(size);
+        let side = NSSize::new(f64::from(size), f64::from(size));
+        self.panel.setContentSize(side);
+        self.view.setFrameSize(side);
+    }
+
+    fn zoom(&self, delta: f64, unit: f64) {
+        let mut wheel = self.wheel.get();
+        let steps = wheel.add(delta, unit);
+        self.wheel.set(wheel);
+        if steps != 0 {
+            let _ = self.events.send(PlatformEvent::IconZoom { steps });
+        }
     }
 
     fn press(&self) {
@@ -310,7 +351,9 @@ impl IconShared {
         let (x, y) = self.pos.get();
         let busy_or_hovered = self.hover.get() || self.look.get() != IconState::Idle;
         let normal = self.mode.get() == InputMode::Normal;
-        button_at((at.0 - x) as f32, (at.1 - y) as f32, ICON_SIZE as f32, |b| button_shown(b, busy_or_hovered, normal))
+        button_at((at.0 - x) as f32, (at.1 - y) as f32, self.size.get() as f32, |b| {
+            button_shown(b, busy_or_hovered, normal)
+        })
     }
 
     fn drag(&self) {
@@ -334,6 +377,7 @@ impl IconShared {
                     None => PlatformEvent::ToggleRequested,
                 },
                 Gesture::Drag => {
+                    self.at_default.set(false);
                     let (x, y) = self.pos.get();
                     PlatformEvent::IconMoved { x, y }
                 }
@@ -365,7 +409,8 @@ pub struct Overlay {
 
 impl Overlay {
     pub fn new(events: Sender<PlatformEvent>, mtm: MainThreadMarker, menu: Menu) -> Overlay {
-        let icon_size = NSSize::new(ICON_SIZE as f64, ICON_SIZE as f64);
+        let side = scaled_size(SCALE_DEFAULT, 1.0);
+        let icon_size = NSSize::new(f64::from(side), f64::from(side));
         let view = ImageView::new(mtm, icon_size, Role::FloatingMic);
         let panel = new_panel(mtm, icon_size, &view, false);
         let icon = Rc::new(IconShared {
@@ -384,6 +429,10 @@ impl Overlay {
             press_origin: Cell::new((0, 0)),
             press_button: Cell::new(None),
             pos: Cell::new((0, 0)),
+            size: Cell::new(side),
+            percent: Cell::new(SCALE_DEFAULT),
+            at_default: Cell::new(true),
+            wheel: Cell::new(WheelSteps::default()),
         });
         ICON.with(|slot| *slot.borrow_mut() = Some(icon.clone()));
 
@@ -408,8 +457,11 @@ impl Overlay {
     /// Shows the mic in `look`, at the saved position when it is still on a screen.
     pub fn show(&mut self, look: IconState, saved: Option<(i32, i32)>) {
         if !self.shown {
+            let size = scaled_size(self.icon.percent.get(), 1.0);
+            self.icon.resize(size);
             let (areas, primary) = work_areas(self.icon.mtm);
-            self.icon.pos.set(resolve_position(saved, ICON_SIZE, &areas, primary));
+            self.icon.pos.set(resolve_position(saved, size, &areas, primary));
+            self.icon.at_default.set(saved.is_none_or(|p| !fits(p, size, &areas)));
             self.icon.place();
         }
         self.icon.look.set(look);
@@ -431,6 +483,27 @@ impl Overlay {
 
     pub fn look(&self) -> IconState {
         self.icon.look.get()
+    }
+
+    /// The mic's size in percent. On screen it changes around its centre (or stays in the
+    /// corner); a moved mic reports where it went so the position is saved.
+    pub fn set_scale(&mut self, percent: u16) {
+        if self.icon.percent.replace(percent) == percent || !self.shown {
+            return;
+        }
+        self.hide_bubble();
+        let old = self.icon.size.get();
+        let new = scaled_size(percent, 1.0);
+        let (areas, primary) = work_areas(self.icon.mtm);
+        let at_default = self.icon.at_default.get();
+        let pos = resized_position(self.icon.pos.get(), old, new, at_default, &areas, primary);
+        self.icon.resize(new);
+        self.icon.pos.set(pos);
+        self.icon.place();
+        self.icon.render();
+        if !at_default {
+            let _ = self.icon.events.send(PlatformEvent::IconMoved { x: pos.0, y: pos.1 });
+        }
     }
 
     pub fn set_templates_menu(&mut self, menu: Menu) {
@@ -520,7 +593,7 @@ impl Overlay {
             .find(|a| ix >= a.x && ix < a.x + a.width && iy >= a.y && iy < a.y + a.height)
             .unwrap_or(primary);
         let (w, h) = (BUBBLE_WIDTH.round() as i32, height.round() as i32);
-        let x = (ix + ICON_SIZE - w).clamp(area.x, (area.x + area.width - w).max(area.x));
+        let x = (ix + self.icon.size.get() - w).clamp(area.x, (area.x + area.width - w).max(area.x));
         let y = (iy - h - 8).max(area.y);
         place(&self.bubble.panel, mtm, (x, y), height);
         if !self.bubble.shown {

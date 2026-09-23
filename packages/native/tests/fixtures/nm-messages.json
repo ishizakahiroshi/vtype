@@ -11,7 +11,7 @@
       "type": "native-config",
       "config": {
         "hotkey": null,
-        "icon": { "visible": true, "x": null, "y": null, "hideOnFullscreen": true },
+        "icon": { "visible": true, "x": null, "y": null, "hideOnFullscreen": true, "scale": 100 },
         "inject": "auto",
         "besideField": { "enabled": false, "trigger": "focus" },
         "extraExtensionIds": [],
@@ -38,7 +38,7 @@
       "type": "set-native-config",
       "config": {
         "hotkey": "Ctrl+Shift+F9",
-        "icon": { "visible": false, "x": 1200, "y": -40, "hideOnFullscreen": false },
+        "icon": { "visible": false, "x": 1200, "y": -40, "hideOnFullscreen": false, "scale": 150 },
         "inject": "paste",
         "besideField": { "enabled": true, "trigger": "hover" },
         "extraExtensionIds": ["abcdefghijklmnopabcdefghijklmnop"],

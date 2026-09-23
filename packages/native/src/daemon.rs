@@ -23,6 +23,7 @@ use crate::config::{self, NativeConfig};
 use crate::diag::{self, ErrorLog};
 use crate::i18n::{t, t_with};
 use crate::ipc;
+use crate::overlay_logic;
 use crate::platform::{
     EditKeys, FieldProbe, IconState, InjectOutcome, MenuAction, MicButton, Platform, PlatformError, PlatformEvent,
     TrayState, VoiceCue, MESSAGE_HOLD,
@@ -179,6 +180,7 @@ impl Core {
     /// Everything that happens once, when the daemon comes up.
     pub fn start(&mut self) {
         // The mic first: a shortcut that cannot be registered is said in its bubble.
+        self.platform.set_icon_scale(self.config.icon.scale);
         if self.config.icon.visible {
             self.platform.show_icon(IconState::Idle, self.icon_position());
         }
@@ -775,6 +777,7 @@ impl Core {
         let mode_changed = new.input_mode != self.config.input_mode;
         let hotkey_changed = new.effective_hotkey() != self.config.effective_hotkey();
         let icon_changed = new.icon.visible != self.config.icon.visible;
+        let scale_changed = new.icon.scale != self.config.icon.scale;
         let beside_changed = new.beside_field != self.config.beside_field;
         self.config = new;
         if beside_changed {
@@ -787,6 +790,9 @@ impl Core {
         self.save_config();
         if hotkey_changed {
             self.register_hotkey();
+        }
+        if scale_changed {
+            self.platform.set_icon_scale(self.config.icon.scale);
         }
         if icon_changed {
             if self.config.icon.visible {
@@ -829,6 +835,14 @@ impl Core {
                 self.config.icon.x = Some(x);
                 self.config.icon.y = Some(y);
                 self.save_config();
+            }
+            PlatformEvent::IconZoom { steps } => {
+                let scale = overlay_logic::zoom_scale(self.config.icon.scale, steps);
+                if scale != self.config.icon.scale {
+                    self.config.icon.scale = scale;
+                    self.save_config();
+                    self.platform.set_icon_scale(scale);
+                }
             }
             PlatformEvent::Menu(action) => match action {
                 MenuAction::ToggleRecording => {
@@ -1074,6 +1088,9 @@ pub mod tests {
         }
         fn hide_icon(&self) {
             self.log("hide icon".into());
+        }
+        fn set_icon_scale(&self, percent: u16) {
+            self.log(format!("icon scale {percent}"));
         }
         fn voice_cue(&self, cue: VoiceCue) {
             self.log(format!("voice {cue:?}"));
@@ -1407,6 +1424,28 @@ pub mod tests {
         h.core.config.send_key = crate::config::SendKey::CtrlEnter;
         h.core.handle(Event::Platform(PlatformEvent::MicButton(MicButton::Send)));
         assert!(h.fake.take().contains(&"keys Send(CtrlEnter)".to_string()));
+    }
+
+    #[test]
+    fn ctrl_wheel_and_the_settings_page_resize_the_mic_within_the_limits() {
+        let mut h = Harness::new();
+        h.core.start();
+        assert!(h.fake.take().contains(&"icon scale 100".to_string()));
+        h.core.handle(Event::Platform(PlatformEvent::IconZoom { steps: 2 }));
+        assert_eq!(h.core.config.icon.scale, 120);
+        assert_eq!(h.fake.take(), vec!["icon scale 120"]);
+        h.core.handle(Event::Platform(PlatformEvent::IconZoom { steps: -20 }));
+        assert_eq!(h.core.config.icon.scale, 50);
+        h.fake.take();
+        // Already the smallest: nothing to redo.
+        h.core.handle(Event::Platform(PlatformEvent::IconZoom { steps: -1 }));
+        assert!(h.fake.take().is_empty());
+        h.connect();
+        let mut c = h.core.config.clone();
+        c.icon.scale = 100;
+        h.ext(json!({"type":"set-native-config","config": c}));
+        assert!(h.fake.take().contains(&"icon scale 100".to_string()));
+        assert_eq!(h.core.config.icon.scale, 100);
     }
 
     #[test]

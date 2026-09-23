@@ -20,7 +20,10 @@ use tiny_skia::Pixmap;
 use tray_icon::menu::{ContextMenu, Menu};
 
 use crate::icon_draw::{draw_floating, draw_rounded_panel, to_premultiplied_bgra};
-use crate::overlay_logic::{button_at, button_shown, resolve_position, tail, Gesture, MicButton, Press, ICON_SIZE};
+use crate::overlay_logic::{
+    button_at, button_shown, fits, resized_position, resolve_position, scaled_size, tail, Gesture, MicButton, Press,
+    WheelSteps, SCALE_DEFAULT,
+};
 use crate::platform::{IconState, PlatformEvent, Rect, VoiceCue};
 use crate::protocol::InputMode;
 use crate::ripple::{Ripple, FRAME};
@@ -102,6 +105,12 @@ struct IconShared {
     /// The corner button the press started on, if any.
     press_button: Cell<Option<MicButton>>,
     pos: Cell<(i32, i32)>,
+    /// The window's side, and the size the user chose in percent.
+    size: Cell<i32>,
+    percent: Cell<u16>,
+    /// Still where it goes by default (never dragged): a new size keeps it in the corner.
+    at_default: Cell<bool>,
+    wheel: Cell<WheelSteps>,
 }
 
 thread_local! {
@@ -128,7 +137,7 @@ fn with_icon(f: impl FnOnce(&IconShared)) {
 impl IconShared {
     fn draw(&self, cr: &cairo::Context) {
         let scale = self.window.scale_factor().max(1) as f64;
-        let px = (ICON_SIZE as f64 * scale).round() as u32;
+        let px = (f64::from(self.size.get()) * scale).round() as u32;
         let rings = self.ripple.borrow().rings();
         paint(cr, &draw_floating(px, self.look.get(), self.hover.get(), self.mode.get(), &rings), scale);
     }
@@ -136,6 +145,20 @@ impl IconShared {
     fn place(&self) {
         let (x, y) = self.pos.get();
         self.window.move_(x, y);
+    }
+
+    fn resize(&self, size: i32) {
+        self.size.set(size);
+        self.window.resize(size, size);
+    }
+
+    fn zoom(&self, delta: f64) {
+        let mut wheel = self.wheel.get();
+        let steps = wheel.add(delta, 1.0);
+        self.wheel.set(wheel);
+        if steps != 0 {
+            let _ = self.events.send(PlatformEvent::IconZoom { steps });
+        }
     }
 
     fn press(&self, at: (i32, i32)) {
@@ -149,7 +172,9 @@ impl IconShared {
         let (x, y) = self.pos.get();
         let busy_or_hovered = self.hover.get() || self.look.get() != IconState::Idle;
         let normal = self.mode.get() == InputMode::Normal;
-        button_at((at.0 - x) as f32, (at.1 - y) as f32, ICON_SIZE as f32, |b| button_shown(b, busy_or_hovered, normal))
+        button_at((at.0 - x) as f32, (at.1 - y) as f32, self.size.get() as f32, |b| {
+            button_shown(b, busy_or_hovered, normal)
+        })
     }
 
     fn drag(&self, now: (i32, i32)) {
@@ -172,6 +197,7 @@ impl IconShared {
                     None => PlatformEvent::ToggleRequested,
                 },
                 Gesture::Drag => {
+                    self.at_default.set(false);
                     let (x, y) = self.pos.get();
                     PlatformEvent::IconMoved { x, y }
                 }
@@ -205,7 +231,9 @@ fn wire_icon(window: &gtk::Window) {
             | gdk::EventMask::BUTTON_RELEASE_MASK
             | gdk::EventMask::POINTER_MOTION_MASK
             | gdk::EventMask::ENTER_NOTIFY_MASK
-            | gdk::EventMask::LEAVE_NOTIFY_MASK,
+            | gdk::EventMask::LEAVE_NOTIFY_MASK
+            | gdk::EventMask::SCROLL_MASK
+            | gdk::EventMask::SMOOTH_SCROLL_MASK,
     );
     window.connect_draw(|_, cr| {
         with_icon(|s| s.draw(cr));
@@ -239,6 +267,19 @@ fn wire_icon(window: &gtk::Window) {
         }
         glib::Propagation::Stop
     });
+    // Ctrl+wheel resizes the mic. Up is away from the user: bigger.
+    window.connect_scroll_event(|_, ev| {
+        if ev.state().contains(gdk::ModifierType::CONTROL_MASK) {
+            let delta = match ev.direction() {
+                gdk::ScrollDirection::Up => 1.0,
+                gdk::ScrollDirection::Down => -1.0,
+                gdk::ScrollDirection::Smooth => -ev.delta().1,
+                _ => 0.0,
+            };
+            with_icon(|s| s.zoom(delta));
+        }
+        glib::Propagation::Stop
+    });
     window.connect_enter_notify_event(|_, _| {
         with_icon(|s| s.set_hover(true));
         glib::Propagation::Proceed
@@ -269,7 +310,8 @@ pub struct Overlay {
 
 impl Overlay {
     pub fn new(events: Sender<PlatformEvent>, menu: Menu) -> Overlay {
-        let window = new_popup(ICON_SIZE, ICON_SIZE);
+        let side = scaled_size(SCALE_DEFAULT, 1.0);
+        let window = new_popup(side, side);
         wire_icon(&window);
         let icon = Rc::new(IconShared {
             events,
@@ -286,6 +328,10 @@ impl Overlay {
             press_origin: Cell::new((0, 0)),
             press_button: Cell::new(None),
             pos: Cell::new((0, 0)),
+            size: Cell::new(side),
+            percent: Cell::new(SCALE_DEFAULT),
+            at_default: Cell::new(true),
+            wheel: Cell::new(WheelSteps::default()),
         });
         ICON.with(|slot| *slot.borrow_mut() = Some(icon.clone()));
 
@@ -324,8 +370,11 @@ impl Overlay {
     /// Shows the mic in `look`, at the saved position when it is still on a screen.
     pub fn show(&mut self, look: IconState, saved: Option<(i32, i32)>) {
         if !self.shown {
+            let size = scaled_size(self.icon.percent.get(), 1.0);
+            self.icon.resize(size);
             let (areas, primary) = work_areas();
-            self.icon.pos.set(resolve_position(saved, ICON_SIZE, &areas, primary));
+            self.icon.pos.set(resolve_position(saved, size, &areas, primary));
+            self.icon.at_default.set(saved.is_none_or(|p| !fits(p, size, &areas)));
             self.icon.place();
         }
         self.icon.look.set(look);
@@ -347,6 +396,27 @@ impl Overlay {
 
     pub fn look(&self) -> IconState {
         self.icon.look.get()
+    }
+
+    /// The mic's size in percent. On screen it changes around its centre (or stays in the
+    /// corner); a moved mic reports where it went so the position is saved.
+    pub fn set_scale(&mut self, percent: u16) {
+        if self.icon.percent.replace(percent) == percent || !self.shown {
+            return;
+        }
+        self.hide_bubble();
+        let old = self.icon.size.get();
+        let new = scaled_size(percent, 1.0);
+        let (areas, primary) = work_areas();
+        let at_default = self.icon.at_default.get();
+        let pos = resized_position(self.icon.pos.get(), old, new, at_default, &areas, primary);
+        self.icon.resize(new);
+        self.icon.pos.set(pos);
+        self.icon.place();
+        self.icon.window.queue_draw();
+        if !at_default {
+            let _ = self.icon.events.send(PlatformEvent::IconMoved { x: pos.0, y: pos.1 });
+        }
     }
 
     pub fn set_templates_menu(&mut self, menu: Menu) {
@@ -420,7 +490,8 @@ impl Overlay {
             .copied()
             .find(|a| ix >= a.x && ix < a.x + a.width && iy >= a.y && iy < a.y + a.height)
             .unwrap_or(primary);
-        let x = (ix + ICON_SIZE - BUBBLE_WIDTH).clamp(area.x, (area.x + area.width - BUBBLE_WIDTH).max(area.x));
+        let x =
+            (ix + self.icon.size.get() - BUBBLE_WIDTH).clamp(area.x, (area.x + area.width - BUBBLE_WIDTH).max(area.x));
         let y = (iy - height - 8).max(area.y);
         self.bubble.window.move_(x, y);
         self.bubble.window.queue_draw();

@@ -195,6 +195,10 @@ impl Ui {
         self.overlay.hide();
     }
 
+    pub fn set_icon_scale(&mut self, percent: u16) {
+        self.overlay.set_scale(percent);
+    }
+
     /// Builds the templates menu and opens it at the mic from the main queue (it is modal).
     pub fn show_templates(&mut self, templates: Vec<String>) {
         let (menu, ids) = build_template_menu(&templates, &self.shared.menu_actions, &self.template_ids);

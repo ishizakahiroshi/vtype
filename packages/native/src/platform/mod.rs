@@ -47,10 +47,14 @@ pub enum PlatformEvent {
     /// Left click on the tray icon, the floating mic, or the global shortcut.
     ToggleRequested,
     Menu(MenuAction),
-    /// The floating mic was dragged to a new top-left position.
+    /// The floating mic was dragged (or resized around its centre) to a new top-left position.
     IconMoved {
         x: i32,
         y: i32,
+    },
+    /// Ctrl+wheel over the floating mic: this many notches, up (positive) makes it bigger.
+    IconZoom {
+        steps: i32,
     },
     /// One of the small buttons around the floating mic was clicked.
     MicButton(MicButton),
@@ -170,6 +174,9 @@ pub trait Platform: Send + Sync {
     fn focused_field(&self) -> FieldInfo;
     fn show_icon(&self, state: IconState, position: Option<(i32, i32)>);
     fn hide_icon(&self);
+    /// The floating mic's size in percent (`overlay_logic::SCALE_MIN..=SCALE_MAX`). Set before
+    /// the first `show_icon`; later it resizes the mic on screen, which may report `IconMoved`.
+    fn set_icon_scale(&self, _percent: u16) {}
     /// The recognizer heard something: the ripple around the floating mic follows it.
     fn voice_cue(&self, _cue: VoiceCue) {}
     /// Recognition in progress above the floating mic; it goes away shortly after the last text.

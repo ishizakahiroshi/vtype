@@ -12,6 +12,72 @@ pub const MIC_SIZE: i32 = 40;
 /// 16 px from it.
 pub const MARGIN: i32 = 16 - (ICON_SIZE - MIC_SIZE) / 2;
 
+/// The floating mic's size the user chose, in percent of `ICON_SIZE`: typed on the settings page,
+/// or Ctrl+wheel over the mic in `SCALE_STEP`s.
+pub const SCALE_MIN: u16 = 50;
+pub const SCALE_MAX: u16 = 200;
+pub const SCALE_DEFAULT: u16 = 100;
+pub const SCALE_STEP: u16 = 10;
+
+pub fn clamp_scale(percent: i64) -> u16 {
+    percent.clamp(SCALE_MIN.into(), SCALE_MAX.into()) as u16
+}
+
+/// `steps` wheel notches from `percent` (up is bigger), landing on multiples of `SCALE_STEP` so a
+/// typed 95 goes to 100 or 90, not 105 or 85.
+pub fn zoom_scale(percent: u16, steps: i32) -> u16 {
+    let (p, step) = (i64::from(percent), i64::from(SCALE_STEP));
+    let next = match steps.signum() {
+        1 => p.div_euclid(step) * step + step * i64::from(steps),
+        -1 => (p + step - 1).div_euclid(step) * step + step * i64::from(steps),
+        _ => p,
+    };
+    clamp_scale(next)
+}
+
+/// The window's side at `percent`, in the same unit as `ICON_SIZE` times `dpi`.
+pub fn scaled_size(percent: u16, dpi: f64) -> i32 {
+    (f64::from(ICON_SIZE) * dpi * f64::from(percent) / 100.0).round().max(1.0) as i32
+}
+
+/// Wheel turns come in small pieces from touchpads; a notch is `unit` of them.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct WheelSteps {
+    acc: f64,
+}
+
+impl WheelSteps {
+    /// Adds `delta` (positive = away from the user) and returns the whole notches it completed.
+    pub fn add(&mut self, delta: f64, unit: f64) -> i32 {
+        self.acc += delta / unit;
+        let steps = self.acc.trunc();
+        self.acc -= steps;
+        steps as i32
+    }
+}
+
+/// Where the mic goes when its size changes from `old` to `new`: at the corner when it was never
+/// moved, else with its centre kept (the pointer stays on it) and kept on that screen.
+pub fn resized_position(
+    pos: (i32, i32),
+    old: i32,
+    new: i32,
+    at_default: bool,
+    work_areas: &[Rect],
+    primary: Rect,
+) -> (i32, i32) {
+    if at_default {
+        let area = work_areas
+            .iter()
+            .copied()
+            .find(|a| pos.0 >= a.x && pos.0 < a.x + a.width && pos.1 >= a.y && pos.1 < a.y + a.height)
+            .unwrap_or(primary);
+        return default_position(area, new);
+    }
+    let centred = (pos.0 + (old - new) / 2, pos.1 + (old - new) / 2);
+    crate::beside_field::keep_on_screen(centred, new, work_areas, primary)
+}
+
 /// The small buttons at the floating mic's corners: the templates top left, the input mode top
 /// right (a click moves to the next mode), send bottom right, clear bottom left.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -184,6 +250,49 @@ mod tests {
         assert!(button_shown(MicButton::Mode, false, false));
         assert!(!button_shown(MicButton::Send, false, false));
         assert!(button_shown(MicButton::Clear, true, true));
+    }
+
+    #[test]
+    fn the_wheel_zooms_in_tens_between_the_limits() {
+        assert_eq!(zoom_scale(100, 1), 110);
+        assert_eq!(zoom_scale(100, -1), 90);
+        assert_eq!(zoom_scale(100, 3), 130);
+        // A typed size lands on the next ten each way.
+        assert_eq!(zoom_scale(95, 1), 100);
+        assert_eq!(zoom_scale(95, -1), 90);
+        assert_eq!(zoom_scale(195, 5), SCALE_MAX);
+        assert_eq!(zoom_scale(SCALE_MIN, -1), SCALE_MIN);
+        assert_eq!(zoom_scale(120, 0), 120);
+        assert_eq!(clamp_scale(10), SCALE_MIN);
+        assert_eq!(clamp_scale(1000), SCALE_MAX);
+        assert_eq!(scaled_size(100, 1.0), ICON_SIZE);
+        assert_eq!(scaled_size(50, 1.0), ICON_SIZE / 2);
+        assert_eq!(scaled_size(200, 1.5), ICON_SIZE * 3);
+    }
+
+    #[test]
+    fn touchpad_pieces_add_up_to_notches() {
+        let mut w = WheelSteps::default();
+        assert_eq!(w.add(40.0, 120.0), 0);
+        assert_eq!(w.add(40.0, 120.0), 0);
+        assert_eq!(w.add(40.0, 120.0), 1);
+        assert_eq!(w.add(-240.0, 120.0), -2);
+        assert_eq!(w.add(1.0, 1.0), 1);
+    }
+
+    #[test]
+    fn a_resized_mic_keeps_its_centre_or_its_corner() {
+        let areas = [SCREEN, SECOND];
+        // Moved by the user: the centre stays.
+        assert_eq!(resized_position((500, 500), 56, 112, false, &areas, SCREEN), (472, 472));
+        assert_eq!(resized_position((472, 472), 112, 56, false, &areas, SCREEN), (500, 500));
+        // Growing at an edge stays on the screen.
+        assert_eq!(resized_position((1920 - 56, 0), 56, 112, false, &areas, SCREEN), (1920 - 112, 0));
+        // Never moved: it stays in the corner of the screen it is on.
+        assert_eq!(
+            resized_position(default_position(SECOND, 56), 56, 112, true, &areas, SCREEN),
+            default_position(SECOND, 112)
+        );
     }
 
     #[test]

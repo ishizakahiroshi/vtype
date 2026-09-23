@@ -29,13 +29,16 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, GetCursorPos, KillTimer, LoadCursorW, PostMessageW, RegisterClassExW, SetCursor,
     SetTimer, SetWindowPos, ShowWindow, UpdateLayeredWindow, HWND_TOPMOST, IDC_HAND, MA_NOACTIVATE, SWP_NOACTIVATE,
     SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE, ULW_ALPHA, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE,
-    WM_RBUTTONUP, WM_SETCURSOR, WM_TIMER, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_POPUP,
+    WM_MOUSEWHEEL, WM_RBUTTONUP, WM_SETCURSOR, WM_TIMER, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 use crate::beside_field::{keep_on_screen, BESIDE_SIZE};
 use crate::icon_draw::{draw_floating, draw_icon, draw_rounded_panel, to_premultiplied_bgra};
-use crate::overlay_logic::{button_at, button_shown, resolve_position, tail, Gesture, MicButton, Press, ICON_SIZE};
+use crate::overlay_logic::{
+    button_at, button_shown, fits, resized_position, resolve_position, scaled_size, tail, Gesture, MicButton, Press,
+    WheelSteps, SCALE_DEFAULT,
+};
 use crate::platform::{IconState, PlatformEvent, Rect, VoiceCue};
 use crate::protocol::InputMode;
 use crate::ripple::{Ripple, FRAME};
@@ -43,6 +46,9 @@ use crate::ripple::{Ripple, FRAME};
 pub const ICON_CLASS: &str = "vtypeOverlay";
 /// (windows-sys keeps it with the common controls.)
 const WM_MOUSELEAVE: u32 = 0x02A3;
+/// One notch of the wheel, and the wheel message's "Ctrl is down" bit.
+const WHEEL_DELTA: f64 = 120.0;
+const MK_CONTROL: usize = 0x0008;
 const BUBBLE_CLASS: &str = "vtypeBubble";
 const BUBBLE_WIDTH: i32 = 320;
 const BUBBLE_PADDING: i32 = 10;
@@ -70,6 +76,11 @@ struct IconShared {
     press_button: Cell<Option<MicButton>>,
     pos: Cell<(i32, i32)>,
     size: Cell<i32>,
+    /// The size the user chose, in percent.
+    percent: Cell<u16>,
+    /// Still where it goes by default (never dragged): a new size keeps it in the corner.
+    at_default: Cell<bool>,
+    wheel: Cell<WheelSteps>,
 }
 
 /// The ripple's timer, on the mic's own window.
@@ -265,11 +276,24 @@ unsafe extern "system" fn icon_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
                         None => PlatformEvent::ToggleRequested,
                     },
                     Gesture::Drag => {
+                        s.at_default.set(false);
                         let (x, y) = s.pos.get();
                         PlatformEvent::IconMoved { x, y }
                     }
                 };
                 let _ = s.events.send(event);
+            }
+            0
+        }
+        // Ctrl+wheel resizes the mic. (Windows sends the wheel to the window under the pointer
+        // unless "scroll inactive windows" is switched off.)
+        WM_MOUSEWHEEL if wparam & MK_CONTROL != 0 => {
+            let delta = f64::from(((wparam >> 16) & 0xFFFF) as u16 as i16);
+            let mut wheel = s.wheel.get();
+            let steps = wheel.add(delta, WHEEL_DELTA);
+            s.wheel.set(wheel);
+            if steps != 0 {
+                let _ = s.events.send(PlatformEvent::IconZoom { steps });
             }
             0
         }
@@ -360,7 +384,10 @@ impl Overlay {
             press_origin: Cell::new((0, 0)),
             press_button: Cell::new(None),
             pos: Cell::new((0, 0)),
-            size: Cell::new(ICON_SIZE),
+            size: Cell::new(scaled_size(SCALE_DEFAULT, 1.0)),
+            percent: Cell::new(SCALE_DEFAULT),
+            at_default: Cell::new(true),
+            wheel: Cell::new(WheelSteps::default()),
         });
         ICON.with(|slot| *slot.borrow_mut() = Some(icon.clone()));
         Overlay { icon, bubble, shown: false, bubble_shown: false }
@@ -373,11 +400,12 @@ impl Overlay {
     /// Shows the mic in `look`, at the saved position when it is still on a screen.
     pub fn show(&mut self, look: IconState, saved: Option<(i32, i32)>) {
         let hwnd = self.icon.hwnd.get();
-        let size = (ICON_SIZE as f32 * scale_for(hwnd)).round() as i32;
+        let size = scaled_size(self.icon.percent.get(), scale_for(hwnd).into());
         self.icon.size.set(size);
         if !self.shown {
             let (areas, primary) = work_areas();
             self.icon.pos.set(resolve_position(saved, size, &areas, primary));
+            self.icon.at_default.set(saved.is_none_or(|p| !fits(p, size, &areas)));
         }
         self.icon.set_look(look);
         self.icon.render();
@@ -391,6 +419,26 @@ impl Overlay {
         self.icon.set_look(look);
         if self.shown {
             self.icon.render();
+        }
+    }
+
+    /// The mic's size in percent. On screen it changes around its centre (or stays in the
+    /// corner); a moved mic reports where it went so the position is saved.
+    pub fn set_scale(&mut self, percent: u16) {
+        if self.icon.percent.replace(percent) == percent || !self.shown {
+            return;
+        }
+        self.hide_bubble();
+        let old = self.icon.size.get();
+        let new = scaled_size(percent, scale_for(self.icon.hwnd.get()).into());
+        let (areas, primary) = work_areas();
+        let at_default = self.icon.at_default.get();
+        let pos = resized_position(self.icon.pos.get(), old, new, at_default, &areas, primary);
+        self.icon.size.set(new);
+        self.icon.pos.set(pos);
+        self.icon.render();
+        if !at_default {
+            let _ = self.icon.events.send(PlatformEvent::IconMoved { x: pos.0, y: pos.1 });
         }
     }
 

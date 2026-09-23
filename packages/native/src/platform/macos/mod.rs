@@ -108,6 +108,10 @@ impl Platform for MacPlatform {
         self.shared.run(|ui| ui.hide_icon());
     }
 
+    fn set_icon_scale(&self, percent: u16) {
+        self.shared.run(move |ui| ui.set_icon_scale(percent));
+    }
+
     fn voice_cue(&self, cue: super::VoiceCue) {
         self.shared.run(move |ui| ui.voice_cue(cue));
     }

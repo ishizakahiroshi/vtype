@@ -57,6 +57,17 @@ export function apiUrl(href: string): string {
   return url.toString();
 }
 
+/** The floating mic's size in percent: same limits as the desktop app's overlay_logic.rs. */
+export const ICON_SCALE_MIN = 50;
+export const ICON_SCALE_MAX = 200;
+export const ICON_SCALE_DEFAULT = 100;
+
+/** A typed size, whole and within the limits; null when it is not a number (keep what was). */
+export function clampIconScale(typed: string): number | null {
+  const n = Math.round(Number(typed));
+  return typed.trim() === "" || !Number.isFinite(n) ? null : Math.min(ICON_SCALE_MAX, Math.max(ICON_SCALE_MIN, n));
+}
+
 export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPage {
   const doc = options.doc ?? document;
   const t = translator(options.language ?? globalThis.navigator?.language);
@@ -93,6 +104,9 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
   setText("nc-hotkey-hint", t("optionsNativeHotkeyHint"));
   setText("nc-icon-visible-label", t("optionsNativeIconVisible"));
   setText("nc-icon-fullscreen-label", t("optionsNativeIconFullscreen"));
+  setText("nc-icon-scale-label", t("settings_iconScale"));
+  setText("nc-icon-scale-reset", t("settings_iconScaleReset"));
+  setText("nc-icon-scale-hint", t("settings_iconScaleHint", { min: ICON_SCALE_MIN, max: ICON_SCALE_MAX }));
   setText("nc-inject-label", t("optionsNativeInject"));
   setText("nc-inject-auto", t("optionsNativeInjectAuto"));
   setText("nc-inject-type", t("optionsNativeInjectType"));
@@ -207,6 +221,15 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
       .map((id) => el(id, HTMLInputElement))
       .filter((r): r is HTMLInputElement => r !== null);
 
+  const scaleNumber = el("nc-icon-scale", HTMLInputElement);
+  const scaleRange = el("nc-icon-scale-range", HTMLInputElement);
+
+  function fillScale(c: NativeConfig): void {
+    const scale = String(c.icon.scale ?? ICON_SCALE_DEFAULT);
+    if (scaleNumber !== null) scaleNumber.value = scale;
+    if (scaleRange !== null) scaleRange.value = scale;
+  }
+
   function fill(c: NativeConfig): void {
     const mode: InputMode = c.inputMode ?? "normal";
     for (const radio of modeRadios()) radio.checked = radio.value === mode;
@@ -219,6 +242,7 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
     if (visible !== null) visible.checked = c.icon.visible;
     const fullscreen = el("nc-icon-fullscreen", HTMLInputElement);
     if (fullscreen !== null) fullscreen.checked = c.icon.hideOnFullscreen;
+    fillScale(c);
     const inject = el("nc-inject", HTMLSelectElement);
     if (inject !== null) inject.value = c.inject;
     const sendKey = el("nc-send-key", HTMLSelectElement);
@@ -245,6 +269,7 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
         ...base.icon,
         visible: el("nc-icon-visible", HTMLInputElement)?.checked ?? base.icon.visible,
         hideOnFullscreen: el("nc-icon-fullscreen", HTMLInputElement)?.checked ?? base.icon.hideOnFullscreen,
+        scale: clampIconScale(scaleNumber?.value ?? "") ?? base.icon.scale ?? ICON_SCALE_DEFAULT,
       },
       inject: inject === "type" || inject === "paste" || inject === "auto" ? inject : base.inject,
       sendKey: sendKey === "enter" || sendKey === "ctrl-enter" ? sendKey : (base.sendKey ?? "enter"),
@@ -314,6 +339,42 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
   el("tpl-send", HTMLInputElement)?.addEventListener("change", (e) => {
     if (config === null) return;
     void save({ ...config, templateSendImmediate: (e.target as HTMLInputElement).checked }, t("optionsSaved"));
+  });
+
+  /** The mic's size goes to the desktop app at once, so the mic can be watched while choosing. */
+  function saveScale(typed: string): void {
+    if (config === null) return;
+    const scale = clampIconScale(typed);
+    if (scale === null || scale === (config.icon.scale ?? ICON_SCALE_DEFAULT)) {
+      fillScale(config);
+      return;
+    }
+    void save({ ...config, icon: { ...config.icon, scale } }, t("optionsSaved"));
+  }
+
+  scaleRange?.addEventListener("input", () => {
+    if (scaleNumber !== null) scaleNumber.value = scaleRange.value;
+  });
+  scaleRange?.addEventListener("change", () => saveScale(scaleRange.value));
+  scaleNumber?.addEventListener("change", () => saveScale(scaleNumber.value));
+  doc.getElementById("nc-icon-scale-reset")?.addEventListener("click", () => saveScale(String(ICON_SCALE_DEFAULT)));
+
+  // Ctrl+wheel over the mic resizes it (and a drag moves it) while this page is open: take that
+  // in when the page is back in front, so the next save does not put the old size back. Only the
+  // icon: the rest of the page may hold edits not saved yet.
+  doc.defaultView?.addEventListener("focus", () => {
+    if (config === null) return;
+    void (async () => {
+      try {
+        const res = await fetchJson(url);
+        const got = res.ok ? await res.json() : null;
+        if (!isNativeConfig(got) || config === null) return;
+        config = { ...config, icon: got.icon };
+        fillScale(config);
+      } catch {
+        // Not reachable now; the next save says so.
+      }
+    })();
   });
 
   doc.getElementById("nc-form")?.addEventListener("submit", (e) => {

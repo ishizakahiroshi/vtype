@@ -19,7 +19,12 @@
   .lead-hint { margin: 4px 0 0; color: #475569; }
   .field { margin: 10px 0; }
   .hint { margin: 2px 0 0; color: #475569; }
-  input[type="text"], select { font: inherit; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: inherit; }
+  input[type="text"], input[type="number"], select { font: inherit; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: inherit; }
+  .scale-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+  #nc-icon-scale-range { flex: 1; }
+  #nc-icon-scale { width: 4.5em; }
+  #nc-icon-scale-reset { padding: 4px 12px; background: #e2e8f0; color: #0f172a; }
+  #nc-icon-scale-reset:hover { background: #cbd5e1; }
   #repl-text { box-sizing: border-box; width: 100%; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: inherit; }
   .row-actions { display: flex; align-items: center; gap: 12px; margin: 8px 0 0; }
   #repl-count, #tpl-count { color: #475569; }
@@ -38,8 +43,9 @@
     body { background: #0e0f12; color: #e2e8f0; }
     fieldset { border-color: #334155; }
     .choice .hint, .lead-hint, .hint, #repl-count, #tpl-count { color: #94a3b8; }
-    input[type="text"], select, #repl-text, #tpl-new, .tpl-edit { background: #16181d; border-color: #334155; }
-    .tpl-actions button.quiet { background: #334155; color: #e2e8f0; }
+    input[type="text"], input[type="number"], select, #repl-text, #tpl-new, .tpl-edit { background: #16181d; border-color: #334155; }
+    .tpl-actions button.quiet, #nc-icon-scale-reset { background: #334155; color: #e2e8f0; }
+    #nc-icon-scale-reset:hover { background: #475569; }
     #repl-bad { color: #f87171; }
   }
 </style>
@@ -80,6 +86,9 @@
   <div class="field"><label for="nc-hotkey" id="nc-hotkey-label"></label> <input id="nc-hotkey" type="text" autocomplete="off" spellcheck="false"><p class="hint" id="nc-hotkey-hint"></p></div>
   <div class="field"><label for="nc-icon-visible"><input type="checkbox" id="nc-icon-visible"> <span id="nc-icon-visible-label"></span></label></div>
   <div class="field"><label for="nc-icon-fullscreen"><input type="checkbox" id="nc-icon-fullscreen"> <span id="nc-icon-fullscreen-label"></span></label></div>
+  <div class="field"><label for="nc-icon-scale" id="nc-icon-scale-label"></label>
+    <div class="scale-row"><input type="range" id="nc-icon-scale-range" min="50" max="200" step="5" aria-labelledby="nc-icon-scale-label"> <input type="number" id="nc-icon-scale" min="50" max="200" step="1"> % <button type="button" id="nc-icon-scale-reset"></button></div>
+    <p class="hint" id="nc-icon-scale-hint"></p></div>
   <div class="field"><label for="nc-inject" id="nc-inject-label"></label> <select id="nc-inject"><option value="auto" id="nc-inject-auto"></option><option value="type" id="nc-inject-type"></option><option value="paste" id="nc-inject-paste"></option></select></div>
   <div class="field"><label for="nc-send-key" id="nc-send-key-label"></label> <select id="nc-send-key"><option value="enter" id="nc-send-enter"></option><option value="ctrl-enter" id="nc-send-ctrl-enter"></option></select><p class="hint" id="nc-send-key-hint"></p></div>
   <div class="field"><label for="nc-beside"><input type="checkbox" id="nc-beside"> <span id="nc-beside-label"></span></label><p class="hint" id="nc-beside-hint"></p></div>

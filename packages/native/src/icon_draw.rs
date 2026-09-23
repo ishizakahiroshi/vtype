@@ -275,6 +275,47 @@ pub fn to_premultiplied_bgra(pm: &Pixmap) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    /// Not a check: draws every look of the floating mic into one PNG to look at by eye, since the
+    /// pixel tests cannot say whether a glyph reads well.
+    /// `cargo test icon_sheet -- --ignored`, then open `vtype-icon-sheet.png` in the temp folder
+    /// (or the path in `VTYPE_ICON_SHEET`).
+    #[test]
+    #[ignore]
+    fn icon_sheet() {
+        use crate::ripple::{Ripple, VoiceCue};
+        let mut ripple = Ripple::default();
+        ripple.set_recording(true);
+        ripple.cue(VoiceCue::Speech);
+        for _ in 0..12 {
+            ripple.tick(0.033);
+        }
+        let rings = ripple.rings();
+        let none = Vec::new();
+        let looks = [
+            (IconState::Idle, false, InputMode::Normal, &none),
+            (IconState::Idle, true, InputMode::Normal, &none),
+            (IconState::Idle, true, InputMode::En, &none),
+            (IconState::Idle, true, InputMode::Kana, &none),
+            (IconState::Recording, false, InputMode::Kana, &rings),
+            (IconState::Done, false, InputMode::Normal, &none),
+        ];
+        let (big, gap, small) = (168u32, 12u32, ICON_SIZE as u32);
+        let mut sheet = Pixmap::new((big + gap) * looks.len() as u32 + gap, big + small + gap * 3).unwrap();
+        sheet.fill(Color::from_rgba8(30, 30, 30, 255));
+        for (i, (state, hover, mode, rings)) in looks.iter().enumerate() {
+            let x = (gap + (big + gap) * i as u32) as i32;
+            for (size, y) in [(big, gap), (small, big + gap * 2)] {
+                let pm = draw_floating(size, *state, *hover, *mode, rings);
+                sheet.draw_pixmap(x, y as i32, pm.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+            }
+        }
+        let path = std::env::var_os("VTYPE_ICON_SHEET")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::env::temp_dir().join("vtype-icon-sheet.png"));
+        sheet.save_png(&path).unwrap();
+        println!("wrote {}", path.display());
+    }
+
     fn center(pm: &Pixmap) -> tiny_skia::ColorU8 {
         // Just left of the mic glyph, inside the disc.
         pm.pixel(pm.width() * 3 / 10, pm.height() / 2).unwrap().demultiply()

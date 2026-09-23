@@ -554,6 +554,18 @@
     "message": "It stays as chosen until you change it. The tray menu switches it too.",
     "description": "Desktop app settings page: under the input mode title. The desktop app keeps the mode until changed; its tray menu switches it too"
   },
+  "settings_iconScale": {
+    "message": "Mic size",
+    "description": "Desktop app settings page: label of the floating mic's size, in percent"
+  },
+  "settings_iconScaleReset": {
+    "message": "Back to 100%",
+    "description": "Desktop app settings page: button that puts the floating mic's size back to 100%"
+  },
+  "settings_iconScaleHint": {
+    "message": "{min}–{max}%. You can also hold Ctrl and turn the mouse wheel over the mic (⌘ works too on macOS).",
+    "description": "Desktop app settings page: hint under the floating mic's size. {min} and {max} are the limits in percent"
+  },
   "settings_templatesTitle": {
     "message": "Templates",
     "description": "Desktop app settings page: title of the templates section"

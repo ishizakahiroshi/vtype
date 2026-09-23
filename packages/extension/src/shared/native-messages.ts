@@ -18,6 +18,8 @@ export interface NativeConfig {
     readonly x: number | null;
     readonly y: number | null;
     readonly hideOnFullscreen: boolean;
+    /** The floating mic's size in percent (50–200); older desktop apps leave it out. */
+    readonly scale?: number;
   };
   readonly inject: "auto" | "type" | "paste";
   readonly besideField: { readonly enabled: boolean; readonly trigger: "focus" | "hover" };
@@ -108,6 +110,7 @@ export function isNativeConfig(v: unknown): v is NativeConfig {
     isNullableInt(icon.x) &&
     isNullableInt(icon.y) &&
     typeof icon.hideOnFullscreen === "boolean" &&
+    (icon.scale === undefined || (typeof icon.scale === "number" && Number.isInteger(icon.scale))) &&
     (r.inject === "auto" || r.inject === "type" || r.inject === "paste") &&
     typeof beside.enabled === "boolean" &&
     (beside.trigger === "focus" || beside.trigger === "hover") &&

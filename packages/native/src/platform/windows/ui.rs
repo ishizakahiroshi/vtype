@@ -254,6 +254,10 @@ impl Ui {
         self.overlay.hide();
     }
 
+    pub fn set_icon_scale(&mut self, percent: u16) {
+        self.overlay.set_scale(percent);
+    }
+
     pub fn voice_cue(&mut self, cue: VoiceCue) {
         self.overlay.voice_cue(cue);
     }

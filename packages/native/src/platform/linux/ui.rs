@@ -185,6 +185,12 @@ impl Ui {
         }
     }
 
+    pub fn set_icon_scale(&mut self, percent: u16) {
+        if let Some(overlay) = &mut self.overlay {
+            overlay.set_scale(percent);
+        }
+    }
+
     /// Builds the templates menu and opens it at the mic from GTK's loop (not inside this job).
     pub fn show_templates(&mut self, templates: Vec<String>) {
         let Some(overlay) = &mut self.overlay else { return };

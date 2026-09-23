@@ -554,6 +554,18 @@
     "message": "変えるまでそのままです。トレイのメニューからも切り替えられます。",
     "description": "Desktop app settings page: under the input mode title. The desktop app keeps the mode until changed; its tray menu switches it too"
   },
+  "settings_iconScale": {
+    "message": "マイクの大きさ",
+    "description": "Desktop app settings page: label of the floating mic's size, in percent"
+  },
+  "settings_iconScaleReset": {
+    "message": "100% に戻す",
+    "description": "Desktop app settings page: button that puts the floating mic's size back to 100%"
+  },
+  "settings_iconScaleHint": {
+    "message": "{min}〜{max}%。マイクの上で Ctrl を押しながらマウスのホイールを回しても変えられます（macOS は ⌘ でも）。",
+    "description": "Desktop app settings page: hint under the floating mic's size. {min} and {max} are the limits in percent"
+  },
   "settings_templatesTitle": {
     "message": "テンプレート",
     "description": "Desktop app settings page: title of the templates section"

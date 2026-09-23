@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
+use crate::overlay_logic::{clamp_scale, SCALE_DEFAULT};
 use crate::protocol::InputMode;
 
 /// Same limit as vtype-core's `MAX_REPLACEMENT_RULES`.
@@ -143,12 +144,21 @@ pub struct IconConfig {
     pub x: Option<i32>,
     pub y: Option<i32>,
     pub hide_on_fullscreen: bool,
+    /// The floating mic's size in percent (`overlay_logic::SCALE_MIN..=SCALE_MAX`).
+    #[serde(deserialize_with = "lenient_scale")]
+    pub scale: u16,
 }
 
 impl Default for IconConfig {
     fn default() -> Self {
-        IconConfig { visible: true, x: None, y: None, hide_on_fullscreen: true }
+        IconConfig { visible: true, x: None, y: None, hide_on_fullscreen: true, scale: SCALE_DEFAULT }
     }
+}
+
+/// Out of range is pulled into it; not a number is the default.
+fn lenient_scale<'de, D: Deserializer<'de>>(d: D) -> Result<u16, D::Error> {
+    let value = Value::deserialize(d)?;
+    Ok(value.as_f64().map_or(SCALE_DEFAULT, |p| clamp_scale(p.round() as i64)))
 }
 
 /// How recognized text reaches the foreground app (parent plan D15).
@@ -293,12 +303,25 @@ mod tests {
     }
 
     #[test]
+    fn the_mic_size_is_kept_in_range_and_old_files_read_as_100() {
+        let old: NativeConfig = serde_json::from_str(r#"{"icon":{"visible":true}}"#).unwrap();
+        assert_eq!(old.icon.scale, 100);
+        let read = |json: &str| serde_json::from_str::<NativeConfig>(json).unwrap().icon.scale;
+        assert_eq!(read(r#"{"icon":{"scale":150}}"#), 150);
+        assert_eq!(read(r#"{"icon":{"scale":10}}"#), 50);
+        assert_eq!(read(r#"{"icon":{"scale":900}}"#), 200);
+        assert_eq!(read(r#"{"icon":{"scale":"big"}}"#), 100);
+        assert_eq!(serde_json::to_value(NativeConfig::default()).unwrap()["icon"]["scale"], 100);
+    }
+
+    #[test]
     fn round_trips_through_the_file() {
         let dir = temp_dir("roundtrip");
         let path = dir.join("config.json");
         let mut cfg = NativeConfig { hotkey: Some("Ctrl+Shift+F9".into()), ..NativeConfig::default() };
         cfg.icon.x = Some(100);
         cfg.icon.y = Some(-20);
+        cfg.icon.scale = 130;
         cfg.inject = InjectMethod::Paste;
         cfg.beside_field.trigger = BesideFieldTrigger::Hover;
         cfg.extra_extension_ids = vec!["a".repeat(32)];

@@ -163,10 +163,73 @@ describe("the desktop settings page", () => {
     expect(app.calls[1]!.body).toEqual({
       ...CONFIG,
       hotkey: "Ctrl+Alt+V",
+      // A config without scale (an older desktop app) is 100 %.
+      icon: { ...CONFIG.icon, scale: 100 },
       inject: "paste",
       sendKey: "ctrl-enter",
       besideField: { enabled: true, trigger: "focus" },
     });
+  });
+
+  it("saves the mic's size at once, within 50-200 %, and puts it back to 100 %", async () => {
+    const app = fakeApp({ ...CONFIG, icon: { ...CONFIG.icon, scale: 120 } });
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "en" }).loaded;
+    const number = $<HTMLInputElement>("nc-icon-scale");
+    const range = $<HTMLInputElement>("nc-icon-scale-range");
+    const scale = () => (app.calls.at(-1)!.body as { icon: { scale: number } }).icon.scale;
+    expect(number.value).toBe("120");
+    expect(range.value).toBe("120");
+    expect($("nc-icon-scale-hint").textContent).toBe(translate("settings_iconScaleHint", "en", { min: 50, max: 200 }));
+
+    number.value = "137.4";
+    number.dispatchEvent(new Event("change"));
+    await flush();
+    expect(scale()).toBe(137);
+    number.value = "900";
+    number.dispatchEvent(new Event("change"));
+    await flush();
+    expect(scale()).toBe(200);
+    expect(number.value).toBe("200");
+
+    // Not a number: nothing is sent and the size shown stays.
+    const saves = app.calls.length;
+    number.value = "";
+    number.dispatchEvent(new Event("change"));
+    await flush();
+    expect(app.calls.length).toBe(saves);
+    expect(number.value).toBe("200");
+
+    // The slider shows the number while it moves and saves when let go.
+    range.value = "60";
+    range.dispatchEvent(new Event("input"));
+    expect(number.value).toBe("60");
+    range.dispatchEvent(new Event("change"));
+    await flush();
+    expect(scale()).toBe(60);
+
+    $("nc-icon-scale-reset").click();
+    await flush();
+    expect(scale()).toBe(100);
+    expect(number.value).toBe("100");
+    // The rest of the config goes along unchanged.
+    expect(app.calls.at(-1)!.body).toEqual({ ...CONFIG, icon: { ...CONFIG.icon, scale: 100 } });
+  });
+
+  it("takes in a size changed with Ctrl+wheel when the page comes back to the front", async () => {
+    const app = fakeApp();
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "en" }).loaded;
+    $<HTMLInputElement>("nc-hotkey").value = "Ctrl+Alt+V"; // typed, not saved yet
+    // The desktop app resized (and so moved) the mic meanwhile.
+    await app.fetch(API, { method: "POST", body: JSON.stringify({ ...CONFIG, icon: { ...CONFIG.icon, x: 5, scale: 150 } }) });
+    window.dispatchEvent(new Event("focus"));
+    await flush();
+    await flush();
+    expect($<HTMLInputElement>("nc-icon-scale").value).toBe("150");
+    expect($<HTMLInputElement>("nc-hotkey").value).toBe("Ctrl+Alt+V");
+    // Saving the form keeps the new size and place.
+    $("nc-form").dispatchEvent(new Event("submit", { cancelable: true }));
+    await flush();
+    expect(app.calls.at(-1)!.body).toMatchObject({ hotkey: "Ctrl+Alt+V", icon: { x: 5, scale: 150 } });
   });
 
   it("says so when the desktop app cannot be reached", async () => {
