@@ -147,7 +147,10 @@ pub fn press_keys(keys: EditKeys) -> Result<(), PlatformError> {
         EditKeys::Send(SendKey::Enter) => chord(VK_RETURN, false),
         EditKeys::Send(SendKey::CtrlEnter) => chord(VK_RETURN, true),
     };
-    if send(&inputs) == inputs.len() {
+    let sent = send(&inputs);
+    // TEMP(clear-ime): how many of the key events Windows took; remove after the check.
+    tracing::info!(?keys, sent, asked = inputs.len(), "edit keys");
+    if sent == inputs.len() {
         Ok(())
     } else {
         Err(PlatformError::Failed("the keys were blocked".into()))

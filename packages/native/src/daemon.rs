@@ -405,6 +405,8 @@ impl Core {
             }
             MicButton::Clear => {
                 let field = self.platform.focused_field();
+                // TEMP(clear-ime): which way the clear button goes; remove after the check.
+                tracing::info!(text_field = ?field.is_text_field, password = ?field.is_password, "clear pressed");
                 // Only an editable text field: Ctrl+A in a file list or a document selects far more.
                 if field.is_text_field == Some(true) && field.is_password != Some(true) {
                     self.press(EditKeys::ClearField);
@@ -781,8 +783,9 @@ impl Core {
             return false;
         }
         match self.platform.inject_text(text, self.config.inject) {
-            Ok(InjectOutcome::Typed) | Ok(InjectOutcome::Pasted) => {
-                tracing::info!(len = text.chars().count(), "inserted");
+            Ok(outcome @ (InjectOutcome::Typed | InjectOutcome::Pasted)) => {
+                // TEMP(clear-ime): `?outcome` only; remove after the check.
+                tracing::info!(len = text.chars().count(), ?outcome, "inserted");
                 self.last_char = text.chars().last();
                 self.show_icon(IconState::Done);
                 true
