@@ -26,8 +26,8 @@ use crate::ipc;
 use crate::menu;
 use crate::overlay_logic;
 use crate::platform::{
-    EditKeys, FieldProbe, IconState, InjectOutcome, MenuAction, MicButton, Platform, PlatformError, PlatformEvent,
-    TrayState, VoiceCue, MESSAGE_HOLD,
+    EditKeys, FieldProbe, IconState, InjectOutcome, MenuAction, MicButton, MicPart, Platform, PlatformError,
+    PlatformEvent, TrayState, VoiceCue, MESSAGE_HOLD,
 };
 use crate::protocol::{FromExtension, InputMode, Reply, Request, SessionEvent, ToExtension};
 use crate::report::{self, ReportInfo, Surface};
@@ -76,6 +76,12 @@ pub const RELAUNCH_DELAY: Duration = Duration::from_secs(3);
 /// How long the first-run request is held in the bubble.
 const SETUP_HOLD: Duration = Duration::from_secs(30);
 
+/// How long the pointer rests on a part of the floating mic before the bubble says what it does
+/// (sooner, and the bubble would flicker as the pointer passes over), and how long that stays
+/// when the pointer does not leave.
+const HINT_DELAY: Duration = Duration::from_millis(700);
+const HINT_HOLD: Duration = Duration::from_secs(10);
+
 pub struct Core {
     platform: Arc<dyn Platform>,
     config: NativeConfig,
@@ -115,6 +121,10 @@ pub struct Core {
     last_start_mode: Option<InputMode>,
     /// Start Chrome again at this time, placed like this (after the setup window closed).
     relaunch: Option<(Instant, WindowPlacement)>,
+    /// The pointer rests on this part of the floating mic: its hint shows at this time.
+    hint_due: Option<(MicPart, Instant)>,
+    /// A hint is in the bubble until this time (leaving the mic takes it away sooner).
+    hint_until: Option<Instant>,
 }
 
 impl Core {
@@ -143,6 +153,8 @@ impl Core {
             grant_in_profile: false,
             last_start_mode: None,
             relaunch: None,
+            hint_due: None,
+            hint_until: None,
         }
     }
 
@@ -245,11 +257,21 @@ impl Core {
     pub fn next_deadline(&self) -> Option<Instant> {
         let pending = self.pending.as_ref().and_then(|p| p.deadline);
         let relaunch = self.relaunch.map(|(at, _)| at);
-        pending.into_iter().chain(relaunch).min()
+        let hint = self.hint_due.map(|(_, at)| at);
+        pending.into_iter().chain(relaunch).chain(hint).min()
     }
 
     pub fn tick(&mut self) {
         let now = (self.now)();
+        if let Some((part, at)) = self.hint_due {
+            if now >= at {
+                self.hint_due = None;
+                if self.hint_fits() {
+                    self.platform.tell(&self.hint_text(part), HINT_HOLD, false);
+                    self.hint_until = Some(now + HINT_HOLD);
+                }
+            }
+        }
         if let Some((at, placement)) = self.relaunch {
             if now >= at {
                 self.relaunch = None;
@@ -414,6 +436,46 @@ impl Core {
                     self.platform.tell(&t("native_bubbleClearNotField"), MESSAGE_HOLD, false);
                 }
             }
+        }
+    }
+
+    /// A hint may take the bubble: not while it shows what is being said, or the wait for Chrome.
+    fn hint_fits(&self) -> bool {
+        !self.recording && self.pending.is_none()
+    }
+
+    /// What the bubble says for the part of the floating mic the pointer rests on.
+    fn hint_text(&self, part: MicPart) -> String {
+        match part {
+            MicPart::Mic => t("native_hintMic"),
+            MicPart::Button(MicButton::Templates) => t("native_hintTemplates"),
+            MicPart::Button(MicButton::Mode) => {
+                let mode = match self.mode {
+                    InputMode::Normal => t("native_trayModeNormal"),
+                    InputMode::En => t("native_trayModeEn"),
+                    InputMode::Kana => t("native_trayModeKana"),
+                };
+                t_with("native_hintMode", &[("mode", &mode)])
+            }
+            MicPart::Button(MicButton::Send) => {
+                // The keys `EditKeys::Send` presses (Ctrl+Enter is ⌘+Return on macOS).
+                let key = match self.config.send_key {
+                    config::SendKey::Enter => "Enter",
+                    config::SendKey::CtrlEnter if cfg!(target_os = "macos") => "⌘+Return",
+                    config::SendKey::CtrlEnter => "Ctrl+Enter",
+                };
+                t_with("native_hintSend", &[("key", key)])
+            }
+            MicPart::Button(MicButton::Clear) => t("native_hintClear"),
+        }
+    }
+
+    /// Forgets the hint waiting to show, and takes the one showing out of the bubble.
+    fn drop_hint(&mut self) {
+        self.hint_due = None;
+        let showing = self.hint_until.take().is_some_and(|until| (self.now)() < until);
+        if showing && self.hint_fits() {
+            self.platform.hide_bubble();
         }
     }
 
@@ -874,6 +936,16 @@ impl Core {
 
     fn handle_platform(&mut self, ev: PlatformEvent) -> Flow {
         match ev {
+            PlatformEvent::MicHover(_) | PlatformEvent::FieldChanged { .. } => {}
+            // The mic (or a menu) was used: its hint goes first, as the action may say something in
+            // the bubble. It comes back only when the pointer moves onto another part.
+            _ => self.drop_hint(),
+        }
+        match ev {
+            PlatformEvent::MicHover(part) => {
+                self.drop_hint();
+                self.hint_due = part.map(|p| (p, (self.now)() + HINT_DELAY));
+            }
             PlatformEvent::ToggleRequested => {
                 let _ = self.toggle(None);
             }
@@ -1481,6 +1553,114 @@ pub mod tests {
         h.core.config.send_key = crate::config::SendKey::CtrlEnter;
         h.core.handle(Event::Platform(PlatformEvent::MicButton(MicButton::Send)));
         assert!(h.fake.take().contains(&"keys Send(CtrlEnter)".to_string()));
+    }
+
+    fn hover(h: &mut Harness, part: Option<MicPart>) {
+        h.core.handle(Event::Platform(PlatformEvent::MicHover(part)));
+    }
+
+    fn hint_call(text: &str) -> String {
+        format!("tell {text} 10s notify=false")
+    }
+
+    #[test]
+    fn resting_on_the_mic_says_what_it_does_and_leaving_takes_it_away() {
+        let mut h = Harness::new();
+        h.connect();
+        hover(&mut h, Some(MicPart::Mic));
+        // Passing over the mic says nothing.
+        assert!(h.fake.take().is_empty());
+        h.advance(HINT_DELAY - Duration::from_millis(1));
+        h.core.tick();
+        assert!(h.fake.take().is_empty());
+        h.advance(Duration::from_millis(1));
+        h.core.tick();
+        assert_eq!(h.fake.take(), vec![hint_call(&t("native_hintMic"))]);
+        assert!(h.core.next_deadline().is_none());
+        hover(&mut h, None);
+        assert_eq!(h.fake.take(), vec!["hide bubble"]);
+        // Left before the hint showed: nothing to take away, nothing shows later.
+        hover(&mut h, Some(MicPart::Mic));
+        hover(&mut h, None);
+        h.advance(HINT_DELAY);
+        h.core.tick();
+        assert!(h.fake.take().is_empty());
+    }
+
+    #[test]
+    fn each_corner_button_says_what_it_does() {
+        let mut h = Harness::new();
+        h.connect();
+        h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::SetMode(InputMode::Kana))));
+        h.fake.take();
+        let expected = [
+            (MicButton::Templates, t("native_hintTemplates")),
+            (MicButton::Mode, t_with("native_hintMode", &[("mode", &t("native_trayModeKana"))])),
+            (MicButton::Send, t_with("native_hintSend", &[("key", "Enter")])),
+            (MicButton::Clear, t("native_hintClear")),
+        ];
+        for (button, text) in expected {
+            hover(&mut h, Some(MicPart::Button(button)));
+            h.advance(HINT_DELAY);
+            h.core.tick();
+            let calls = h.fake.take();
+            // Moving on from the previous button takes its hint away first.
+            assert_eq!(calls.last(), Some(&hint_call(&text)), "{button:?}");
+        }
+        // The placeholders are the dictionary's own: nothing is left unfilled.
+        for button in [MicButton::Mode, MicButton::Send] {
+            let text = h.core.hint_text(MicPart::Button(button));
+            assert!(!text.contains('{'), "{text}");
+        }
+    }
+
+    #[test]
+    fn using_the_mic_takes_its_hint_away_before_the_button_speaks_and_it_does_not_come_back() {
+        let mut h = Harness::new();
+        h.connect();
+        hover(&mut h, Some(MicPart::Button(MicButton::Clear)));
+        h.advance(HINT_DELAY);
+        h.core.tick();
+        h.fake.take();
+        // The focus is not in a text field: the button says so, after the hint went.
+        h.core.handle(Event::Platform(PlatformEvent::MicButton(MicButton::Clear)));
+        let calls = h.fake.take();
+        assert_eq!(calls.first().map(String::as_str), Some("hide bubble"), "{calls:?}");
+        assert!(calls.iter().any(|c| c.contains(&t("native_bubbleClearNotField"))), "{calls:?}");
+        // Still on the button: its hint stays away (the message stays up).
+        h.advance(HINT_DELAY * 2);
+        h.core.tick();
+        assert!(h.fake.take().is_empty());
+        // A click before the hint showed cancels it.
+        hover(&mut h, Some(MicPart::Button(MicButton::Mode)));
+        h.core.handle(Event::Platform(PlatformEvent::MicButton(MicButton::Mode)));
+        h.fake.take();
+        h.advance(HINT_DELAY);
+        h.core.tick();
+        assert!(!h.fake.take().iter().any(|c| c.starts_with("tell ")));
+    }
+
+    #[test]
+    fn no_hint_while_the_bubble_shows_what_is_being_said() {
+        let mut h = Harness::new();
+        h.connect();
+        h.ext(json!({"type":"session","event":{"kind":"started"}}));
+        h.fake.take();
+        hover(&mut h, Some(MicPart::Mic));
+        h.advance(HINT_DELAY);
+        h.core.tick();
+        assert!(h.fake.take().is_empty());
+        hover(&mut h, None);
+        assert!(h.fake.take().is_empty(), "the live text stays");
+        // A hint that ran out by itself is not taken away again (the bubble may say something else).
+        h.ext(json!({"type":"session","event":{"kind":"ended","reason":"stopped"}}));
+        hover(&mut h, Some(MicPart::Mic));
+        h.advance(HINT_DELAY);
+        h.core.tick();
+        h.fake.take();
+        h.advance(HINT_HOLD);
+        hover(&mut h, None);
+        assert!(h.fake.take().is_empty());
     }
 
     #[test]

@@ -13,7 +13,7 @@ use thiserror::Error;
 
 pub use crate::beside_field::FieldProbe;
 use crate::config::{BesideFieldConfig, InjectMethod};
-pub use crate::overlay_logic::MicButton;
+pub use crate::overlay_logic::{MicButton, MicPart};
 use crate::protocol::InputMode;
 pub use crate::ripple::VoiceCue;
 
@@ -58,6 +58,9 @@ pub enum PlatformEvent {
     },
     /// One of the small buttons around the floating mic was clicked.
     MicButton(MicButton),
+    /// The pointer moved onto this part of the floating mic, or (`None`) off the mic: the bubble
+    /// says what the part does once the pointer rests there. Sent only when the part changes.
+    MicHover(Option<MicPart>),
     /// The focused element changed, or (hover) the pointer settled on or left a field; for the
     /// mic beside the field. `at` is when the OS told us, to measure how fast the mic appears.
     /// (Linux has no beside mic, so nothing sends it there.)

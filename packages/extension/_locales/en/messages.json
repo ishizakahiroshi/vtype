@@ -402,6 +402,26 @@
     "message": "To type, allow vtype in System Settings → Privacy & Security → Accessibility.",
     "description": "Desktop app (macOS): notification when vtype may not send keystrokes yet"
   },
+  "native_hintMic": {
+    "message": "Click to dictate\nCtrl+wheel to resize",
+    "description": "Desktop app: bubble when the pointer rests on the floating mic. Two lines"
+  },
+  "native_hintTemplates": {
+    "message": "Templates (put in saved text)",
+    "description": "Desktop app: bubble when the pointer rests on the top-left button of the floating mic"
+  },
+  "native_hintMode": {
+    "message": "{mode} (click to switch)",
+    "description": "Desktop app: bubble when the pointer rests on the top-right button of the floating mic. {mode} is one of the tray's mode items, e.g. \"Mode: Normal\""
+  },
+  "native_hintSend": {
+    "message": "Send ({key})",
+    "description": "Desktop app: bubble when the pointer rests on the bottom-right button of the floating mic. {key} is the send key, e.g. Enter"
+  },
+  "native_hintClear": {
+    "message": "Clear the text field",
+    "description": "Desktop app: bubble when the pointer rests on the bottom-left button of the floating mic, which empties the focused text field"
+  },
   "optionsModeLegend": {
     "message": "Input mode",
     "description": "Options page: title of the input mode choice"

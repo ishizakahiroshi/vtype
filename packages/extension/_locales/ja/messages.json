@@ -402,6 +402,26 @@
     "message": "文字を入力するには、システム設定 → プライバシーとセキュリティ → アクセシビリティ で vtype を許可してください。",
     "description": "Desktop app (macOS): notification when vtype may not send keystrokes yet"
   },
+  "native_hintMic": {
+    "message": "クリックで音声入力\nCtrl+ホイールで大きさを変える",
+    "description": "Desktop app: bubble when the pointer rests on the floating mic. Two lines"
+  },
+  "native_hintTemplates": {
+    "message": "テンプレート（定型文を入れる）",
+    "description": "Desktop app: bubble when the pointer rests on the top-left button of the floating mic"
+  },
+  "native_hintMode": {
+    "message": "{mode}（押すと切り替え）",
+    "description": "Desktop app: bubble when the pointer rests on the top-right button of the floating mic. {mode} is one of the tray's mode items, e.g. \"Mode: Normal\""
+  },
+  "native_hintSend": {
+    "message": "送信（{key}）",
+    "description": "Desktop app: bubble when the pointer rests on the bottom-right button of the floating mic. {key} is the send key, e.g. Enter"
+  },
+  "native_hintClear": {
+    "message": "入力欄の文字を全部消す",
+    "description": "Desktop app: bubble when the pointer rests on the bottom-left button of the floating mic, which empties the focused text field"
+  },
   "optionsModeLegend": {
     "message": "入力モード",
     "description": "Options page: title of the input mode choice"

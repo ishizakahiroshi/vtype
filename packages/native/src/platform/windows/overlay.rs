@@ -36,8 +36,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use crate::beside_field::{keep_on_screen, BESIDE_SIZE};
 use crate::icon_draw::{draw_floating, draw_icon, draw_rounded_panel, to_premultiplied_bgra};
 use crate::overlay_logic::{
-    button_at, button_shown, fits, resized_position, resolve_position, scaled_size, tail, Gesture, MicButton, Press,
-    WheelSteps, SCALE_DEFAULT,
+    button_at, button_shown, fits, part_at, resized_position, resolve_position, scaled_size, tail, Gesture, MicButton,
+    MicPart, Press, WheelSteps, SCALE_DEFAULT,
 };
 use crate::platform::{IconState, PlatformEvent, Rect, VoiceCue};
 use crate::protocol::InputMode;
@@ -69,7 +69,8 @@ struct IconShared {
     /// Whether the ripple's timer runs, and when it last ticked.
     animating: Cell<bool>,
     last_frame: Cell<Instant>,
-    hover: Cell<bool>,
+    /// What the pointer is on (`None`: off the mic).
+    pointer: Cell<Option<MicPart>>,
     press: Cell<Option<Press>>,
     press_origin: Cell<(i32, i32)>,
     /// The corner button the press started on, if any.
@@ -182,15 +183,36 @@ impl IconShared {
         let hwnd = self.hwnd.get();
         let size = self.size.get();
         let rings = self.ripple.borrow().rings();
-        let pm = draw_floating(size as u32, self.look.get(), self.hover.get(), self.mode.get(), &rings);
+        let pm = draw_floating(size as u32, self.look.get(), self.pointer.get(), self.mode.get(), &rings);
         let (x, y) = self.pos.get();
         update_layered(hwnd, x, y, size, size, &to_premultiplied_bgra(&pm), |_, _| {});
+    }
+
+    /// The pointer is at the screen point `at` over the mic: a new part is drawn and reported. While
+    /// pressed the mic moves with the pointer, so the part stays the one pressed.
+    fn point_at(&self, at: (i32, i32)) {
+        if self.press.get().is_some() && self.pointer.get().is_some() {
+            return;
+        }
+        let (x, y) = self.pos.get();
+        let part = part_at((at.0 - x) as f32, (at.1 - y) as f32, self.size.get() as f32);
+        if self.pointer.replace(Some(part)) != Some(part) {
+            self.render();
+            let _ = self.events.send(PlatformEvent::MicHover(Some(part)));
+        }
+    }
+
+    fn pointer_left(&self) {
+        if self.pointer.take().is_some() {
+            self.render();
+            let _ = self.events.send(PlatformEvent::MicHover(None));
+        }
     }
 
     /// The corner button under the screen point `at`, among those on screen now.
     fn button_under(&self, at: (i32, i32)) -> Option<MicButton> {
         let (x, y) = self.pos.get();
-        let busy_or_hovered = self.hover.get() || self.look.get() != IconState::Idle;
+        let busy_or_hovered = self.pointer.get().is_some() || self.look.get() != IconState::Idle;
         let normal = self.mode.get() == InputMode::Normal;
         button_at((at.0 - x) as f32, (at.1 - y) as f32, self.size.get() as f32, |b| {
             button_shown(b, busy_or_hovered, normal)
@@ -243,8 +265,7 @@ unsafe extern "system" fn icon_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
             0
         }
         WM_MOUSEMOVE => {
-            if !s.hover.get() {
-                s.hover.set(true);
+            if s.pointer.get().is_none() {
                 let mut track = TRACKMOUSEEVENT {
                     cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
                     dwFlags: TME_LEAVE,
@@ -252,8 +273,8 @@ unsafe extern "system" fn icon_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
                     dwHoverTime: 0,
                 };
                 TrackMouseEvent(&mut track);
-                s.render();
             }
+            s.point_at(cursor());
             if let Some(mut press) = s.press.get() {
                 let now = cursor();
                 if press.moved(now) {
@@ -298,8 +319,7 @@ unsafe extern "system" fn icon_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
             0
         }
         WM_MOUSELEAVE => {
-            s.hover.set(false);
-            s.render();
+            s.pointer_left();
             0
         }
         WM_RBUTTONUP => {
@@ -379,7 +399,7 @@ impl Overlay {
             ripple: RefCell::new(Ripple::default()),
             animating: Cell::new(false),
             last_frame: Cell::new(Instant::now()),
-            hover: Cell::new(false),
+            pointer: Cell::new(None),
             press: Cell::new(None),
             press_origin: Cell::new((0, 0)),
             press_button: Cell::new(None),

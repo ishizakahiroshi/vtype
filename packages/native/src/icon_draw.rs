@@ -5,11 +5,12 @@
 //! Its window (`draw_floating`) adds the ripple while the user speaks and four small buttons at
 //! the corners: the templates top left (a list), the input mode top right ("A" English, "カ"
 //! katakana, a circular arrow for the normal mode), send bottom right, clear bottom left. The
-//! glyphs are drawn as strokes, so no font is needed.
+//! glyphs are drawn as strokes, so no font is needed. The button under the pointer is lighter and
+//! a little bigger, so it reads as the one a click goes to.
 
 use tiny_skia::{Color, FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, PixmapPaint, Stroke, Transform};
 
-use crate::overlay_logic::{button_shown, MicButton, BUTTON_RADIUS, ICON_SIZE, MIC_SIZE};
+use crate::overlay_logic::{button_shown, MicButton, MicPart, BUTTON_RADIUS, ICON_SIZE, MIC_SIZE};
 use crate::platform::IconState;
 use crate::protocol::InputMode;
 
@@ -21,6 +22,10 @@ pub const MODE_RGB: (u8, u8, u8) = (0x4f, 0x46, 0xe5);
 pub const SEND_RGB: (u8, u8, u8) = (0x63, 0x66, 0xf1);
 pub const CLEAR_RGB: (u8, u8, u8) = (0x6b, 0x72, 0x80);
 pub const TEMPLATES_RGB: (u8, u8, u8) = (0x0d, 0x94, 0x88);
+/// The button under the pointer: its colour mixed with this much white, and its radius grown by
+/// this much (still inside the click area, `BUTTON_RADIUS * 1.15`).
+const HOT_LIGHTEN: f32 = 0.3;
+const HOT_GROW: f32 = 1.12;
 
 fn paint(rgb: (u8, u8, u8), alpha: u8) -> Paint<'static> {
     let mut p = Paint::default();
@@ -95,8 +100,15 @@ pub fn draw_icon(size: u32, state: IconState, hover: bool) -> Pixmap {
 /// The floating mic's whole window, `size` × `size` pixels: the mic (`draw_icon`, at
 /// `MIC_SIZE / ICON_SIZE` of the window) in the middle, the ripple's `rings` (spread 0..1,
 /// opacity 0..1, from `Ripple::rings`) spreading from its edge to the window's, and the corner
-/// buttons that `button_shown` allows.
-pub fn draw_floating(size: u32, state: IconState, hover: bool, mode: InputMode, rings: &[(f32, f32)]) -> Pixmap {
+/// buttons that `button_shown` allows. `pointer` is what the pointer is on (`None`: off the mic).
+pub fn draw_floating(
+    size: u32,
+    state: IconState,
+    pointer: Option<MicPart>,
+    mode: InputMode,
+    rings: &[(f32, f32)],
+) -> Pixmap {
+    let hover = pointer.is_some();
     let mut pm = Pixmap::new(size.max(8), size.max(8)).expect("non-zero size");
     let s = pm.width() as f32;
     let mic = ((s * MIC_SIZE as f32 / ICON_SIZE as f32).round() as u32).max(8);
@@ -117,7 +129,7 @@ pub fn draw_floating(size: u32, state: IconState, hover: bool, mode: InputMode, 
     let mut buttons = Pixmap::new(pm.width(), pm.height()).expect("non-zero size");
     for button in MicButton::ALL {
         if button_shown(button, busy_or_hovered, mode == InputMode::Normal) {
-            draw_button(&mut buttons, button, mode);
+            draw_button(&mut buttons, button, mode, pointer == Some(MicPart::Button(button)));
         }
     }
     // Like the mic, the lone mode badge is faint until the pointer comes.
@@ -127,17 +139,19 @@ pub fn draw_floating(size: u32, state: IconState, hover: bool, mode: InputMode, 
     pm
 }
 
-/// One corner button: a disc with a white rim, and its glyph.
-fn draw_button(pm: &mut Pixmap, button: MicButton, mode: InputMode) {
+/// One corner button: a disc with a white rim, and its glyph. `hot`: the pointer is on it.
+fn draw_button(pm: &mut Pixmap, button: MicButton, mode: InputMode, hot: bool) {
     let s = pm.width() as f32;
     let (fx, fy) = button.center();
-    let (x, y, r) = (s * fx, s * fy, s * BUTTON_RADIUS);
+    let grow = if hot { HOT_GROW } else { 1.0 };
+    let (x, y, r) = (s * fx, s * fy, s * BUTTON_RADIUS * grow);
     let rgb = match button {
         MicButton::Templates => TEMPLATES_RGB,
         MicButton::Mode => MODE_RGB,
         MicButton::Send => SEND_RGB,
         MicButton::Clear => CLEAR_RGB,
     };
+    let rgb = if hot { lighten(rgb, HOT_LIGHTEN) } else { rgb };
     let white = paint((255, 255, 255), 255);
     if let Some(rim) = PathBuilder::from_circle(x, y, r) {
         pm.fill_path(&rim, &white, FillRule::Winding, Transform::identity(), None);
@@ -243,6 +257,12 @@ pub fn draw_rounded_panel(width: u32, height: u32, radius: f32, rgba: (u8, u8, u
     pm
 }
 
+/// `rgb` mixed with `amount` (0..1) of white.
+fn lighten(rgb: (u8, u8, u8), amount: f32) -> (u8, u8, u8) {
+    let mix = |c: u8| (f32::from(c) + (255.0 - f32::from(c)) * amount).round() as u8;
+    (mix(rgb.0), mix(rgb.1), mix(rgb.2))
+}
+
 /// Multiplies every (premultiplied) channel, i.e. the whole image's opacity.
 fn fade(pm: &mut Pixmap, opacity: f32) {
     for px in pm.data_mut().iter_mut() {
@@ -291,21 +311,23 @@ mod tests {
         }
         let rings = ripple.rings();
         let none = Vec::new();
+        let on_mic = Some(MicPart::Mic);
         let looks = [
-            (IconState::Idle, false, InputMode::Normal, &none),
-            (IconState::Idle, true, InputMode::Normal, &none),
-            (IconState::Idle, true, InputMode::En, &none),
-            (IconState::Idle, true, InputMode::Kana, &none),
-            (IconState::Recording, false, InputMode::Kana, &rings),
-            (IconState::Done, false, InputMode::Normal, &none),
+            (IconState::Idle, None, InputMode::Normal, &none),
+            (IconState::Idle, on_mic, InputMode::Normal, &none),
+            (IconState::Idle, Some(MicPart::Button(MicButton::Send)), InputMode::Normal, &none),
+            (IconState::Idle, on_mic, InputMode::En, &none),
+            (IconState::Idle, on_mic, InputMode::Kana, &none),
+            (IconState::Recording, None, InputMode::Kana, &rings),
+            (IconState::Done, None, InputMode::Normal, &none),
         ];
         let (big, gap, small) = (168u32, 12u32, ICON_SIZE as u32);
         let mut sheet = Pixmap::new((big + gap) * looks.len() as u32 + gap, big + small + gap * 3).unwrap();
         sheet.fill(Color::from_rgba8(30, 30, 30, 255));
-        for (i, (state, hover, mode, rings)) in looks.iter().enumerate() {
+        for (i, (state, pointer, mode, rings)) in looks.iter().enumerate() {
             let x = (gap + (big + gap) * i as u32) as i32;
             for (size, y) in [(big, gap), (small, big + gap * 2)] {
-                let pm = draw_floating(size, *state, *hover, *mode, rings);
+                let pm = draw_floating(size, *state, *pointer, *mode, rings);
                 sheet.draw_pixmap(x, y as i32, pm.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
             }
         }
@@ -329,30 +351,53 @@ mod tests {
         pm.pixel(x as u32, y as u32).unwrap().demultiply()
     }
 
+    const COLOURS: [(MicButton, (u8, u8, u8)); 4] = [
+        (MicButton::Templates, TEMPLATES_RGB),
+        (MicButton::Mode, MODE_RGB),
+        (MicButton::Send, SEND_RGB),
+        (MicButton::Clear, CLEAR_RGB),
+    ];
+
     #[test]
     fn the_buttons_show_while_hovered_or_busy() {
-        let hovered = draw_floating(56, IconState::Idle, true, InputMode::Normal, &[]);
-        for (button, rgb) in [
-            (MicButton::Templates, TEMPLATES_RGB),
-            (MicButton::Mode, MODE_RGB),
-            (MicButton::Send, SEND_RGB),
-            (MicButton::Clear, CLEAR_RGB),
-        ] {
+        let hovered = draw_floating(56, IconState::Idle, Some(MicPart::Mic), InputMode::Normal, &[]);
+        for (button, rgb) in COLOURS {
             let c = button_pixel(&hovered, button);
             assert_eq!((c.red(), c.green(), c.blue()), rgb, "{button:?}");
         }
-        let recording = draw_floating(56, IconState::Recording, false, InputMode::Normal, &[]);
+        let recording = draw_floating(56, IconState::Recording, None, InputMode::Normal, &[]);
         assert_eq!(button_pixel(&recording, MicButton::Send).alpha(), 255);
         // Idle and not hovered: no buttons, and the normal mode has no badge.
-        let idle = draw_floating(56, IconState::Idle, false, InputMode::Normal, &[]);
+        let idle = draw_floating(56, IconState::Idle, None, InputMode::Normal, &[]);
         for button in MicButton::ALL {
             assert_eq!(button_pixel(&idle, button).alpha(), 0, "{button:?}");
         }
     }
 
     #[test]
+    fn only_the_button_under_the_pointer_is_lighter_and_bigger() {
+        let s = 56u32;
+        for (hot, rgb) in COLOURS {
+            let pm = draw_floating(s, IconState::Idle, Some(MicPart::Button(hot)), InputMode::Normal, &[]);
+            let c = button_pixel(&pm, hot);
+            assert_eq!((c.red(), c.green(), c.blue()), lighten(rgb, HOT_LIGHTEN), "{hot:?}");
+            for (other, rgb) in COLOURS.into_iter().filter(|(b, _)| *b != hot) {
+                let c = button_pixel(&pm, other);
+                assert_eq!((c.red(), c.green(), c.blue()), rgb, "{other:?} while {hot:?} is hot");
+            }
+        }
+        // Just outside the drawn disc of a plain button, inside the grown one (away from the mic).
+        let (fx, fy) = MicButton::Clear.center();
+        let r = s as f32 * BUTTON_RADIUS * 1.06;
+        let at = |pm: &Pixmap| pm.pixel((s as f32 * fx - r) as u32, (s as f32 * fy) as u32).unwrap().alpha();
+        let plain = draw_floating(s, IconState::Idle, Some(MicPart::Mic), InputMode::Normal, &[]);
+        let hot = draw_floating(s, IconState::Idle, Some(MicPart::Button(MicButton::Clear)), InputMode::Normal, &[]);
+        assert!(at(&hot) > at(&plain), "grown: {} vs {}", at(&hot), at(&plain));
+    }
+
+    #[test]
     fn the_mode_badge_stays_for_english_and_katakana_and_the_glyphs_differ() {
-        let en = draw_floating(56, IconState::Idle, false, InputMode::En, &[]);
+        let en = draw_floating(56, IconState::Idle, None, InputMode::En, &[]);
         let c = button_pixel(&en, MicButton::Mode);
         // Faded, so the colour comes back only to within rounding.
         let near = |a: u8, b: u8| a.abs_diff(b) <= 4;
@@ -360,7 +405,8 @@ mod tests {
         assert!(c.alpha() > 0 && c.alpha() < 255, "faint while idle: {}", c.alpha());
         assert_eq!(button_pixel(&en, MicButton::Send).alpha(), 0);
         let modes = [InputMode::Normal, InputMode::En, InputMode::Kana];
-        let drawn: Vec<_> = modes.iter().map(|&m| draw_floating(56, IconState::Idle, true, m, &[])).collect();
+        let drawn: Vec<_> =
+            modes.iter().map(|&m| draw_floating(56, IconState::Idle, Some(MicPart::Mic), m, &[])).collect();
         assert_ne!(drawn[0].data(), drawn[1].data());
         assert_ne!(drawn[1].data(), drawn[2].data());
         assert_ne!(drawn[0].data(), drawn[2].data());
@@ -368,13 +414,13 @@ mod tests {
 
     #[test]
     fn the_floating_window_has_the_mic_in_the_middle_and_the_rings_around_it() {
-        let quiet = draw_floating(56, IconState::Recording, false, InputMode::Normal, &[]);
+        let quiet = draw_floating(56, IconState::Recording, None, InputMode::Normal, &[]);
         // The mic (40 px, 8 px in) is orange left of its glyph; the window's edge is empty.
         let c = quiet.pixel(8 + 40 * 3 / 10, 28).unwrap().demultiply();
         assert_eq!((c.red(), c.green(), c.blue()), RECORDING_RGB);
         assert_eq!(quiet.pixel(1, 28).unwrap().alpha(), 0);
         // A ring near the window's edge.
-        let rippling = draw_floating(56, IconState::Recording, false, InputMode::Normal, &[(1.0, 0.7)]);
+        let rippling = draw_floating(56, IconState::Recording, None, InputMode::Normal, &[(1.0, 0.7)]);
         let edge = rippling.pixel((56.0 * 0.02) as u32 + 1, 28).unwrap();
         assert!(edge.alpha() > 0, "no ring at the edge");
     }

@@ -29,8 +29,8 @@ use tray_icon::menu::{ContextMenu, Menu};
 use crate::beside_field::{keep_on_screen, BESIDE_SIZE};
 use crate::icon_draw::{draw_floating, draw_icon, draw_rounded_panel};
 use crate::overlay_logic::{
-    button_at, button_shown, fits, resized_position, resolve_position, scaled_size, tail, Gesture, MicButton, Press,
-    WheelSteps, SCALE_DEFAULT,
+    button_at, button_shown, fits, part_at, resized_position, resolve_position, scaled_size, tail, Gesture, MicButton,
+    MicPart, Press, WheelSteps, SCALE_DEFAULT,
 };
 use crate::platform::{IconState, PlatformEvent, Rect, VoiceCue};
 use crate::protocol::InputMode;
@@ -133,14 +133,22 @@ define_class!(
         #[unsafe(method(mouseEntered:))]
         fn mouse_entered(&self, _event: &NSEvent) {
             if self.ivars().role == Role::FloatingMic {
-                with_icon(|s| s.set_hover(true));
+                with_icon(|s| s.point_at(cursor(s.mtm)));
+            }
+        }
+
+        // Which corner button the pointer is on (the tracking area asks for moves too).
+        #[unsafe(method(mouseMoved:))]
+        fn mouse_moved(&self, _event: &NSEvent) {
+            if self.ivars().role == Role::FloatingMic {
+                with_icon(|s| s.point_at(cursor(s.mtm)));
             }
         }
 
         #[unsafe(method(mouseExited:))]
         fn mouse_exited(&self, _event: &NSEvent) {
             if self.ivars().role == Role::FloatingMic {
-                with_icon(|s| s.set_hover(false));
+                with_icon(|s| s.pointer_left());
             }
         }
 
@@ -160,6 +168,7 @@ impl ImageView {
         let view: Retained<ImageView> = unsafe { msg_send![super(this), initWithFrame: frame] };
         if role == Role::FloatingMic {
             let options = NSTrackingAreaOptions::MouseEnteredAndExited
+                | NSTrackingAreaOptions::MouseMoved
                 | NSTrackingAreaOptions::ActiveAlways
                 | NSTrackingAreaOptions::InVisibleRect;
             let area = unsafe {
@@ -269,7 +278,8 @@ struct IconShared {
     mode: Cell<InputMode>,
     ripple: RefCell<Ripple>,
     last_frame: Cell<Instant>,
-    hover: Cell<bool>,
+    /// What the pointer is on (`None`: off the mic).
+    pointer: Cell<Option<MicPart>>,
     press: Cell<Option<Press>>,
     press_origin: Cell<(i32, i32)>,
     /// The corner button the press started on, if any.
@@ -313,7 +323,7 @@ impl IconShared {
         let side = f64::from(self.size.get());
         let px = (side * scale).round().max(1.0) as u32;
         let rings = self.ripple.borrow().rings();
-        let pm = draw_floating(px, self.look.get(), self.hover.get(), self.mode.get(), &rings);
+        let pm = draw_floating(px, self.look.get(), self.pointer.get(), self.mode.get(), &rings);
         self.view.set_image(image_from(&pm, NSSize::new(side, side)));
     }
 
@@ -349,7 +359,7 @@ impl IconShared {
     /// screen now.
     fn button_under(&self, at: (i32, i32)) -> Option<MicButton> {
         let (x, y) = self.pos.get();
-        let busy_or_hovered = self.hover.get() || self.look.get() != IconState::Idle;
+        let busy_or_hovered = self.pointer.get().is_some() || self.look.get() != IconState::Idle;
         let normal = self.mode.get() == InputMode::Normal;
         button_at((at.0 - x) as f32, (at.1 - y) as f32, self.size.get() as f32, |b| {
             button_shown(b, busy_or_hovered, normal)
@@ -386,10 +396,25 @@ impl IconShared {
         }
     }
 
-    fn set_hover(&self, hover: bool) {
-        if self.hover.get() != hover {
-            self.hover.set(hover);
+    /// The pointer is at `at` (points from the top left of the main screen) over the mic: a new
+    /// part is drawn and reported. While pressed the mic moves with the pointer, so the part stays
+    /// the one pressed.
+    fn point_at(&self, at: (i32, i32)) {
+        if self.press.get().is_some() && self.pointer.get().is_some() {
+            return;
+        }
+        let (x, y) = self.pos.get();
+        let part = part_at((at.0 - x) as f32, (at.1 - y) as f32, self.size.get() as f32);
+        if self.pointer.replace(Some(part)) != Some(part) {
             self.render();
+            let _ = self.events.send(PlatformEvent::MicHover(Some(part)));
+        }
+    }
+
+    fn pointer_left(&self) {
+        if self.pointer.take().is_some() {
+            self.render();
+            let _ = self.events.send(PlatformEvent::MicHover(None));
         }
     }
 }
@@ -424,7 +449,7 @@ impl Overlay {
             mode: Cell::new(InputMode::Normal),
             ripple: RefCell::new(Ripple::default()),
             last_frame: Cell::new(Instant::now()),
-            hover: Cell::new(false),
+            pointer: Cell::new(None),
             press: Cell::new(None),
             press_origin: Cell::new((0, 0)),
             press_button: Cell::new(None),

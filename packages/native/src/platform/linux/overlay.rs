@@ -21,8 +21,8 @@ use tray_icon::menu::{ContextMenu, Menu};
 
 use crate::icon_draw::{draw_floating, draw_rounded_panel, to_premultiplied_bgra};
 use crate::overlay_logic::{
-    button_at, button_shown, fits, resized_position, resolve_position, scaled_size, tail, Gesture, MicButton, Press,
-    WheelSteps, SCALE_DEFAULT,
+    button_at, button_shown, fits, part_at, resized_position, resolve_position, scaled_size, tail, Gesture, MicButton,
+    MicPart, Press, WheelSteps, SCALE_DEFAULT,
 };
 use crate::platform::{IconState, PlatformEvent, Rect, VoiceCue};
 use crate::protocol::InputMode;
@@ -99,7 +99,8 @@ struct IconShared {
     /// Whether the ripple's timer runs, and when it last ticked.
     animating: Cell<bool>,
     last_frame: Cell<Instant>,
-    hover: Cell<bool>,
+    /// What the pointer is on (`None`: off the mic).
+    pointer: Cell<Option<MicPart>>,
     press: Cell<Option<Press>>,
     press_origin: Cell<(i32, i32)>,
     /// The corner button the press started on, if any.
@@ -139,7 +140,7 @@ impl IconShared {
         let scale = self.window.scale_factor().max(1) as f64;
         let px = (f64::from(self.size.get()) * scale).round() as u32;
         let rings = self.ripple.borrow().rings();
-        paint(cr, &draw_floating(px, self.look.get(), self.hover.get(), self.mode.get(), &rings), scale);
+        paint(cr, &draw_floating(px, self.look.get(), self.pointer.get(), self.mode.get(), &rings), scale);
     }
 
     fn place(&self) {
@@ -170,7 +171,7 @@ impl IconShared {
     /// The corner button under the root point `at`, among those on screen now.
     fn button_under(&self, at: (i32, i32)) -> Option<MicButton> {
         let (x, y) = self.pos.get();
-        let busy_or_hovered = self.hover.get() || self.look.get() != IconState::Idle;
+        let busy_or_hovered = self.pointer.get().is_some() || self.look.get() != IconState::Idle;
         let normal = self.mode.get() == InputMode::Normal;
         button_at((at.0 - x) as f32, (at.1 - y) as f32, self.size.get() as f32, |b| {
             button_shown(b, busy_or_hovered, normal)
@@ -206,10 +207,24 @@ impl IconShared {
         }
     }
 
-    fn set_hover(&self, hover: bool) {
-        if self.hover.get() != hover {
-            self.hover.set(hover);
+    /// The pointer is at the root point `at` over the mic: a new part is drawn and reported. While
+    /// pressed the mic moves with the pointer, so the part stays the one pressed.
+    fn point_at(&self, at: (i32, i32)) {
+        if self.press.get().is_some() && self.pointer.get().is_some() {
+            return;
+        }
+        let (x, y) = self.pos.get();
+        let part = part_at((at.0 - x) as f32, (at.1 - y) as f32, self.size.get() as f32);
+        if self.pointer.replace(Some(part)) != Some(part) {
             self.window.queue_draw();
+            let _ = self.events.send(PlatformEvent::MicHover(Some(part)));
+        }
+    }
+
+    fn pointer_left(&self) {
+        if self.pointer.take().is_some() {
+            self.window.queue_draw();
+            let _ = self.events.send(PlatformEvent::MicHover(None));
         }
     }
 
@@ -258,7 +273,10 @@ fn wire_icon(window: &gtk::Window) {
         glib::Propagation::Stop
     });
     window.connect_motion_notify_event(|_, ev| {
-        with_icon(|s| s.drag(root_point(ev.root())));
+        with_icon(|s| {
+            s.point_at(root_point(ev.root()));
+            s.drag(root_point(ev.root()));
+        });
         glib::Propagation::Stop
     });
     window.connect_button_release_event(|_, ev| {
@@ -280,12 +298,12 @@ fn wire_icon(window: &gtk::Window) {
         }
         glib::Propagation::Stop
     });
-    window.connect_enter_notify_event(|_, _| {
-        with_icon(|s| s.set_hover(true));
+    window.connect_enter_notify_event(|_, ev| {
+        with_icon(|s| s.point_at(root_point(ev.root())));
         glib::Propagation::Proceed
     });
     window.connect_leave_notify_event(|_, _| {
-        with_icon(|s| s.set_hover(false));
+        with_icon(|s| s.pointer_left());
         glib::Propagation::Proceed
     });
 }
@@ -323,7 +341,7 @@ impl Overlay {
             ripple: RefCell::new(Ripple::default()),
             animating: Cell::new(false),
             last_frame: Cell::new(Instant::now()),
-            hover: Cell::new(false),
+            pointer: Cell::new(None),
             press: Cell::new(None),
             press_origin: Cell::new((0, 0)),
             press_button: Cell::new(None),

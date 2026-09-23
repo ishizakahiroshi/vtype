@@ -122,6 +122,20 @@ pub fn button_shown(button: MicButton, busy_or_hovered: bool, mode_is_normal: bo
     busy_or_hovered || (button == MicButton::Mode && !mode_is_normal)
 }
 
+/// What the pointer is on, over the floating mic: the hovered button is drawn lighter, and the
+/// bubble says what the part does once the pointer rests on it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MicPart {
+    Mic,
+    Button(MicButton),
+}
+
+/// The part under (`x`, `y`), window-local in the same unit as `size`, while the pointer is on
+/// the window (so all four buttons are on screen).
+pub fn part_at(x: f32, y: f32, size: f32) -> MicPart {
+    button_at(x, y, size, |_| true).map_or(MicPart::Mic, MicPart::Button)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Gesture {
     Click,
@@ -250,6 +264,16 @@ mod tests {
         assert!(button_shown(MicButton::Mode, false, false));
         assert!(!button_shown(MicButton::Send, false, false));
         assert!(button_shown(MicButton::Clear, true, true));
+    }
+
+    #[test]
+    fn the_pointer_is_on_a_button_or_else_on_the_mic() {
+        let s = ICON_SIZE as f32;
+        assert_eq!(part_at(0.5 * s, 0.5 * s, s), MicPart::Mic);
+        assert_eq!(part_at(0.2 * s, 0.8 * s, s), MicPart::Button(MicButton::Clear));
+        assert_eq!(part_at(0.8 * s, 0.2 * s, s), MicPart::Button(MicButton::Mode));
+        // Between a button and the mic's disc.
+        assert_eq!(part_at(0.5 * s, 0.05 * s, s), MicPart::Mic);
     }
 
     #[test]
