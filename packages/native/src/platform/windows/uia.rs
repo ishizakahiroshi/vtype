@@ -46,7 +46,9 @@ pub fn describe(element: &IUIAutomationElement) -> FieldInfo {
             height: r.bottom - r.top,
         });
         let app_id = element.CurrentProcessId().ok().and_then(|pid| super::system_process_name(pid as u32));
-        FieldInfo { is_password, caret_rect, app_id }
+        // The same test as the beside mic's: an editable edit or document control.
+        let is_text_field = Some(super::beside::probe(element, false).is_text_field);
+        FieldInfo { is_password, caret_rect, app_id, is_text_field }
     }
 }
 

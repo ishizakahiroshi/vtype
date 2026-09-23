@@ -334,6 +334,38 @@
   "native_bubbleConsent": {
     "message": "最初の 1 回だけ、開いた Chrome の窓で同意とマイクの許可をお願いします。",
     "description": "Desktop app: bubble while the first-run window (consent and microphone) is open"
+  },
+  "native_menuAddSelection": {
+    "message": "選択中の文字をテンプレートに登録",
+    "description": "Desktop app menu: copy the text selected in the front app and keep it as a template"
+  },
+  "native_menuEditTemplates": {
+    "message": "テンプレートを編集…",
+    "description": "Desktop app templates menu: opens the settings page to edit the templates"
+  },
+  "native_bubbleTemplateAdded": {
+    "message": "テンプレートに登録しました。",
+    "description": "Desktop app: the selected text was saved as a template"
+  },
+  "native_bubbleTemplateDuplicate": {
+    "message": "同じテンプレートがすでにあります。",
+    "description": "Desktop app: the selected text is already a template"
+  },
+  "native_bubbleTemplateFull": {
+    "message": "テンプレートは 100 件までです。設定ページで整理してください。",
+    "description": "Desktop app: there are already 100 templates"
+  },
+  "native_bubbleNoSelection": {
+    "message": "選択された文字がありませんでした。文字を選んでから、もう一度どうぞ。",
+    "description": "Desktop app: nothing was selected in the front app to save as a template"
+  },
+  "native_bubbleClearNotField": {
+    "message": "文字の入力欄にカーソルがないので、消しませんでした。",
+    "description": "Desktop app: the clear button did nothing because the focus is not in a text field (or is in a password field)"
+  },
+  "native_bubbleKeysUnsupported": {
+    "message": "この画面ではボタンからキーを送れません。",
+    "description": "Desktop app: the send / clear button cannot press keys here (e.g. Wayland)"
   },  "native_bubbleConnecting": {
     "message": "Chrome の vtype とつないでいます…",
     "description": "Desktop app: shown above the mic icon while it waits (up to 10 seconds) for the extension in Chrome"
@@ -474,6 +506,22 @@
     "message": "常に貼り付け（クリップボードは元に戻します）",
     "description": "Options page: always paste the text (the clipboard is restored afterwards)"
   },
+  "optionsNativeSendKey": {
+    "message": "送信ボタンで押すキー",
+    "description": "Desktop settings: label of the key the floating mic's send button presses"
+  },
+  "optionsNativeSendKeyEnter": {
+    "message": "Enter",
+    "description": "Desktop settings: the send button presses Enter"
+  },
+  "optionsNativeSendKeyCtrlEnter": {
+    "message": "Ctrl+Enter（macOS は ⌘+Enter）",
+    "description": "Desktop settings: the send button presses Ctrl+Enter (Command+Enter on macOS)"
+  },
+  "optionsNativeSendKeyHint": {
+    "message": "マイクの右下のボタン。Enter で改行になるアプリでは Ctrl+Enter にしてください。",
+    "description": "Desktop settings: hint under the send key choice"
+  },
   "optionsNativeBeside": {
     "message": "ほかのアプリの入力欄の横にマイクを出す（実験）",
     "description": "Options page: experimental mic beside text fields of other apps"
@@ -505,5 +553,69 @@
   "settings_modeLead": {
     "message": "変えるまでそのままです。トレイのメニューからも切り替えられます。",
     "description": "Desktop app settings page: under the input mode title. The desktop app keeps the mode until changed; its tray menu switches it too"
+  },
+  "settings_templatesTitle": {
+    "message": "テンプレート",
+    "description": "Desktop app settings page: title of the templates section"
+  },
+  "settings_templatesLead": {
+    "message": "マイクの左上のボタンから、1 回のクリックで入れられる文章です。ほかのアプリで文字を選んだまま、マイクを右クリックして「選択中の文字をテンプレートに登録」でも足せます。",
+    "description": "Desktop app settings page: under the templates title. The floating mic's top-left button puts one in; selected text can be added from the mic's right-click menu"
+  },
+  "settings_templatesSendImmediate": {
+    "message": "選んだら、そのまま送信する（送信ボタンと同じキーを押します）",
+    "description": "Desktop app settings page: checkbox to press the send key right after a template went in"
+  },
+  "settings_templatesEmpty": {
+    "message": "まだありません。下の欄に書いて「追加」を押してください。",
+    "description": "Desktop app settings page: no templates yet"
+  },
+  "settings_templatesPlaceholder": {
+    "message": "よく使う文章（改行もそのまま入ります）",
+    "description": "Desktop app settings page: placeholder of the new template text area"
+  },
+  "settings_templatesAdd": {
+    "message": "追加",
+    "description": "Desktop app settings page: button that adds the typed template"
+  },
+  "settings_templatesEdit": {
+    "message": "編集",
+    "description": "Desktop app settings page: button that edits one template"
+  },
+  "settings_templatesDone": {
+    "message": "保存",
+    "description": "Desktop app settings page: button that saves the edited template"
+  },
+  "settings_templatesCancel": {
+    "message": "やめる",
+    "description": "Desktop app settings page: button that stops editing without saving"
+  },
+  "settings_templatesUp": {
+    "message": "上へ",
+    "description": "Desktop app settings page: button that moves a template up"
+  },
+  "settings_templatesDown": {
+    "message": "下へ",
+    "description": "Desktop app settings page: button that moves a template down"
+  },
+  "settings_templatesDelete": {
+    "message": "削除",
+    "description": "Desktop app settings page: button that deletes a template"
+  },
+  "settings_templatesDeleted": {
+    "message": "削除しました。",
+    "description": "Desktop app settings page: status after a template was deleted"
+  },
+  "settings_templatesDuplicate": {
+    "message": "同じテンプレートがすでにあります。",
+    "description": "Desktop app settings page: the typed template is already in the list"
+  },
+  "settings_templatesFull": {
+    "message": "テンプレートは 100 件までです。いらないものを削除してから追加してください。",
+    "description": "Desktop app settings page: there are already 100 templates"
+  },
+  "settings_templatesCount": {
+    "message": "{count} / {max} 件",
+    "description": "Desktop app settings page: how many templates are stored. {count} and {max} are numbers"
   }
 }

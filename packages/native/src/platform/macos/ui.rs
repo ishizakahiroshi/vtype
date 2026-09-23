@@ -21,8 +21,9 @@ use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, 
 use super::overlay::{screen_frames, BesideMic, Overlay};
 use crate::hotkey::HotkeySpec;
 use crate::menu::tooltip;
-use crate::platform::desktop::{build_menu, to_global_hotkey, tray_icons, update_checks, Timing};
-use crate::platform::{IconState, MenuAction, PlatformError, PlatformEvent, TrayState, LIVE_LINES};
+use crate::platform::desktop::{build_menu, build_template_menu, to_global_hotkey, tray_icons, update_checks, Timing};
+use crate::platform::{IconState, MenuAction, PlatformError, PlatformEvent, TrayState, VoiceCue, LIVE_LINES};
+use crate::ripple::FRAME;
 
 /// How long the green check stays after text went in.
 const DONE: Duration = Duration::from_millis(800);
@@ -45,6 +46,8 @@ pub struct Shared {
     bubble_generation: AtomicU64,
     /// How fast the beside mic appears after the OS reports a field (child plan C8).
     beside_timing: Mutex<Timing>,
+    /// Whether the ripple's ticker thread runs. Set and cleared on the main thread only.
+    ripple_running: AtomicBool,
 }
 
 impl Shared {
@@ -97,6 +100,8 @@ pub struct Ui {
     hide_on_fullscreen: bool,
     hidden_for_fullscreen: bool,
     recording: bool,
+    /// The templates menu's entry ids, dropped from the action map when it is rebuilt.
+    template_ids: Vec<String>,
 }
 
 thread_local! {
@@ -126,6 +131,7 @@ fn drain(shared: &Shared) {
 impl Ui {
     pub fn set_tray(&mut self, state: TrayState) {
         update_checks(&self.checks, &state);
+        self.overlay.set_mode(state.mode);
         self.hide_on_fullscreen = state.hide_on_fullscreen;
         if state.recording != self.recording {
             self.recording = state.recording;
@@ -187,6 +193,37 @@ impl Ui {
     pub fn hide_icon(&mut self) {
         self.icon_wanted = false;
         self.overlay.hide();
+    }
+
+    /// Builds the templates menu and opens it at the mic from the main queue (it is modal).
+    pub fn show_templates(&mut self, templates: Vec<String>) {
+        let (menu, ids) = build_template_menu(&templates, &self.shared.menu_actions, &self.template_ids);
+        self.template_ids = ids;
+        self.overlay.set_templates_menu(menu);
+        DispatchQueue::main().exec_async(super::overlay::show_templates_menu);
+    }
+
+    /// Starts the ripple's ticker if it is not running: a thread that hands each frame to the main
+    /// thread, and ends when the ripple has nothing left to draw.
+    pub fn voice_cue(&mut self, cue: VoiceCue) {
+        if !self.overlay.voice_cue(cue) || self.shared.ripple_running.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let shared = self.shared.clone();
+        thread::spawn(move || loop {
+            thread::sleep(FRAME);
+            let frame = shared.clone();
+            let going = shared.call(move |ui| {
+                let active = ui.overlay.ripple_frame();
+                if !active {
+                    frame.ripple_running.store(false, Ordering::Release);
+                }
+                active
+            });
+            if going != Some(true) {
+                break;
+            }
+        });
     }
 
     pub fn show_bubble(&mut self, text: &str) {
@@ -324,6 +361,7 @@ pub fn run(shared: Arc<Shared>, events: Sender<PlatformEvent>) -> Result<(), Pla
             hide_on_fullscreen: true,
             hidden_for_fullscreen: false,
             recording: false,
+            template_ids: Vec::new(),
         });
     });
 

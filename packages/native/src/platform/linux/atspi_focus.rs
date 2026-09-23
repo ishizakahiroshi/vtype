@@ -22,6 +22,8 @@ use crate::platform::FieldInfo;
 struct Focus {
     status: String,
     is_password: Option<bool>,
+    /// Whether it is an editable text field (what the clear button may empty).
+    is_text_field: Option<bool>,
     /// Which element that answer is about (bus name and path).
     item: Option<(String, String)>,
 }
@@ -50,6 +52,7 @@ impl Tracker {
             let mut f = focus.lock().unwrap_or_else(|e| e.into_inner());
             f.status = status;
             f.is_password = None;
+            f.is_text_field = None;
         });
         if let Err(e) = spawned {
             set_status(&self.focus, &format!("unavailable: {e}"));
@@ -58,7 +61,7 @@ impl Tracker {
 
     pub fn field(&self) -> FieldInfo {
         let f = self.focus.lock().unwrap_or_else(|e| e.into_inner());
-        FieldInfo { is_password: f.is_password, caret_rect: None, app_id: None }
+        FieldInfo { is_password: f.is_password, caret_rect: None, app_id: None, is_text_field: f.is_text_field }
     }
 
     pub fn status(&self) -> String {
@@ -96,9 +99,10 @@ async fn listen(focus: Arc<Mutex<Focus>>) -> Result<(), atspi::AtspiError> {
         }
         let item = (changed.item.name_as_str().unwrap_or_default().to_string(), changed.item.path_as_str().to_string());
         if changed.enabled {
-            let is_password = role_of(&conn, &changed).await.map(|role| role == Role::PasswordText);
+            let role = role_of(&conn, &changed).await;
             let mut f = focus.lock().unwrap_or_else(|e| e.into_inner());
-            f.is_password = is_password;
+            f.is_password = role.as_ref().map(|r| *r == Role::PasswordText);
+            f.is_text_field = role.as_ref().map(|r| matches!(r, Role::Text | Role::Entry | Role::PasswordText));
             f.item = Some(item);
         } else {
             // Focus left an element. The next one may already have said it has it (the order
@@ -106,6 +110,7 @@ async fn listen(focus: Arc<Mutex<Focus>>) -> Result<(), atspi::AtspiError> {
             let mut f = focus.lock().unwrap_or_else(|e| e.into_inner());
             if f.item.as_ref() == Some(&item) {
                 f.is_password = None;
+                f.is_text_field = None;
                 f.item = None;
             }
         }

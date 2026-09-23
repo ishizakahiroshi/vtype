@@ -69,6 +69,48 @@ pub struct NativeConfig {
     /// Words the recognition gets wrong, and what to write instead.
     #[serde(deserialize_with = "lenient_replacements")]
     pub replacements: Vec<ReplacementRule>,
+    /// What the floating mic's send button presses.
+    pub send_key: SendKey,
+    /// Texts the user saved to put in with one click (the floating mic's top-left button).
+    #[serde(deserialize_with = "lenient_templates")]
+    pub templates: Vec<String>,
+    /// Press the send key right after a template went in.
+    pub template_send_immediate: bool,
+}
+
+/// At most this many templates, as the many-ai-cli dashboard keeps.
+pub const MAX_TEMPLATES: usize = 100;
+/// Characters per template.
+pub const MAX_TEMPLATE_CHARS: usize = 8000;
+
+/// Trimmed, non-empty, cut to `MAX_TEMPLATE_CHARS`, no duplicates, at most `MAX_TEMPLATES`.
+pub fn normalize_templates(items: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for item in items {
+        let text: String = item.trim().chars().take(MAX_TEMPLATE_CHARS).collect();
+        let text = text.trim_end().to_string();
+        if !text.is_empty() && !out.contains(&text) && out.len() < MAX_TEMPLATES {
+            out.push(text);
+        }
+    }
+    out
+}
+
+/// A broken list (or broken entries) must not make the whole file unreadable.
+fn lenient_templates<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    let value = Value::deserialize(d)?;
+    let items = value.as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect::<Vec<_>>());
+    Ok(normalize_templates(items.unwrap_or_default()))
+}
+
+/// The floating mic's send button: Enter, or Ctrl+Enter (⌘+Enter on macOS) for apps where Enter
+/// starts a new line.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SendKey {
+    #[default]
+    Enter,
+    CtrlEnter,
 }
 
 fn is_false(v: &bool) -> bool {
@@ -86,6 +128,9 @@ impl Default for NativeConfig {
             consented: false,
             input_mode: InputMode::Normal,
             replacements: Vec::new(),
+            send_key: SendKey::Enter,
+            templates: Vec::new(),
+            template_send_immediate: false,
         }
     }
 }
@@ -223,6 +268,28 @@ mod tests {
         assert!(cfg.extra_extension_ids.is_empty());
         assert!(!cfg.consented);
         assert_eq!(cfg.effective_hotkey(), default_hotkey());
+        assert_eq!(cfg.send_key, SendKey::Enter);
+        assert!(cfg.templates.is_empty());
+        assert!(!cfg.template_send_immediate);
+    }
+
+    #[test]
+    fn templates_are_tidied_and_a_broken_list_is_dropped_not_fatal() {
+        let many = (0..150).map(|i| format!("t{i}"));
+        assert_eq!(normalize_templates(many).len(), MAX_TEMPLATES);
+        let long = "あ".repeat(MAX_TEMPLATE_CHARS + 10);
+        assert_eq!(normalize_templates([long])[0].chars().count(), MAX_TEMPLATE_CHARS);
+        assert_eq!(
+            normalize_templates(["  hi \n".into(), "".into(), "hi".into(), "line1\nline2".into()]),
+            vec!["hi".to_string(), "line1\nline2".to_string()]
+        );
+        let cfg: NativeConfig =
+            serde_json::from_str(r#"{"templates": ["a", 3, null, " a ", "b"], "templateSendImmediate": true}"#)
+                .unwrap();
+        assert_eq!(cfg.templates, vec!["a".to_string(), "b".to_string()]);
+        assert!(cfg.template_send_immediate);
+        let broken: NativeConfig = serde_json::from_str(r#"{"templates": "oops"}"#).unwrap();
+        assert!(broken.templates.is_empty());
     }
 
     #[test]

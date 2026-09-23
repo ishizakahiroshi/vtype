@@ -12,15 +12,18 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::mpsc::Sender;
+use std::time::Instant;
 
 use gtk::prelude::*;
 use gtk::{cairo, gdk, glib};
 use tiny_skia::Pixmap;
 use tray_icon::menu::{ContextMenu, Menu};
 
-use crate::icon_draw::{draw_icon, draw_rounded_panel, to_premultiplied_bgra};
-use crate::overlay_logic::{resolve_position, tail, Gesture, Press, ICON_SIZE};
-use crate::platform::{IconState, PlatformEvent, Rect};
+use crate::icon_draw::{draw_floating, draw_rounded_panel, to_premultiplied_bgra};
+use crate::overlay_logic::{button_at, button_shown, resolve_position, tail, Gesture, MicButton, Press, ICON_SIZE};
+use crate::platform::{IconState, PlatformEvent, Rect, VoiceCue};
+use crate::protocol::InputMode;
+use crate::ripple::{Ripple, FRAME};
 
 const BUBBLE_WIDTH: i32 = 320;
 const BUBBLE_PADDING: i32 = 10;
@@ -84,15 +87,35 @@ struct IconShared {
     events: Sender<PlatformEvent>,
     window: gtk::Window,
     menu: Menu,
+    /// The templates menu, rebuilt by the UI each time it opens.
+    templates_menu: RefCell<Option<Menu>>,
     look: Cell<IconState>,
+    /// The input mode, shown as a badge.
+    mode: Cell<InputMode>,
+    ripple: RefCell<Ripple>,
+    /// Whether the ripple's timer runs, and when it last ticked.
+    animating: Cell<bool>,
+    last_frame: Cell<Instant>,
     hover: Cell<bool>,
     press: Cell<Option<Press>>,
     press_origin: Cell<(i32, i32)>,
+    /// The corner button the press started on, if any.
+    press_button: Cell<Option<MicButton>>,
     pos: Cell<(i32, i32)>,
 }
 
 thread_local! {
     static ICON: RefCell<Option<Rc<IconShared>>> = const { RefCell::new(None) };
+}
+
+/// Opens the templates menu at the mic. Called from GTK's loop, not from a UI job.
+pub fn show_templates_menu() {
+    with_icon(|s| {
+        let menu = s.templates_menu.borrow().clone();
+        if let Some(menu) = menu {
+            menu.show_context_menu_for_gtk_window(&s.window, None);
+        }
+    });
 }
 
 fn with_icon(f: impl FnOnce(&IconShared)) {
@@ -106,7 +129,8 @@ impl IconShared {
     fn draw(&self, cr: &cairo::Context) {
         let scale = self.window.scale_factor().max(1) as f64;
         let px = (ICON_SIZE as f64 * scale).round() as u32;
-        paint(cr, &draw_icon(px, self.look.get(), self.hover.get()), scale);
+        let rings = self.ripple.borrow().rings();
+        paint(cr, &draw_floating(px, self.look.get(), self.hover.get(), self.mode.get(), &rings), scale);
     }
 
     fn place(&self) {
@@ -117,6 +141,15 @@ impl IconShared {
     fn press(&self, at: (i32, i32)) {
         self.press.set(Some(Press::new(at)));
         self.press_origin.set(self.pos.get());
+        self.press_button.set(self.button_under(at));
+    }
+
+    /// The corner button under the root point `at`, among those on screen now.
+    fn button_under(&self, at: (i32, i32)) -> Option<MicButton> {
+        let (x, y) = self.pos.get();
+        let busy_or_hovered = self.hover.get() || self.look.get() != IconState::Idle;
+        let normal = self.mode.get() == InputMode::Normal;
+        button_at((at.0 - x) as f32, (at.1 - y) as f32, ICON_SIZE as f32, |b| button_shown(b, busy_or_hovered, normal))
     }
 
     fn drag(&self, now: (i32, i32)) {
@@ -134,7 +167,10 @@ impl IconShared {
     fn release(&self, at: (i32, i32)) {
         if let Some(press) = self.press.take() {
             let event = match press.release(at) {
-                Gesture::Click => PlatformEvent::ToggleRequested,
+                Gesture::Click => match self.press_button.take() {
+                    Some(button) => PlatformEvent::MicButton(button),
+                    None => PlatformEvent::ToggleRequested,
+                },
                 Gesture::Drag => {
                     let (x, y) = self.pos.get();
                     PlatformEvent::IconMoved { x, y }
@@ -149,6 +185,17 @@ impl IconShared {
             self.hover.set(hover);
             self.window.queue_draw();
         }
+    }
+
+    /// One step of the ripple; false (and the timer stops) once nothing is left to draw.
+    fn frame(&self) -> bool {
+        let now = Instant::now();
+        let dt = now.duration_since(self.last_frame.replace(now)).as_secs_f32();
+        self.ripple.borrow_mut().tick(dt);
+        self.window.queue_draw();
+        let active = self.ripple.borrow().active();
+        self.animating.set(active);
+        active
     }
 }
 
@@ -228,10 +275,16 @@ impl Overlay {
             events,
             window,
             menu,
+            templates_menu: RefCell::new(None),
             look: Cell::new(IconState::Idle),
+            mode: Cell::new(InputMode::Normal),
+            ripple: RefCell::new(Ripple::default()),
+            animating: Cell::new(false),
+            last_frame: Cell::new(Instant::now()),
             hover: Cell::new(false),
             press: Cell::new(None),
             press_origin: Cell::new((0, 0)),
+            press_button: Cell::new(None),
             pos: Cell::new((0, 0)),
         });
         ICON.with(|slot| *slot.borrow_mut() = Some(icon.clone()));
@@ -276,6 +329,7 @@ impl Overlay {
             self.icon.place();
         }
         self.icon.look.set(look);
+        self.icon.ripple.borrow_mut().set_recording(look == IconState::Recording);
         self.icon.window.queue_draw();
         if !self.shown {
             self.icon.window.show_all();
@@ -285,6 +339,7 @@ impl Overlay {
 
     pub fn set_look(&mut self, look: IconState) {
         self.icon.look.set(look);
+        self.icon.ripple.borrow_mut().set_recording(look == IconState::Recording);
         if self.shown {
             self.icon.window.queue_draw();
         }
@@ -292,6 +347,36 @@ impl Overlay {
 
     pub fn look(&self) -> IconState {
         self.icon.look.get()
+    }
+
+    pub fn set_templates_menu(&mut self, menu: Menu) {
+        *self.icon.templates_menu.borrow_mut() = Some(menu);
+    }
+
+    pub fn set_mode(&mut self, mode: InputMode) {
+        if self.icon.mode.replace(mode) != mode && self.shown {
+            self.icon.window.queue_draw();
+        }
+    }
+
+    /// The ripple follows what the recognizer heard (only while the mic is on screen).
+    pub fn voice_cue(&mut self, cue: VoiceCue) {
+        if !self.shown {
+            return;
+        }
+        self.icon.ripple.borrow_mut().cue(cue);
+        if self.icon.ripple.borrow().active() && !self.icon.animating.replace(true) {
+            self.icon.last_frame.set(Instant::now());
+            glib::timeout_add_local(FRAME, || {
+                let mut going = false;
+                with_icon(|s| going = s.frame());
+                if going {
+                    glib::ControlFlow::Continue
+                } else {
+                    glib::ControlFlow::Break
+                }
+            });
+        }
     }
 
     pub fn hide(&mut self) {

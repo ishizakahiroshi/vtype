@@ -22,6 +22,7 @@ mod tests {
         assert_eq!(ty, "application/octet-stream");
         assert!(!dict.is_empty());
         assert!(asset("dict/LICENSE-kuromoji.txt").is_some());
+        assert_eq!(asset("icon.png").unwrap().0, "image/png");
         assert_eq!(SPEECH_ASSETS.iter().filter(|(p, _, _)| p.ends_with(".dat.gz")).count(), 12);
     }
 

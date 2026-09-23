@@ -158,6 +158,8 @@ pub enum FromExtension {
         consented: bool,
         mic_granted: bool,
     },
+    /// The user clicked the hidden speech window's taskbar button: they want vtype's settings.
+    OpenSettings,
 }
 
 /// A recognition session the desktop app started. `interim` is shown, only `final` is typed.
@@ -170,6 +172,11 @@ pub enum SessionEvent {
     },
     Final {
         text: String,
+    },
+    /// The recognizer heard sound or speech start or end (`soundstart`, `speechstart`,
+    /// `speechend`, …): drives the ripple around the floating mic.
+    Activity {
+        activity: String,
     },
     Ended {
         reason: String,

@@ -10,6 +10,7 @@ use std::ffi::c_void;
 use std::ptr::{null, null_mut};
 use std::rc::Rc;
 use std::sync::mpsc::Sender;
+use std::time::Instant;
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
@@ -25,16 +26,19 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     ReleaseCapture, SetCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, GetCursorPos, LoadCursorW, PostMessageW, RegisterClassExW, SetCursor,
-    SetWindowPos, ShowWindow, UpdateLayeredWindow, HWND_TOPMOST, IDC_HAND, MA_NOACTIVATE, SWP_NOACTIVATE, SWP_NOSIZE,
-    SW_HIDE, SW_SHOWNOACTIVATE, ULW_ALPHA, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_RBUTTONUP,
-    WM_SETCURSOR, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, GetCursorPos, KillTimer, LoadCursorW, PostMessageW, RegisterClassExW, SetCursor,
+    SetTimer, SetWindowPos, ShowWindow, UpdateLayeredWindow, HWND_TOPMOST, IDC_HAND, MA_NOACTIVATE, SWP_NOACTIVATE,
+    SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE, ULW_ALPHA, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE,
+    WM_RBUTTONUP, WM_SETCURSOR, WM_TIMER, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_POPUP,
 };
 
 use crate::beside_field::{keep_on_screen, BESIDE_SIZE};
-use crate::icon_draw::{draw_icon, draw_rounded_panel, to_premultiplied_bgra};
-use crate::overlay_logic::{resolve_position, tail, Gesture, Press, ICON_SIZE};
-use crate::platform::{IconState, PlatformEvent, Rect};
+use crate::icon_draw::{draw_floating, draw_icon, draw_rounded_panel, to_premultiplied_bgra};
+use crate::overlay_logic::{button_at, button_shown, resolve_position, tail, Gesture, MicButton, Press, ICON_SIZE};
+use crate::platform::{IconState, PlatformEvent, Rect, VoiceCue};
+use crate::protocol::InputMode;
+use crate::ripple::{Ripple, FRAME};
 
 pub const ICON_CLASS: &str = "vtypeOverlay";
 /// (windows-sys keeps it with the common controls.)
@@ -53,12 +57,23 @@ struct IconShared {
     msg_hwnd: HWND,
     hwnd: Cell<HWND>,
     look: Cell<IconState>,
+    /// The input mode, shown as a badge.
+    mode: Cell<InputMode>,
+    ripple: RefCell<Ripple>,
+    /// Whether the ripple's timer runs, and when it last ticked.
+    animating: Cell<bool>,
+    last_frame: Cell<Instant>,
     hover: Cell<bool>,
     press: Cell<Option<Press>>,
     press_origin: Cell<(i32, i32)>,
+    /// The corner button the press started on, if any.
+    press_button: Cell<Option<MicButton>>,
     pos: Cell<(i32, i32)>,
     size: Cell<i32>,
 }
+
+/// The ripple's timer, on the mic's own window.
+const TIMER_RIPPLE: usize = 1;
 
 thread_local! {
     static ICON: RefCell<Option<Rc<IconShared>>> = const { RefCell::new(None) };
@@ -155,9 +170,45 @@ impl IconShared {
     fn render(&self) {
         let hwnd = self.hwnd.get();
         let size = self.size.get();
-        let pm = draw_icon(size as u32, self.look.get(), self.hover.get());
+        let rings = self.ripple.borrow().rings();
+        let pm = draw_floating(size as u32, self.look.get(), self.hover.get(), self.mode.get(), &rings);
         let (x, y) = self.pos.get();
         update_layered(hwnd, x, y, size, size, &to_premultiplied_bgra(&pm), |_, _| {});
+    }
+
+    /// The corner button under the screen point `at`, among those on screen now.
+    fn button_under(&self, at: (i32, i32)) -> Option<MicButton> {
+        let (x, y) = self.pos.get();
+        let busy_or_hovered = self.hover.get() || self.look.get() != IconState::Idle;
+        let normal = self.mode.get() == InputMode::Normal;
+        button_at((at.0 - x) as f32, (at.1 - y) as f32, self.size.get() as f32, |b| {
+            button_shown(b, busy_or_hovered, normal)
+        })
+    }
+
+    fn set_look(&self, look: IconState) {
+        self.look.set(look);
+        self.ripple.borrow_mut().set_recording(look == IconState::Recording);
+    }
+
+    fn cue(&self, cue: VoiceCue) {
+        self.ripple.borrow_mut().cue(cue);
+        if self.ripple.borrow().active() && !self.animating.replace(true) {
+            self.last_frame.set(Instant::now());
+            unsafe { SetTimer(self.hwnd.get(), TIMER_RIPPLE, FRAME.as_millis() as u32, None) };
+        }
+    }
+
+    /// One step of the ripple; the timer stops once nothing is left to draw.
+    fn frame(&self) {
+        let now = Instant::now();
+        let dt = now.duration_since(self.last_frame.replace(now)).as_secs_f32();
+        self.ripple.borrow_mut().tick(dt);
+        self.render();
+        if !self.ripple.borrow().active() {
+            unsafe { KillTimer(self.hwnd.get(), TIMER_RIPPLE) };
+            self.animating.set(false);
+        }
     }
 }
 
@@ -174,8 +225,10 @@ unsafe extern "system" fn icon_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
         }
         WM_LBUTTONDOWN => {
             SetCapture(hwnd);
-            s.press.set(Some(Press::new(cursor())));
+            let at = cursor();
+            s.press.set(Some(Press::new(at)));
             s.press_origin.set(s.pos.get());
+            s.press_button.set(s.button_under(at));
             0
         }
         WM_MOUSEMOVE => {
@@ -207,7 +260,10 @@ unsafe extern "system" fn icon_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
             ReleaseCapture();
             if let Some(press) = s.press.take() {
                 let event = match press.release(cursor()) {
-                    Gesture::Click => PlatformEvent::ToggleRequested,
+                    Gesture::Click => match s.press_button.take() {
+                        Some(button) => PlatformEvent::MicButton(button),
+                        None => PlatformEvent::ToggleRequested,
+                    },
                     Gesture::Drag => {
                         let (x, y) = s.pos.get();
                         PlatformEvent::IconMoved { x, y }
@@ -225,6 +281,10 @@ unsafe extern "system" fn icon_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
         WM_RBUTTONUP => {
             // The menu belongs to the UI state, which may be borrowed right now.
             PostMessageW(s.msg_hwnd, super::ui::WM_APP_MENU, 0, 0);
+            0
+        }
+        WM_TIMER if wparam == TIMER_RIPPLE => {
+            s.frame();
             0
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
@@ -291,9 +351,14 @@ impl Overlay {
             msg_hwnd,
             hwnd: Cell::new(hwnd),
             look: Cell::new(IconState::Idle),
+            mode: Cell::new(InputMode::Normal),
+            ripple: RefCell::new(Ripple::default()),
+            animating: Cell::new(false),
+            last_frame: Cell::new(Instant::now()),
             hover: Cell::new(false),
             press: Cell::new(None),
             press_origin: Cell::new((0, 0)),
+            press_button: Cell::new(None),
             pos: Cell::new((0, 0)),
             size: Cell::new(ICON_SIZE),
         });
@@ -314,7 +379,7 @@ impl Overlay {
             let (areas, primary) = work_areas();
             self.icon.pos.set(resolve_position(saved, size, &areas, primary));
         }
-        self.icon.look.set(look);
+        self.icon.set_look(look);
         self.icon.render();
         if !self.shown {
             unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
@@ -323,14 +388,27 @@ impl Overlay {
     }
 
     pub fn set_look(&mut self, look: IconState) {
-        self.icon.look.set(look);
+        self.icon.set_look(look);
         if self.shown {
             self.icon.render();
         }
     }
 
+    /// The ripple follows what the recognizer heard (only while the mic is on screen).
+    pub fn voice_cue(&mut self, cue: VoiceCue) {
+        if self.shown {
+            self.icon.cue(cue);
+        }
+    }
+
     pub fn look(&self) -> IconState {
         self.icon.look.get()
+    }
+
+    pub fn set_mode(&mut self, mode: InputMode) {
+        if self.icon.mode.replace(mode) != mode && self.shown {
+            self.icon.render();
+        }
     }
 
     pub fn hide(&mut self) {

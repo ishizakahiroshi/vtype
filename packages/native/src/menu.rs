@@ -51,6 +51,7 @@ pub fn menu_items(state: &TrayState, with_record_item: bool) -> Vec<MenuItem> {
         mode(InputMode::En, t("native_trayModeEn")),
         mode(InputMode::Kana, t("native_trayModeKana")),
         MenuItem::Separator,
+        MenuItem::Action { action: MenuAction::AddSelectionAsTemplate, label: t("native_menuAddSelection") },
         MenuItem::Action { action: MenuAction::OpenSettings, label: t("native_trayOpenSettings") },
         MenuItem::Action { action: MenuAction::ReportBug, label: t("native_trayReportBug") },
         MenuItem::Action { action: MenuAction::CopyDiagnostics, label: t("native_trayCopyDiagnostics") },
@@ -60,9 +61,64 @@ pub fn menu_items(state: &TrayState, with_record_item: bool) -> Vec<MenuItem> {
     items
 }
 
+/// How much of a template its menu item shows.
+pub const TEMPLATE_LABEL_CHARS: usize = 30;
+
+/// A template as a menu item: its first line, cut to `TEMPLATE_LABEL_CHARS`, with "…" when
+/// something was left out. `&` is doubled, or the menu would read it as a keyboard shortcut.
+pub fn template_label(text: &str) -> String {
+    let first = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default();
+    let cut: String = first.chars().take(TEMPLATE_LABEL_CHARS).collect();
+    let more = first.chars().count() > TEMPLATE_LABEL_CHARS || text.trim().lines().count() > 1;
+    let label = if more { format!("{cut}…") } else { cut };
+    label.replace('&', "&&")
+}
+
+/// The floating mic's templates menu: the templates, then adding the selection and editing.
+pub fn template_menu(templates: &[String]) -> Vec<MenuItem> {
+    let mut items: Vec<MenuItem> = templates
+        .iter()
+        .enumerate()
+        .map(|(i, text)| MenuItem::Action { action: MenuAction::InsertTemplate(i), label: template_label(text) })
+        .collect();
+    if !items.is_empty() {
+        items.push(MenuItem::Separator);
+    }
+    items.push(MenuItem::Action { action: MenuAction::AddSelectionAsTemplate, label: t("native_menuAddSelection") });
+    items.push(MenuItem::Action { action: MenuAction::OpenSettings, label: t("native_menuEditTemplates") });
+    items
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_templates_menu_lists_them_then_adding_and_editing() {
+        let menu = template_menu(&["お世話になっております。".into(), "A & B\nsecond line".into()]);
+        let actions: Vec<_> = menu
+            .iter()
+            .filter_map(|i| match i {
+                MenuItem::Action { action, .. } => Some(*action),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            actions,
+            vec![
+                MenuAction::InsertTemplate(0),
+                MenuAction::InsertTemplate(1),
+                MenuAction::AddSelectionAsTemplate,
+                MenuAction::OpenSettings
+            ]
+        );
+        assert!(matches!(&menu[1], MenuItem::Action { label, .. } if label == "A && B…"));
+        // Nothing saved yet: only adding and editing.
+        assert_eq!(template_menu(&[]).len(), 2);
+        let long = "x".repeat(40);
+        assert_eq!(template_label(&long), format!("{}…", "x".repeat(TEMPLATE_LABEL_CHARS)));
+        assert_eq!(template_label("  short  "), "short");
+    }
 
     #[test]
     fn checks_the_current_mode_and_toggles() {

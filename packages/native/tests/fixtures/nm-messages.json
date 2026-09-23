@@ -16,7 +16,10 @@
         "besideField": { "enabled": false, "trigger": "focus" },
         "extraExtensionIds": [],
         "inputMode": "normal",
-        "replacements": []
+        "replacements": [],
+        "sendKey": "enter",
+        "templates": [],
+        "templateSendImmediate": false
       }
     },
     { "type": "open-options" }
@@ -28,6 +31,7 @@
     { "type": "session", "event": { "kind": "started" } },
     { "type": "session", "event": { "kind": "interim", "text": "こんに" } },
     { "type": "session", "event": { "kind": "final", "text": "こんにちは" } },
+    { "type": "session", "event": { "kind": "activity", "activity": "speechstart" } },
     { "type": "session", "event": { "kind": "ended", "reason": "user" } },
     { "type": "session", "event": { "kind": "ended", "reason": "error", "code": "not-allowed" } },
     {
@@ -39,13 +43,17 @@
         "besideField": { "enabled": true, "trigger": "hover" },
         "extraExtensionIds": ["abcdefghijklmnopabcdefghijklmnop"],
         "inputMode": "kana",
-        "replacements": [{ "from": "ブイタイプ", "to": "vtype" }]
+        "replacements": [{ "from": "ブイタイプ", "to": "vtype" }],
+        "sendKey": "ctrl-enter",
+        "templates": ["お世話になっております。", "よろしくお願いします。"],
+        "templateSendImmediate": true
       }
     },
     { "type": "get-native-config" },
     { "type": "error", "code": "offscreen-unavailable" },
     { "type": "consent" },
-    { "type": "page-state", "consented": true, "micGranted": false }
+    { "type": "page-state", "consented": true, "micGranted": false },
+    { "type": "open-settings" }
   ],
   "invalidToExtension": [
     { "type": "set-mode", "mode": "katakana" },
@@ -55,6 +63,7 @@
   "invalidFromExtension": [
     { "type": "state", "mode": "en" },
     { "type": "session", "event": { "kind": "final" } },
+    { "type": "session", "event": { "kind": "activity" } },
     { "type": "set-native-config" },
     { "type": "page-state", "consented": true }
   ]

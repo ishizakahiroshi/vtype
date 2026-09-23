@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>vtype-settings</title>
+<title>vtype settings</title>
+<link rel="icon" href="icon.png">
 <style>
   body { font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif; max-width: 560px; margin: 32px auto; padding: 0 16px; color: #0f172a; }
   h1 { font-size: 20px; }
@@ -21,7 +22,14 @@
   input[type="text"], select { font: inherit; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: inherit; }
   #repl-text { box-sizing: border-box; width: 100%; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: inherit; }
   .row-actions { display: flex; align-items: center; gap: 12px; margin: 8px 0 0; }
-  #repl-count { color: #475569; }
+  #repl-count, #tpl-count { color: #475569; }
+  #tpl-new, .tpl-edit { box-sizing: border-box; width: 100%; font: inherit; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: inherit; }
+  #tpl-list { padding-left: 1.4em; }
+  #tpl-list li { margin: 8px 0; }
+  .tpl-text { white-space: pre-wrap; word-break: break-word; }
+  .tpl-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  .tpl-actions button { padding: 2px 10px; font-size: 13px; }
+  .tpl-actions button.quiet { background: #e2e8f0; color: #0f172a; }
   #repl-bad { color: #dc2626; }
   #status { margin-top: 16px; font-weight: 600; min-height: 1.6em; }
   #status.ok { color: #16a34a; }
@@ -29,8 +37,9 @@
   @media (prefers-color-scheme: dark) {
     body { background: #0e0f12; color: #e2e8f0; }
     fieldset { border-color: #334155; }
-    .choice .hint, .lead-hint, .hint, #repl-count { color: #94a3b8; }
-    input[type="text"], select, #repl-text { background: #16181d; border-color: #334155; }
+    .choice .hint, .lead-hint, .hint, #repl-count, #tpl-count { color: #94a3b8; }
+    input[type="text"], select, #repl-text, #tpl-new, .tpl-edit { background: #16181d; border-color: #334155; }
+    .tpl-actions button.quiet { background: #334155; color: #e2e8f0; }
     #repl-bad { color: #f87171; }
   }
 </style>
@@ -58,6 +67,13 @@
 <textarea id="repl-text" rows="6" spellcheck="false" autocomplete="off"></textarea>
 <div class="row-actions"><button id="repl-save" type="button"></button> <span id="repl-count"></span></div>
 <p id="repl-bad" hidden></p>
+<h2 id="tpl-title"></h2>
+<p id="tpl-lead"></p>
+<div class="field"><label for="tpl-send"><input type="checkbox" id="tpl-send"> <span id="tpl-send-label"></span></label></div>
+<ol id="tpl-list"></ol>
+<p class="hint" id="tpl-empty" hidden></p>
+<textarea id="tpl-new" rows="3" spellcheck="false" autocomplete="off"></textarea>
+<div class="row-actions"><button id="tpl-add" type="button"></button> <span id="tpl-count"></span></div>
 <form id="nc-form" style="margin-top: 28px">
   <fieldset>
   <legend id="nc-legend"></legend>
@@ -65,6 +81,7 @@
   <div class="field"><label for="nc-icon-visible"><input type="checkbox" id="nc-icon-visible"> <span id="nc-icon-visible-label"></span></label></div>
   <div class="field"><label for="nc-icon-fullscreen"><input type="checkbox" id="nc-icon-fullscreen"> <span id="nc-icon-fullscreen-label"></span></label></div>
   <div class="field"><label for="nc-inject" id="nc-inject-label"></label> <select id="nc-inject"><option value="auto" id="nc-inject-auto"></option><option value="type" id="nc-inject-type"></option><option value="paste" id="nc-inject-paste"></option></select></div>
+  <div class="field"><label for="nc-send-key" id="nc-send-key-label"></label> <select id="nc-send-key"><option value="enter" id="nc-send-enter"></option><option value="ctrl-enter" id="nc-send-ctrl-enter"></option></select><p class="hint" id="nc-send-key-hint"></p></div>
   <div class="field"><label for="nc-beside"><input type="checkbox" id="nc-beside"> <span id="nc-beside-label"></span></label><p class="hint" id="nc-beside-hint"></p></div>
   <div class="field"><label for="nc-beside-trigger" id="nc-beside-trigger-label"></label> <select id="nc-beside-trigger"><option value="focus" id="nc-trigger-focus"></option><option value="hover" id="nc-trigger-hover"></option></select></div>
   <button id="nc-save" type="submit"></button>

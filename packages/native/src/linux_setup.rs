@@ -180,6 +180,9 @@ pub const XK_RETURN: u32 = 0xff0d;
 pub const XK_TAB: u32 = 0xff09;
 pub const XK_CONTROL_L: u32 = 0xffe3;
 pub const XK_V: u32 = 0x0076;
+pub const XK_A: u32 = 0x0061;
+pub const XK_C: u32 = 0x0063;
+pub const XK_BACKSPACE: u32 = 0xff08;
 
 #[cfg(test)]
 mod tests {

@@ -22,7 +22,7 @@ use crate::beside_field::{FieldProbe, HoverChange, HoverTracker, Pointed, HOVER_
 use crate::config::BesideFieldTrigger;
 use crate::platform::{PlatformEvent, Rect};
 
-const TEXT_ROLES: [&str; 3] = ["AXTextField", "AXTextArea", "AXComboBox"];
+pub(super) const TEXT_ROLES: [&str; 3] = ["AXTextField", "AXTextArea", "AXComboBox"];
 /// How often the focus thread looks for a new front app (and lets the observer's callbacks run).
 const FRONT_APP_POLL: Duration = Duration::from_millis(250);
 

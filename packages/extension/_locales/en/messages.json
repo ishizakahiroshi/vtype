@@ -334,6 +334,38 @@
   "native_bubbleConsent": {
     "message": "Just this once: please agree and allow the microphone in the Chrome window that opened.",
     "description": "Desktop app: bubble while the first-run window (consent and microphone) is open"
+  },
+  "native_menuAddSelection": {
+    "message": "Save the selection as a template",
+    "description": "Desktop app menu: copy the text selected in the front app and keep it as a template"
+  },
+  "native_menuEditTemplates": {
+    "message": "Edit templates…",
+    "description": "Desktop app templates menu: opens the settings page to edit the templates"
+  },
+  "native_bubbleTemplateAdded": {
+    "message": "Saved as a template.",
+    "description": "Desktop app: the selected text was saved as a template"
+  },
+  "native_bubbleTemplateDuplicate": {
+    "message": "That template is already there.",
+    "description": "Desktop app: the selected text is already a template"
+  },
+  "native_bubbleTemplateFull": {
+    "message": "Up to 100 templates. Tidy them up on the settings page.",
+    "description": "Desktop app: there are already 100 templates"
+  },
+  "native_bubbleNoSelection": {
+    "message": "Nothing was selected. Select some text and try again.",
+    "description": "Desktop app: nothing was selected in the front app to save as a template"
+  },
+  "native_bubbleClearNotField": {
+    "message": "The cursor is not in a text field, so nothing was cleared.",
+    "description": "Desktop app: the clear button did nothing because the focus is not in a text field (or is in a password field)"
+  },
+  "native_bubbleKeysUnsupported": {
+    "message": "The buttons cannot press keys on this screen.",
+    "description": "Desktop app: the send / clear button cannot press keys here (e.g. Wayland)"
   },  "native_bubbleConnecting": {
     "message": "Connecting to vtype in Chrome…",
     "description": "Desktop app: shown above the mic icon while it waits (up to 10 seconds) for the extension in Chrome"
@@ -474,6 +506,22 @@
     "message": "Always paste it (the clipboard is put back)",
     "description": "Options page: always paste the text (the clipboard is restored afterwards)"
   },
+  "optionsNativeSendKey": {
+    "message": "Key the send button presses",
+    "description": "Desktop settings: label of the key the floating mic's send button presses"
+  },
+  "optionsNativeSendKeyEnter": {
+    "message": "Enter",
+    "description": "Desktop settings: the send button presses Enter"
+  },
+  "optionsNativeSendKeyCtrlEnter": {
+    "message": "Ctrl+Enter (⌘+Enter on macOS)",
+    "description": "Desktop settings: the send button presses Ctrl+Enter (Command+Enter on macOS)"
+  },
+  "optionsNativeSendKeyHint": {
+    "message": "The button at the mic's bottom right. For apps where Enter starts a new line, choose Ctrl+Enter.",
+    "description": "Desktop settings: hint under the send key choice"
+  },
   "optionsNativeBeside": {
     "message": "Mic beside text fields in other apps (experimental)",
     "description": "Options page: experimental mic beside text fields of other apps"
@@ -505,5 +553,69 @@
   "settings_modeLead": {
     "message": "It stays as chosen until you change it. The tray menu switches it too.",
     "description": "Desktop app settings page: under the input mode title. The desktop app keeps the mode until changed; its tray menu switches it too"
+  },
+  "settings_templatesTitle": {
+    "message": "Templates",
+    "description": "Desktop app settings page: title of the templates section"
+  },
+  "settings_templatesLead": {
+    "message": "Texts the button at the mic's top left puts in with one click. You can also select text in another app, right-click the mic and choose \"Save the selection as a template\".",
+    "description": "Desktop app settings page: under the templates title. The floating mic's top-left button puts one in; selected text can be added from the mic's right-click menu"
+  },
+  "settings_templatesSendImmediate": {
+    "message": "Send right after choosing one (presses the send button's key)",
+    "description": "Desktop app settings page: checkbox to press the send key right after a template went in"
+  },
+  "settings_templatesEmpty": {
+    "message": "None yet. Write one below and press Add.",
+    "description": "Desktop app settings page: no templates yet"
+  },
+  "settings_templatesPlaceholder": {
+    "message": "A text you use often (line breaks are kept)",
+    "description": "Desktop app settings page: placeholder of the new template text area"
+  },
+  "settings_templatesAdd": {
+    "message": "Add",
+    "description": "Desktop app settings page: button that adds the typed template"
+  },
+  "settings_templatesEdit": {
+    "message": "Edit",
+    "description": "Desktop app settings page: button that edits one template"
+  },
+  "settings_templatesDone": {
+    "message": "Save",
+    "description": "Desktop app settings page: button that saves the edited template"
+  },
+  "settings_templatesCancel": {
+    "message": "Cancel",
+    "description": "Desktop app settings page: button that stops editing without saving"
+  },
+  "settings_templatesUp": {
+    "message": "Up",
+    "description": "Desktop app settings page: button that moves a template up"
+  },
+  "settings_templatesDown": {
+    "message": "Down",
+    "description": "Desktop app settings page: button that moves a template down"
+  },
+  "settings_templatesDelete": {
+    "message": "Delete",
+    "description": "Desktop app settings page: button that deletes a template"
+  },
+  "settings_templatesDeleted": {
+    "message": "Deleted.",
+    "description": "Desktop app settings page: status after a template was deleted"
+  },
+  "settings_templatesDuplicate": {
+    "message": "That template is already there.",
+    "description": "Desktop app settings page: the typed template is already in the list"
+  },
+  "settings_templatesFull": {
+    "message": "Up to 100 templates. Delete one you no longer need first.",
+    "description": "Desktop app settings page: there are already 100 templates"
+  },
+  "settings_templatesCount": {
+    "message": "{count} / {max}",
+    "description": "Desktop app settings page: how many templates are stored. {count} and {max} are numbers"
   }
 }

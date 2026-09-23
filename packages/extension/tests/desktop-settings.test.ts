@@ -97,11 +97,66 @@ describe("the desktop settings page", () => {
     expect($("repl-count").textContent).toBe(translate("optionsReplCount", "en", { count: 2 }));
   });
 
+  it("adds, edits, moves and deletes templates, and saves the send-right-away switch", async () => {
+    const app = fakeApp({ ...CONFIG, templates: ["one", "two"], templateSendImmediate: false });
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "en" }).loaded;
+    const items = () => [...document.querySelectorAll("#tpl-list .tpl-text")].map((e) => e.textContent);
+    const buttons = (i: number) => [...document.querySelectorAll("#tpl-list li")][i]!.querySelectorAll("button");
+    const click = (i: number, label: string) =>
+      [...buttons(i)].find((b) => b.textContent === translate(label, "en"))!.click();
+    const last = () => app.calls.at(-1)!.body as { templates: string[]; templateSendImmediate: boolean };
+    expect(items()).toEqual(["one", "two"]);
+    expect($("tpl-empty").hidden).toBe(true);
+
+    // Add (trimmed, line breaks kept); a duplicate is refused without saving.
+    $<HTMLTextAreaElement>("tpl-new").value = "  three\nlines  ";
+    $("tpl-add").click();
+    await flush();
+    expect(last().templates).toEqual(["one", "two", "three\nlines"]);
+    expect($<HTMLTextAreaElement>("tpl-new").value).toBe("");
+    const saves = app.calls.length;
+    $<HTMLTextAreaElement>("tpl-new").value = "one";
+    $("tpl-add").click();
+    await flush();
+    expect(app.calls.length).toBe(saves);
+    expect($("status").textContent).toBe(translate("settings_templatesDuplicate", "en"));
+
+    // Move the last one up, edit the first, delete the second.
+    click(2, "settings_templatesUp");
+    await flush();
+    expect(last().templates).toEqual(["one", "three\nlines", "two"]);
+    click(0, "settings_templatesEdit");
+    document.querySelector<HTMLTextAreaElement>("#tpl-list .tpl-edit")!.value = "ONE";
+    click(0, "settings_templatesDone");
+    await flush();
+    expect(items()).toEqual(["ONE", "three\nlines", "two"]);
+    click(1, "settings_templatesDelete");
+    await flush();
+    expect(last().templates).toEqual(["ONE", "two"]);
+    expect($("tpl-count").textContent).toBe(translate("settings_templatesCount", "en", { count: 2, max: 100 }));
+
+    const send = $<HTMLInputElement>("tpl-send");
+    send.checked = true;
+    send.dispatchEvent(new Event("change"));
+    await flush();
+    expect(last().templateSendImmediate).toBe(true);
+  });
+
+  it("says so when there are no templates yet", async () => {
+    const app = fakeApp();
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "en" }).loaded;
+    expect($("tpl-empty").hidden).toBe(false);
+    expect($<HTMLInputElement>("tpl-send").checked).toBe(false);
+  });
+
   it("saves the desktop app's own settings from the form", async () => {
     const app = fakeApp();
     await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "en" }).loaded;
     $<HTMLInputElement>("nc-hotkey").value = " Ctrl+Alt+V ";
     $<HTMLSelectElement>("nc-inject").value = "paste";
+    // A config without sendKey (an older desktop app) shows Enter.
+    expect($<HTMLSelectElement>("nc-send-key").value).toBe("enter");
+    $<HTMLSelectElement>("nc-send-key").value = "ctrl-enter";
     $<HTMLInputElement>("nc-beside").checked = true;
     $("nc-form").dispatchEvent(new Event("submit", { cancelable: true }));
     await flush();
@@ -109,6 +164,7 @@ describe("the desktop settings page", () => {
       ...CONFIG,
       hotkey: "Ctrl+Alt+V",
       inject: "paste",
+      sendKey: "ctrl-enter",
       besideField: { enabled: true, trigger: "focus" },
     });
   });

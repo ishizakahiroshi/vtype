@@ -25,6 +25,12 @@ export interface NativeConfig {
   /** The desktop app's own input mode and replacement table (standalone plan C5). */
   readonly inputMode?: InputMode;
   readonly replacements?: readonly ReplacementRule[];
+  /** What the floating mic's send button presses (Ctrl+Enter is ⌘+Enter on macOS). */
+  readonly sendKey?: "enter" | "ctrl-enter";
+  /** Texts put in with one click from the floating mic's top-left button. */
+  readonly templates?: readonly string[];
+  /** Press the send key right after a template went in. */
+  readonly templateSendImmediate?: boolean;
 }
 
 export type NativeToExtension =
@@ -40,6 +46,8 @@ export type NativeSessionEvent =
   | { readonly kind: "started" }
   | { readonly kind: "interim"; readonly text: string }
   | { readonly kind: "final"; readonly text: string }
+  /** soundstart / speechstart / speechend …: drives the ripple around the desktop app's mic. */
+  | { readonly kind: "activity"; readonly activity: string }
   | { readonly kind: "ended"; readonly reason: string; readonly code?: string };
 
 export type ExtensionToNative =
@@ -53,12 +61,14 @@ export type ExtensionToNative =
   /** The user pressed "agree and start" on the speech page. */
   | { readonly type: "consent" }
   /** Where the speech page's first-run setup stands. */
-  | { readonly type: "page-state"; readonly consented: boolean; readonly micGranted: boolean };
+  | { readonly type: "page-state"; readonly consented: boolean; readonly micGranted: boolean }
+  /** The user clicked the hidden speech window's taskbar button: open the desktop app's settings. */
+  | { readonly type: "open-settings" };
 
 /**
- * A recognition session's event as the desktop app hears it: the text only, final or interim.
- * `activity` drives a web page's waveform and is not sent. Used by the extension's bridge and by
- * the desktop app's speech page.
+ * A recognition session's event as the desktop app hears it: the text, final or interim, and the
+ * recognizer's activity (which drives the ripple around the desktop app's mic). Used by the
+ * desktop app's speech page.
  */
 export function toNativeEvent(event: SessionEvent): NativeSessionEvent | null {
   switch (event.kind) {
@@ -66,6 +76,8 @@ export function toNativeEvent(event: SessionEvent): NativeSessionEvent | null {
       return { kind: "started" };
     case "result":
       return event.isFinal ? { kind: "final", text: event.transcript } : { kind: "interim", text: event.transcript };
+    case "activity":
+      return { kind: "activity", activity: event.activity };
     case "ended":
       return event.code === undefined
         ? { kind: "ended", reason: event.reason }
@@ -102,7 +114,10 @@ export function isNativeConfig(v: unknown): v is NativeConfig {
     Array.isArray(r.extraExtensionIds) &&
     r.extraExtensionIds.every((id) => typeof id === "string") &&
     (r.inputMode === undefined || isInputMode(r.inputMode)) &&
-    (r.replacements === undefined || Array.isArray(r.replacements))
+    (r.replacements === undefined || Array.isArray(r.replacements)) &&
+    (r.sendKey === undefined || r.sendKey === "enter" || r.sendKey === "ctrl-enter") &&
+    (r.templates === undefined || (Array.isArray(r.templates) && r.templates.every((s) => typeof s === "string"))) &&
+    (r.templateSendImmediate === undefined || typeof r.templateSendImmediate === "boolean")
   );
 }
 
@@ -132,6 +147,7 @@ function isNativeSessionEvent(e: unknown): e is NativeSessionEvent {
   if (r === null) return false;
   if (r.kind === "started") return true;
   if (r.kind === "interim" || r.kind === "final") return typeof r.text === "string";
+  if (r.kind === "activity") return typeof r.activity === "string";
   if (r.kind === "ended") return typeof r.reason === "string" && (r.code === undefined || typeof r.code === "string");
   return false;
 }
@@ -150,6 +166,7 @@ export function isExtensionToNative(m: unknown): m is ExtensionToNative {
       return isNativeConfig(r.config);
     case "get-native-config":
     case "consent":
+    case "open-settings":
       return true;
     case "page-state":
       return typeof r.consented === "boolean" && typeof r.micGranted === "boolean";

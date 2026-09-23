@@ -16,9 +16,9 @@ use x11rb::protocol::xtest::ConnectionExt as _;
 use x11rb::rust_connection::RustConnection;
 use x11rb::CURRENT_TIME;
 
-use crate::config::InjectMethod;
-use crate::linux_setup::{keysym_batches, keysym_for, XK_CONTROL_L, XK_RETURN, XK_TAB, XK_V};
-use crate::platform::{InjectOutcome, PlatformError};
+use crate::config::{InjectMethod, SendKey};
+use crate::linux_setup::{keysym_batches, keysym_for, XK_A, XK_BACKSPACE, XK_C, XK_CONTROL_L, XK_RETURN, XK_TAB, XK_V};
+use crate::platform::{EditKeys, InjectOutcome, PlatformError};
 
 /// How long an app gets to notice a changed keyboard mapping before the keys come.
 const MAPPING_SETTLE: Duration = Duration::from_millis(20);
@@ -181,6 +181,45 @@ pub fn paste_text(text: &str) -> Result<(), PlatformError> {
         None => tracing::info!("the clipboard held no text before; it keeps the pasted text"),
     }
     Ok(())
+}
+
+/// Ctrl+C, to copy the active window's selection.
+pub fn press_copy() -> Result<(), PlatformError> {
+    let kb = Keyboard::open()?;
+    let (Some(ctrl), Some(c)) = (kb.keycode_for(XK_CONTROL_L), kb.keycode_for(XK_C)) else {
+        return Err(err("no Control or C key on this keyboard"));
+    };
+    kb.key(ctrl, true)?;
+    kb.tap(c)?;
+    kb.key(ctrl, false)?;
+    kb.sync()
+}
+
+/// The floating mic's buttons: Ctrl+A then BackSpace, or the send key.
+pub fn press_keys(keys: EditKeys) -> Result<(), PlatformError> {
+    let kb = Keyboard::open()?;
+    let code = |keysym: Keysym| kb.keycode_for(keysym).ok_or_else(|| err("a key is missing on this keyboard"));
+    let chord = |ctrl: bool, keysym: Keysym| -> Result<(), PlatformError> {
+        let key = code(keysym)?;
+        let control = if ctrl { Some(code(XK_CONTROL_L)?) } else { None };
+        if let Some(c) = control {
+            kb.key(c, true)?;
+        }
+        kb.tap(key)?;
+        if let Some(c) = control {
+            kb.key(c, false)?;
+        }
+        Ok(())
+    };
+    match keys {
+        EditKeys::ClearField => {
+            chord(true, XK_A)?;
+            chord(false, XK_BACKSPACE)?;
+        }
+        EditKeys::Send(SendKey::Enter) => chord(false, XK_RETURN)?,
+        EditKeys::Send(SendKey::CtrlEnter) => chord(true, XK_RETURN)?,
+    }
+    kb.sync()
 }
 
 pub fn inject(text: &str, method: InjectMethod) -> Result<InjectOutcome, PlatformError> {

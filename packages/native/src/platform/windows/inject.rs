@@ -5,12 +5,12 @@ use std::thread;
 use std::time::Duration;
 
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, VIRTUAL_KEY, VK_CONTROL,
-    VK_RETURN, VK_TAB,
+    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, VIRTUAL_KEY, VK_BACK,
+    VK_CONTROL, VK_RETURN, VK_TAB,
 };
 
-use crate::config::InjectMethod;
-use crate::platform::{InjectOutcome, PlatformError};
+use crate::config::{InjectMethod, SendKey};
+use crate::platform::{EditKeys, InjectOutcome, PlatformError};
 
 /// How long the pasted text stays on the clipboard before the old content comes back.
 pub const PASTE_RESTORE_DELAY: Duration = Duration::from_millis(300);
@@ -113,6 +113,44 @@ pub fn paste_text(text: &str) -> Result<(), PlatformError> {
         Ok(())
     } else {
         Err(PlatformError::Failed("Ctrl+V was blocked".into()))
+    }
+}
+
+/// Presses `vk` with Ctrl held when `ctrl`.
+fn chord(vk: VIRTUAL_KEY, ctrl: bool) -> Vec<INPUT> {
+    let mut inputs = Vec::with_capacity(4);
+    if ctrl {
+        inputs.push(key_input(VK_CONTROL, 0, 0));
+    }
+    inputs.push(key_input(vk, 0, 0));
+    inputs.push(key_input(vk, 0, KEYEVENTF_KEYUP));
+    if ctrl {
+        inputs.push(key_input(VK_CONTROL, 0, KEYEVENTF_KEYUP));
+    }
+    inputs
+}
+
+/// Ctrl+C, to copy the foreground app's selection.
+pub fn press_copy() -> Result<(), PlatformError> {
+    let inputs = chord('C' as VIRTUAL_KEY, true);
+    if send(&inputs) == inputs.len() {
+        Ok(())
+    } else {
+        Err(PlatformError::Failed("Ctrl+C was blocked".into()))
+    }
+}
+
+/// The floating mic's buttons: Ctrl+A then Backspace, or the send key.
+pub fn press_keys(keys: EditKeys) -> Result<(), PlatformError> {
+    let inputs = match keys {
+        EditKeys::ClearField => [chord('A' as VIRTUAL_KEY, true), chord(VK_BACK, false)].concat(),
+        EditKeys::Send(SendKey::Enter) => chord(VK_RETURN, false),
+        EditKeys::Send(SendKey::CtrlEnter) => chord(VK_RETURN, true),
+    };
+    if send(&inputs) == inputs.len() {
+        Ok(())
+    } else {
+        Err(PlatformError::Failed("the keys were blocked".into()))
     }
 }
 

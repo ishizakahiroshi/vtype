@@ -13,7 +13,9 @@ use thiserror::Error;
 
 pub use crate::beside_field::FieldProbe;
 use crate::config::{BesideFieldConfig, InjectMethod};
+pub use crate::overlay_logic::MicButton;
 use crate::protocol::InputMode;
+pub use crate::ripple::VoiceCue;
 
 pub mod desktop;
 #[cfg(target_os = "linux")]
@@ -50,6 +52,8 @@ pub enum PlatformEvent {
         x: i32,
         y: i32,
     },
+    /// One of the small buttons around the floating mic was clicked.
+    MicButton(MicButton),
     /// The focused element changed, or (hover) the pointer settled on or left a field; for the
     /// mic beside the field. `at` is when the OS told us, to measure how fast the mic appears.
     /// (Linux has no beside mic, so nothing sends it there.)
@@ -67,6 +71,10 @@ pub enum MenuAction {
     ToggleIconVisible,
     ToggleHideOnFullscreen,
     SetMode(InputMode),
+    /// Put the template at this index (of the config's list) into the foreground app.
+    InsertTemplate(usize),
+    /// Copy what is selected in the foreground app and keep it as a template.
+    AddSelectionAsTemplate,
     OpenSettings,
     ReportBug,
     CopyDiagnostics,
@@ -126,6 +134,18 @@ pub struct FieldInfo {
     pub caret_rect: Option<Rect>,
     /// Executable name or bundle id of the foreground app.
     pub app_id: Option<String>,
+    /// `Some(true)` for an editable text field (what the clear button may empty); `None` when the
+    /// OS could not say.
+    pub is_text_field: Option<bool>,
+}
+
+/// Keys the floating mic's buttons press in the foreground app.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditKeys {
+    /// Select all, then Backspace: empties the focused field.
+    ClearField,
+    /// The send button.
+    Send(crate::config::SendKey),
 }
 
 pub trait Platform: Send + Sync {
@@ -135,9 +155,23 @@ pub trait Platform: Send + Sync {
     fn set_tray(&self, state: &TrayState);
     fn register_hotkey(&self, spec: &str) -> Result<(), PlatformError>;
     fn inject_text(&self, text: &str, method: InjectMethod) -> Result<InjectOutcome, PlatformError>;
+    /// Presses `keys` in the foreground app.
+    fn press_keys(&self, _keys: EditKeys) -> Result<(), PlatformError> {
+        Err(PlatformError::Failed("pressing keys is not implemented here".into()))
+    }
+    /// What is selected in the foreground app, through a copy (the clipboard is put back).
+    /// `None` when nothing was selected.
+    fn copy_selection(&self) -> Result<Option<String>, PlatformError> {
+        Err(PlatformError::Failed("copying is not implemented here".into()))
+    }
+    /// Opens the templates menu (`crate::menu::template_menu`) at the floating mic. The focus
+    /// goes back to the foreground app when it closes.
+    fn show_templates(&self, _templates: &[String]) {}
     fn focused_field(&self) -> FieldInfo;
     fn show_icon(&self, state: IconState, position: Option<(i32, i32)>);
     fn hide_icon(&self);
+    /// The recognizer heard something: the ripple around the floating mic follows it.
+    fn voice_cue(&self, _cue: VoiceCue) {}
     /// Recognition in progress above the floating mic; it goes away shortly after the last text.
     fn show_bubble(&self, text: &str);
     fn hide_bubble(&self);

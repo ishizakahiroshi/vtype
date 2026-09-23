@@ -195,6 +195,8 @@ await copyDictionary(distDesktop);
 // Its settings page (standalone plan C5), opened from the tray in the same Chrome.
 await bundle("src/desktop-settings/settings.ts", join(distDesktop, "settings.js"));
 await copyFile(join(here, "src/desktop-settings/settings.html"), join(distDesktop, "settings.html"));
+// Both pages' favicon, which Chrome also shows as their windows' taskbar icon.
+await copyFile(join(here, "../../assets/icons/icon-192.png"), join(distDesktop, "icon.png"));
 for (const page of ["speech", "settings"]) {
   const code = await readFile(join(distDesktop, `${page}.js`), "utf8");
   const moduleSyntax = code.match(/^\s*(import|export)\b.*$/m);

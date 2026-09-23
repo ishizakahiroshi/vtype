@@ -19,8 +19,8 @@ use super::overlay::Overlay;
 use crate::hotkey::HotkeySpec;
 use crate::linux_setup::Session;
 use crate::menu::tooltip;
-use crate::platform::desktop::{build_menu, to_global_hotkey, tray_icons, update_checks};
-use crate::platform::{IconState, MenuAction, PlatformError, PlatformEvent, TrayState, LIVE_LINES};
+use crate::platform::desktop::{build_menu, build_template_menu, to_global_hotkey, tray_icons, update_checks};
+use crate::platform::{IconState, MenuAction, PlatformError, PlatformEvent, TrayState, VoiceCue, LIVE_LINES};
 
 /// How long the green check stays after text went in.
 const DONE: Duration = Duration::from_millis(800);
@@ -75,6 +75,8 @@ pub struct Ui {
     hide_on_fullscreen: bool,
     hidden_for_fullscreen: bool,
     recording: bool,
+    /// The templates menu's entry ids, dropped from the action map when it is rebuilt.
+    template_ids: Vec<String>,
     /// Bumped by each check mark / bubble text, so an older timer knows it is stale.
     done_generation: u64,
     bubble_generation: u64,
@@ -111,6 +113,9 @@ fn drain(shared: &Shared) {
 impl Ui {
     pub fn set_tray(&mut self, state: TrayState) {
         update_checks(&self.checks, &state);
+        if let Some(overlay) = &mut self.overlay {
+            overlay.set_mode(state.mode);
+        }
         self.hide_on_fullscreen = state.hide_on_fullscreen;
         if state.recording != self.recording {
             self.recording = state.recording;
@@ -177,6 +182,21 @@ impl Ui {
         self.icon_wanted = false;
         if let Some(overlay) = &mut self.overlay {
             overlay.hide();
+        }
+    }
+
+    /// Builds the templates menu and opens it at the mic from GTK's loop (not inside this job).
+    pub fn show_templates(&mut self, templates: Vec<String>) {
+        let Some(overlay) = &mut self.overlay else { return };
+        let (menu, ids) = build_template_menu(&templates, &self.shared.menu_actions, &self.template_ids);
+        self.template_ids = ids;
+        overlay.set_templates_menu(menu);
+        glib::idle_add_local_once(super::overlay::show_templates_menu);
+    }
+
+    pub fn voice_cue(&mut self, cue: VoiceCue) {
+        if let Some(overlay) = &mut self.overlay {
+            overlay.voice_cue(cue);
         }
     }
 
@@ -283,6 +303,7 @@ pub fn run(shared: Arc<Shared>, events: Sender<PlatformEvent>, session: Session)
             hide_on_fullscreen: true,
             hidden_for_fullscreen: false,
             recording: false,
+            template_ids: Vec::new(),
             done_generation: 0,
             bubble_generation: 0,
         });

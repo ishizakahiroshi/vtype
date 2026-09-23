@@ -102,20 +102,47 @@ pub fn tray_icons() -> (Option<Icon>, Option<Icon>) {
 
 /// The tray menu, with each entry's id noted in `actions` so a menu event can be told apart.
 pub fn build_menu(actions: &Mutex<HashMap<String, MenuAction>>) -> (Menu, Vec<(MenuAction, CheckMenuItem)>) {
+    let (menu, checks, _) = build_items(tray_menu(&TrayState::default()), actions);
+    (menu, checks)
+}
+
+/// The floating mic's templates menu. `previous` are the ids of the last one, dropped from
+/// `actions` so that the map does not grow each time; the new ids are returned for next time.
+pub fn build_template_menu(
+    templates: &[String],
+    actions: &Mutex<HashMap<String, MenuAction>>,
+    previous: &[String],
+) -> (Menu, Vec<String>) {
+    {
+        let mut map = actions.lock().unwrap_or_else(|e| e.into_inner());
+        for id in previous {
+            map.remove(id);
+        }
+    }
+    let (menu, _, ids) = build_items(crate::menu::template_menu(templates), actions);
+    (menu, ids)
+}
+
+type Built = (Menu, Vec<(MenuAction, CheckMenuItem)>, Vec<String>);
+
+fn build_items(items: Vec<Item>, actions: &Mutex<HashMap<String, MenuAction>>) -> Built {
     let menu = Menu::new();
     let mut checks = Vec::new();
+    let mut ids = Vec::new();
     let mut actions = actions.lock().unwrap_or_else(|e| e.into_inner());
-    for item in tray_menu(&TrayState::default()) {
+    for item in items {
         match item {
             Item::Check { action, label, checked } | Item::Radio { action, label, checked } => {
                 let entry = CheckMenuItem::new(label, true, checked, None);
                 actions.insert(entry.id().0.clone(), action);
+                ids.push(entry.id().0.clone());
                 let _ = menu.append(&entry);
                 checks.push((action, entry));
             }
             Item::Action { action, label } => {
                 let entry = MenuItem::new(label, true, None);
                 actions.insert(entry.id().0.clone(), action);
+                ids.push(entry.id().0.clone());
                 let _ = menu.append(&entry);
             }
             Item::Separator => {
@@ -123,7 +150,43 @@ pub fn build_menu(actions: &Mutex<HashMap<String, MenuAction>>) -> (Menu, Vec<(M
             }
         }
     }
-    (menu, checks)
+    (menu, checks, ids)
+}
+
+/// Copies the foreground app's selection with `press_copy` (Ctrl+C / Cmd+C) and puts the
+/// clipboard back. The clipboard is emptied first, so "nothing selected" is not mistaken for the
+/// text that was already on it. Like pasting, only text is put back: an image on the clipboard is
+/// lost.
+pub fn copy_selection_with(
+    press_copy: impl FnOnce() -> Result<(), crate::platform::PlatformError>,
+) -> Result<Option<String>, crate::platform::PlatformError> {
+    use crate::platform::PlatformError;
+    let mut clipboard = arboard::Clipboard::new().map_err(PlatformError::failed)?;
+    let previous = clipboard.get_text().ok();
+    let _ = clipboard.clear();
+    let pressed = press_copy();
+    // The app answers the copy on its own time.
+    let mut copied = None;
+    if pressed.is_ok() {
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            if let Ok(text) = clipboard.get_text() {
+                if !text.is_empty() {
+                    copied = Some(text);
+                    break;
+                }
+            }
+        }
+    }
+    match previous {
+        Some(old) => {
+            let _ = clipboard.set_text(old);
+        }
+        None => {
+            let _ = clipboard.clear();
+        }
+    }
+    pressed.map(|()| copied)
 }
 
 /// Ticks the check and radio entries to match `state`.

@@ -90,6 +90,7 @@ pub fn focused_field() -> FieldInfo {
             }),
             _ => None,
         };
-        FieldInfo { is_password, caret_rect, app_id: bundle_id(&focused) }
+        let is_text_field = role.as_deref().map(|r| super::beside::TEXT_ROLES.contains(&r));
+        FieldInfo { is_password, caret_rect, app_id: bundle_id(&focused), is_text_field }
     }
 }

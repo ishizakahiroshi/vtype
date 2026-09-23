@@ -129,7 +129,15 @@ describe("the speech page and the desktop app", () => {
       { kind: "final", text: "こんにちは" },
     ]);
     expect(s.ofType("state").at(-1)).toEqual({ type: "state", mode: "normal", recording: true });
-    expect(s.sent.some((m) => m.type === "session" && (m.event as { kind: string }).kind === "activity")).toBe(false);
+  });
+
+  it("the recognizer's activity goes out too, for the ripple around the desktop app's mic", async () => {
+    page = makePage();
+    const s = await connected();
+    const sr = await started(s);
+    sr.onspeechstart?.({});
+    await flush(vi);
+    expect(s.events()).toContainEqual({ kind: "activity", activity: "speechstart" });
   });
 
   it("stop ends the session with ended:user and reports not recording", async () => {
@@ -302,5 +310,42 @@ describe("the window", () => {
     answer("granted");
     await flush(vi);
     expect(s.ofType("page-state")).toEqual([{ type: "page-state", consented: true, micGranted: true }]);
+  });
+
+  function pageWithWindow(href: string): EventTarget {
+    const win = new EventTarget();
+    page = createSpeechPage({
+      href,
+      doc: null,
+      win,
+      connect: (url) => new FakeSocket(url),
+      queryMicrophone: async () => "granted",
+      closeWindow: () => undefined,
+      createRecognizer: (lang) =>
+        createSpeechRecognizer({ lang, SpeechRecognition: FakeSpeechRecognition as never, isChromium: true }),
+    });
+    return win;
+  }
+
+  it("a click on the off-screen window's taskbar button asks for the settings", async () => {
+    const win = pageWithWindow(`${PAGE}?consent=1`);
+    const s = await connected();
+    // Chrome may focus the window when it starts it: that is not the user.
+    win.dispatchEvent(new Event("focus"));
+    expect(s.ofType("open-settings")).toEqual([]);
+    win.dispatchEvent(new Event("blur"));
+    win.dispatchEvent(new Event("focus"));
+    expect(s.ofType("open-settings")).toEqual([{ type: "open-settings" }]);
+  });
+
+  it("the on-screen windows do not open the settings when focused", async () => {
+    for (const href of [`${PAGE}?setup=1`, `${PAGE}?consent=1&stay=1`]) {
+      FakeSocket.all = [];
+      const win = pageWithWindow(href);
+      const s = await connected();
+      win.dispatchEvent(new Event("blur"));
+      win.dispatchEvent(new Event("focus"));
+      expect(s.ofType("open-settings")).toEqual([]);
+    }
   });
 });

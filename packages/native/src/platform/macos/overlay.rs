@@ -13,6 +13,7 @@ use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::mpsc::Sender;
+use std::time::Instant;
 
 use objc2::rc::Retained;
 use objc2::{define_class, msg_send, AllocAnyThread, DefinedClass};
@@ -25,9 +26,11 @@ use tiny_skia::Pixmap;
 use tray_icon::menu::{ContextMenu, Menu};
 
 use crate::beside_field::{keep_on_screen, BESIDE_SIZE};
-use crate::icon_draw::{draw_icon, draw_rounded_panel};
-use crate::overlay_logic::{resolve_position, tail, Gesture, Press, ICON_SIZE};
-use crate::platform::{IconState, PlatformEvent, Rect};
+use crate::icon_draw::{draw_floating, draw_icon, draw_rounded_panel};
+use crate::overlay_logic::{button_at, button_shown, resolve_position, tail, Gesture, MicButton, Press, ICON_SIZE};
+use crate::platform::{IconState, PlatformEvent, Rect, VoiceCue};
+use crate::protocol::InputMode;
+use crate::ripple::Ripple;
 
 const BUBBLE_WIDTH: f64 = 320.0;
 const BUBBLE_PADDING: f64 = 10.0;
@@ -241,15 +244,33 @@ struct IconShared {
     panel: Retained<NSPanel>,
     view: Retained<ImageView>,
     menu: RefCell<Option<Menu>>,
+    /// The templates menu, rebuilt by the UI each time it opens.
+    templates_menu: RefCell<Option<Menu>>,
     look: Cell<IconState>,
+    /// The input mode, shown as a badge.
+    mode: Cell<InputMode>,
+    ripple: RefCell<Ripple>,
+    last_frame: Cell<Instant>,
     hover: Cell<bool>,
     press: Cell<Option<Press>>,
     press_origin: Cell<(i32, i32)>,
+    /// The corner button the press started on, if any.
+    press_button: Cell<Option<MicButton>>,
     pos: Cell<(i32, i32)>,
 }
 
 thread_local! {
     static ICON: RefCell<Option<Rc<IconShared>>> = const { RefCell::new(None) };
+}
+
+/// Opens the templates menu at the mic. Called from the main queue, not from a UI job: the menu
+/// runs a modal loop, and jobs arriving meanwhile must find the UI free.
+pub fn show_templates_menu() {
+    let target = icon_shared().and_then(|s| s.templates_menu.borrow().clone().map(|m| (m, s.view.clone())));
+    if let Some((menu, view)) = target {
+        let view = &*view as *const ImageView as *const c_void;
+        unsafe { menu.show_context_menu_for_nsview(view, None) };
+    }
 }
 
 fn icon_shared() -> Option<Rc<IconShared>> {
@@ -266,7 +287,8 @@ impl IconShared {
     fn render(&self) {
         let scale = self.panel.backingScaleFactor();
         let px = (ICON_SIZE as f64 * scale).round().max(1.0) as u32;
-        let pm = draw_icon(px, self.look.get(), self.hover.get());
+        let rings = self.ripple.borrow().rings();
+        let pm = draw_floating(px, self.look.get(), self.hover.get(), self.mode.get(), &rings);
         let size = NSSize::new(ICON_SIZE as f64, ICON_SIZE as f64);
         self.view.set_image(image_from(&pm, size));
     }
@@ -276,8 +298,19 @@ impl IconShared {
     }
 
     fn press(&self) {
-        self.press.set(Some(Press::new(cursor(self.mtm))));
+        let at = cursor(self.mtm);
+        self.press.set(Some(Press::new(at)));
         self.press_origin.set(self.pos.get());
+        self.press_button.set(self.button_under(at));
+    }
+
+    /// The corner button under `at` (points from the top left of the main screen), among those on
+    /// screen now.
+    fn button_under(&self, at: (i32, i32)) -> Option<MicButton> {
+        let (x, y) = self.pos.get();
+        let busy_or_hovered = self.hover.get() || self.look.get() != IconState::Idle;
+        let normal = self.mode.get() == InputMode::Normal;
+        button_at((at.0 - x) as f32, (at.1 - y) as f32, ICON_SIZE as f32, |b| button_shown(b, busy_or_hovered, normal))
     }
 
     fn drag(&self) {
@@ -296,7 +329,10 @@ impl IconShared {
     fn release(&self) {
         if let Some(press) = self.press.take() {
             let event = match press.release(cursor(self.mtm)) {
-                Gesture::Click => PlatformEvent::ToggleRequested,
+                Gesture::Click => match self.press_button.take() {
+                    Some(button) => PlatformEvent::MicButton(button),
+                    None => PlatformEvent::ToggleRequested,
+                },
                 Gesture::Drag => {
                     let (x, y) = self.pos.get();
                     PlatformEvent::IconMoved { x, y }
@@ -338,10 +374,15 @@ impl Overlay {
             panel,
             view,
             menu: RefCell::new(Some(menu)),
+            templates_menu: RefCell::new(None),
             look: Cell::new(IconState::Idle),
+            mode: Cell::new(InputMode::Normal),
+            ripple: RefCell::new(Ripple::default()),
+            last_frame: Cell::new(Instant::now()),
             hover: Cell::new(false),
             press: Cell::new(None),
             press_origin: Cell::new((0, 0)),
+            press_button: Cell::new(None),
             pos: Cell::new((0, 0)),
         });
         ICON.with(|slot| *slot.borrow_mut() = Some(icon.clone()));
@@ -372,6 +413,7 @@ impl Overlay {
             self.icon.place();
         }
         self.icon.look.set(look);
+        self.icon.ripple.borrow_mut().set_recording(look == IconState::Recording);
         self.icon.render();
         if !self.shown {
             self.icon.panel.orderFrontRegardless();
@@ -381,6 +423,7 @@ impl Overlay {
 
     pub fn set_look(&mut self, look: IconState) {
         self.icon.look.set(look);
+        self.icon.ripple.borrow_mut().set_recording(look == IconState::Recording);
         if self.shown {
             self.icon.render();
         }
@@ -388,6 +431,37 @@ impl Overlay {
 
     pub fn look(&self) -> IconState {
         self.icon.look.get()
+    }
+
+    pub fn set_templates_menu(&mut self, menu: Menu) {
+        *self.icon.templates_menu.borrow_mut() = Some(menu);
+    }
+
+    pub fn set_mode(&mut self, mode: InputMode) {
+        if self.icon.mode.replace(mode) != mode && self.shown {
+            self.icon.render();
+        }
+    }
+
+    /// The ripple follows what the recognizer heard; true when its timer should run.
+    pub fn voice_cue(&mut self, cue: VoiceCue) -> bool {
+        if !self.shown {
+            return false;
+        }
+        self.icon.ripple.borrow_mut().cue(cue);
+        self.icon.last_frame.set(Instant::now());
+        self.icon.ripple.borrow().active()
+    }
+
+    /// One step of the ripple; false once nothing is left to draw.
+    pub fn ripple_frame(&mut self) -> bool {
+        let now = Instant::now();
+        let dt = now.duration_since(self.icon.last_frame.replace(now)).as_secs_f32();
+        self.icon.ripple.borrow_mut().tick(dt);
+        if self.shown {
+            self.icon.render();
+        }
+        self.icon.ripple.borrow().active()
     }
 
     pub fn hide(&mut self) {

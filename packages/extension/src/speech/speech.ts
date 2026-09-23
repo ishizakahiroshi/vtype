@@ -24,6 +24,10 @@
 // missing closes itself and comes back on screen. If the microphone grant did not hold, the page
 // comes back as a window that stays (`stay=1`): it asks for the microphone and never closes itself.
 //
+// The off-screen window still has a taskbar button (with vtype's icon). Nothing on the page can be
+// seen, so a click on that button asks the desktop app to open its settings instead. Only a focus
+// that follows a blur counts: Chrome may hand the window the focus when it starts it.
+//
 // A lost WebSocket is retried from 1 s, doubling up to 30 s. A recording that loses the desktop
 // app is stopped: nobody is left to type what it hears.
 
@@ -90,6 +94,8 @@ export interface SpeechPageOptions {
   reading?: ReadingProvider;
   /** Closes this window. Default: `window.close()` (it works for the `--app` window). */
   closeWindow?: () => void;
+  /** Where the window's `focus` / `blur` arrive. Default: `window`. */
+  win?: Pick<EventTarget, "addEventListener"> | null;
 }
 
 export interface SpeechPage {
@@ -376,6 +382,16 @@ export function createSpeechPage(options: SpeechPageOptions = {}): SpeechPage {
   setText("ready-lead", stay ? t("speech_ready_stay") : t("speech_ready"));
   doc?.getElementById("consent-button")?.addEventListener("click", () => void consent());
   doc?.getElementById("microphone-button")?.addEventListener("click", () => void requestMicrophone());
+  if (!setup && !stay) {
+    const win = options.win === undefined ? (globalThis.window ?? null) : options.win;
+    let blurred = false;
+    win?.addEventListener("blur", () => {
+      blurred = true;
+    });
+    win?.addEventListener("focus", () => {
+      if (blurred && connected) post({ type: "open-settings" });
+    });
+  }
   render();
   void refreshMicrophone().then(() => {
     micKnown = true;

@@ -77,6 +77,25 @@ impl Platform for MacPlatform {
         inject::inject(text, method)
     }
 
+    fn press_keys(&self, keys: super::EditKeys) -> Result<(), PlatformError> {
+        if !ax::trusted(false) {
+            return Err(PlatformError::Failed("vtype is not allowed to use Accessibility".into()));
+        }
+        inject::press_keys(keys)
+    }
+
+    fn copy_selection(&self) -> Result<Option<String>, PlatformError> {
+        if !ax::trusted(false) {
+            return Err(PlatformError::Failed("vtype is not allowed to use Accessibility".into()));
+        }
+        super::desktop::copy_selection_with(inject::press_copy)
+    }
+
+    fn show_templates(&self, templates: &[String]) {
+        let templates = templates.to_vec();
+        self.shared.run(move |ui| ui.show_templates(templates));
+    }
+
     fn focused_field(&self) -> FieldInfo {
         ax::focused_field()
     }
@@ -87,6 +106,10 @@ impl Platform for MacPlatform {
 
     fn hide_icon(&self) {
         self.shared.run(|ui| ui.hide_icon());
+    }
+
+    fn voice_cue(&self, cue: super::VoiceCue) {
+        self.shared.run(move |ui| ui.voice_cue(cue));
     }
 
     fn show_bubble(&self, text: &str) {

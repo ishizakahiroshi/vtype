@@ -23,6 +23,7 @@ mod paths;
 mod platform;
 mod protocol;
 mod report;
+mod ripple;
 mod speech_assets;
 mod speech_host;
 #[cfg(any(target_os = "macos", test))]

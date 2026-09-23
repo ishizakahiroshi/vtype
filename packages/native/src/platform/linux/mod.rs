@@ -84,6 +84,26 @@ impl Platform for LinuxPlatform {
         }
     }
 
+    fn press_keys(&self, keys: super::EditKeys) -> Result<(), PlatformError> {
+        // Wayland does not let an app press keys in another one (typing there has its own fallback).
+        match self.session {
+            Session::X11 => x11::press_keys(keys),
+            _ => Err(PlatformError::Unsupported),
+        }
+    }
+
+    fn copy_selection(&self) -> Result<Option<String>, PlatformError> {
+        match self.session {
+            Session::X11 => super::desktop::copy_selection_with(x11::press_copy),
+            _ => Err(PlatformError::Unsupported),
+        }
+    }
+
+    fn show_templates(&self, templates: &[String]) {
+        let templates = templates.to_vec();
+        self.shared.run(move |ui| ui.show_templates(templates));
+    }
+
     fn focused_field(&self) -> FieldInfo {
         self.focus.field()
     }
@@ -94,6 +114,10 @@ impl Platform for LinuxPlatform {
 
     fn hide_icon(&self) {
         self.shared.run(|ui| ui.hide_icon());
+    }
+
+    fn voice_cue(&self, cue: super::VoiceCue) {
+        self.shared.run(move |ui| ui.voice_cue(cue));
     }
 
     fn show_bubble(&self, text: &str) {

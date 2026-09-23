@@ -24,10 +24,17 @@ use crate::diag::{self, ErrorLog};
 use crate::i18n::{t, t_with};
 use crate::ipc;
 use crate::platform::{
-    FieldProbe, IconState, InjectOutcome, MenuAction, Platform, PlatformError, PlatformEvent, TrayState, MESSAGE_HOLD,
+    EditKeys, FieldProbe, IconState, InjectOutcome, MenuAction, MicButton, Platform, PlatformError, PlatformEvent,
+    TrayState, VoiceCue, MESSAGE_HOLD,
 };
 use crate::protocol::{FromExtension, InputMode, Reply, Request, SessionEvent, ToExtension};
 use crate::report::{self, ReportInfo, Surface};
+
+/// After a menu closes, how long the app it gave the focus back to gets before keys arrive.
+#[cfg(not(test))]
+const MENU_SETTLE: Duration = Duration::from_millis(150);
+#[cfg(test)]
+const MENU_SETTLE: Duration = Duration::ZERO;
 
 /// How long a start request waits for Chrome to come up and connect (parent plan D13).
 pub const CHROME_WAIT: Duration = Duration::from_secs(10);
@@ -79,6 +86,9 @@ pub struct Core {
     now: Box<dyn Fn() -> Instant + Send>,
     /// Last character typed in this recording (to space English finals apart).
     last_char: Option<char>,
+    /// The send button was pressed while recording: the recording stops, and the send key is
+    /// pressed once the last text went in (when the session ends).
+    send_after_stop: bool,
     /// The mic beside the field is up (child plan C8).
     beside_shown: bool,
     /// The daemon's own speech page (speech_host.rs), when it could listen.
@@ -116,6 +126,7 @@ impl Core {
             errors: ErrorLog::default(),
             now: Box::new(Instant::now),
             last_char: None,
+            send_after_stop: false,
             beside_shown: false,
             speech_page: None,
             profile_dir: chrome_launch::profile_dir(),
@@ -361,6 +372,84 @@ impl Core {
         Flow::Continue
     }
 
+    /// The small buttons around the floating mic.
+    fn mic_button(&mut self, button: MicButton) {
+        match button {
+            MicButton::Templates => self.platform.show_templates(&self.config.templates),
+            MicButton::Mode => {
+                let next = match self.mode {
+                    InputMode::Normal => InputMode::En,
+                    InputMode::En => InputMode::Kana,
+                    InputMode::Kana => InputMode::Normal,
+                };
+                let _ = self.set_mode(next);
+            }
+            MicButton::Send => {
+                if self.recording {
+                    // Send what is being said, not half of it.
+                    self.send_after_stop = true;
+                    let _ = self.stop_recording();
+                } else {
+                    self.press(EditKeys::Send(self.config.send_key));
+                }
+            }
+            MicButton::Clear => {
+                let field = self.platform.focused_field();
+                // Only an editable text field: Ctrl+A in a file list or a document selects far more.
+                if field.is_text_field == Some(true) && field.is_password != Some(true) {
+                    self.press(EditKeys::ClearField);
+                } else {
+                    self.platform.tell(&t("native_bubbleClearNotField"), MESSAGE_HOLD, false);
+                }
+            }
+        }
+    }
+
+    /// A template chosen from the menu: in it goes, and is sent when the user asked for that.
+    fn insert_template(&mut self, index: usize) {
+        let Some(text) = self.config.templates.get(index).cloned() else { return };
+        // The menu gave the focus back to the app just now; let it settle first.
+        std::thread::sleep(MENU_SETTLE);
+        // A template is a text of its own: no space in front of it for the words said before.
+        self.last_char = None;
+        if self.insert(&text) && self.config.template_send_immediate {
+            self.press(EditKeys::Send(self.config.send_key));
+        }
+    }
+
+    /// The selection of the foreground app becomes a template.
+    fn add_selection_as_template(&mut self) {
+        std::thread::sleep(MENU_SETTLE);
+        let copied = match self.platform.copy_selection() {
+            Ok(copied) => copied,
+            Err(e) => {
+                tracing::warn!(error = %e, "could not copy the selection");
+                self.platform.tell(&t("native_bubbleKeysUnsupported"), MESSAGE_HOLD, false);
+                return;
+            }
+        };
+        // Tidied the way every template is (trimmed, cut to length).
+        let text = config::normalize_templates(copied).into_iter().next();
+        let message = match text {
+            None => t("native_bubbleNoSelection"),
+            Some(text) if self.config.templates.contains(&text) => t("native_bubbleTemplateDuplicate"),
+            Some(_) if self.config.templates.len() >= config::MAX_TEMPLATES => t("native_bubbleTemplateFull"),
+            Some(text) => {
+                self.config.templates.push(text);
+                self.save_config();
+                t("native_bubbleTemplateAdded")
+            }
+        };
+        self.platform.tell(&message, MESSAGE_HOLD, false);
+    }
+
+    fn press(&self, keys: EditKeys) {
+        if let Err(e) = self.platform.press_keys(keys) {
+            tracing::warn!(error = %e, ?keys, "could not press the keys");
+            self.platform.tell(&t("native_bubbleKeysUnsupported"), MESSAGE_HOLD, false);
+        }
+    }
+
     fn toggle(&mut self, mode: Option<InputMode>) -> Reply {
         if self.recording {
             self.stop_recording()
@@ -558,6 +647,9 @@ impl Core {
                 tracing::warn!(code = %code, "extension error");
                 self.errors.push(code);
             }
+            FromExtension::OpenSettings => {
+                let _ = self.open_settings();
+            }
         }
     }
 
@@ -586,12 +678,18 @@ impl Core {
             }
             SessionEvent::Interim { text } => {
                 if self.config.icon.visible {
+                    self.platform.voice_cue(VoiceCue::Text);
                     self.platform.show_bubble(&text);
+                }
+            }
+            SessionEvent::Activity { activity } => {
+                if let (true, Some(cue)) = (self.config.icon.visible, VoiceCue::from_activity(&activity)) {
+                    self.platform.voice_cue(cue);
                 }
             }
             SessionEvent::Final { text } => {
                 self.platform.hide_bubble();
-                self.insert(&text);
+                let _ = self.insert(&text);
             }
             SessionEvent::Ended { reason, code } => {
                 tracing::info!(reason = %reason, code = ?code, "session ended");
@@ -600,14 +698,18 @@ impl Core {
                 }
                 self.end_recording_ui();
                 self.update_tray();
+                if std::mem::take(&mut self.send_after_stop) {
+                    self.press(EditKeys::Send(self.config.send_key));
+                }
             }
         }
     }
 
-    /// Puts recognized text into the foreground app. Never into a password field.
-    fn insert(&mut self, text: &str) {
+    /// Puts recognized text into the foreground app. Never into a password field. True when the
+    /// text went in.
+    fn insert(&mut self, text: &str) -> bool {
         if text.trim().is_empty() {
-            return;
+            return false;
         }
         // Chrome ends a recognition after each utterance, so one recording yields several finals.
         // English words would run together ("helloworld"); Japanese needs no space.
@@ -623,22 +725,24 @@ impl Core {
         if std::env::var_os("VTYPE_TEST_NO_INJECT").is_some() {
             tracing::info!("test: final len={}", text.chars().count());
             self.last_char = text.chars().last();
-            return;
+            return true;
         }
         let field = self.platform.focused_field();
         if field.is_password == Some(true) {
             tracing::info!(len = text.chars().count(), "password field in front; not inserting");
             self.platform.tell(&t("native_notifyPasswordField"), MESSAGE_HOLD, true);
-            return;
+            return false;
         }
         match self.platform.inject_text(text, self.config.inject) {
             Ok(InjectOutcome::Typed) | Ok(InjectOutcome::Pasted) => {
                 tracing::info!(len = text.chars().count(), "inserted");
                 self.last_char = text.chars().last();
                 self.show_icon(IconState::Done);
+                true
             }
             Ok(InjectOutcome::CopiedOnly) => {
                 self.platform.tell(&t("native_notifyPasteManually"), MESSAGE_HOLD, true);
+                false
             }
             Err(e) => {
                 tracing::warn!(error = %e, "could not insert; copying instead");
@@ -646,6 +750,7 @@ impl Core {
                 if self.platform.copy_to_clipboard(text).is_ok() {
                     self.platform.tell(&t("native_notifyPasteManually"), MESSAGE_HOLD, true);
                 }
+                false
             }
         }
     }
@@ -718,6 +823,7 @@ impl Core {
             PlatformEvent::ToggleRequested => {
                 let _ = self.toggle(None);
             }
+            PlatformEvent::MicButton(button) => self.mic_button(button),
             PlatformEvent::FieldChanged { probe, at } => self.field_changed(&probe, at),
             PlatformEvent::IconMoved { x, y } => {
                 self.config.icon.x = Some(x);
@@ -746,6 +852,8 @@ impl Core {
                 MenuAction::OpenSettings => {
                     let _ = self.open_settings();
                 }
+                MenuAction::InsertTemplate(index) => self.insert_template(index),
+                MenuAction::AddSelectionAsTemplate => self.add_selection_as_template(),
                 MenuAction::ReportBug => {
                     let os = self.platform.os_description();
                     let browser = self.host.as_ref().and_then(|h| h.browser.clone()).unwrap_or_default();
@@ -918,6 +1026,8 @@ pub mod tests {
         pub inject: Mutex<Option<Result<InjectOutcome, PlatformError>>>,
         pub hotkey: Mutex<Option<Result<(), PlatformError>>>,
         pub chrome: Mutex<Option<Result<(), PlatformError>>>,
+        /// What `copy_selection` finds selected.
+        pub selection: Mutex<Option<String>>,
     }
 
     impl FakePlatform {
@@ -948,11 +1058,25 @@ pub mod tests {
         fn focused_field(&self) -> FieldInfo {
             self.field.lock().unwrap().clone()
         }
+        fn press_keys(&self, keys: EditKeys) -> Result<(), PlatformError> {
+            self.log(format!("keys {keys:?}"));
+            Ok(())
+        }
+        fn copy_selection(&self) -> Result<Option<String>, PlatformError> {
+            self.log("copy selection".into());
+            Ok(self.selection.lock().unwrap().clone())
+        }
+        fn show_templates(&self, templates: &[String]) {
+            self.log(format!("templates {}", templates.len()));
+        }
         fn show_icon(&self, state: IconState, _position: Option<(i32, i32)>) {
             self.log(format!("icon {state:?}"));
         }
         fn hide_icon(&self) {
             self.log("hide icon".into());
+        }
+        fn voice_cue(&self, cue: VoiceCue) {
+            self.log(format!("voice {cue:?}"));
         }
         fn show_bubble(&self, text: &str) {
             self.log(format!("bubble {text}"));
@@ -1264,6 +1388,134 @@ pub mod tests {
     }
 
     #[test]
+    fn the_mode_button_goes_round_the_modes() {
+        let mut h = Harness::new();
+        h.connect();
+        for expected in [InputMode::En, InputMode::Kana, InputMode::Normal] {
+            h.core.handle(Event::Platform(PlatformEvent::MicButton(MicButton::Mode)));
+            assert_eq!(h.core.mode, expected);
+        }
+    }
+
+    #[test]
+    fn the_send_button_presses_the_chosen_key() {
+        let mut h = Harness::new();
+        h.connect();
+        h.fake.take();
+        h.core.handle(Event::Platform(PlatformEvent::MicButton(MicButton::Send)));
+        assert!(h.fake.take().contains(&"keys Send(Enter)".to_string()));
+        h.core.config.send_key = crate::config::SendKey::CtrlEnter;
+        h.core.handle(Event::Platform(PlatformEvent::MicButton(MicButton::Send)));
+        assert!(h.fake.take().contains(&"keys Send(CtrlEnter)".to_string()));
+    }
+
+    #[test]
+    fn sending_while_recording_stops_first_and_sends_after_the_last_text() {
+        let mut h = Harness::new();
+        h.connect();
+        h.ext(json!({"type":"session","event":{"kind":"started"}}));
+        h.fake.take();
+        h.core.handle(Event::Platform(PlatformEvent::MicButton(MicButton::Send)));
+        assert_eq!(h.sent(), vec![json!({"type":"stop"})]);
+        assert!(!h.fake.take().iter().any(|c| c.starts_with("keys")), "not before the text is in");
+        h.ext(json!({"type":"session","event":{"kind":"final","text":"hello"}}));
+        h.ext(json!({"type":"session","event":{"kind":"ended","reason":"user"}}));
+        let calls = h.fake.take();
+        let inject = calls.iter().position(|c| c.starts_with("inject")).unwrap();
+        let keys = calls.iter().position(|c| c == "keys Send(Enter)").unwrap();
+        assert!(inject < keys, "{calls:?}");
+        // Only once.
+        h.ext(json!({"type":"session","event":{"kind":"ended","reason":"user"}}));
+        assert!(!h.fake.take().iter().any(|c| c.starts_with("keys")));
+    }
+
+    #[test]
+    fn the_clear_button_empties_only_an_editable_text_field() {
+        let mut h = Harness::new();
+        h.connect();
+        h.fake.take();
+        let clear = |h: &mut Harness, field: FieldInfo| {
+            *h.fake.field.lock().unwrap() = field;
+            h.core.handle(Event::Platform(PlatformEvent::MicButton(MicButton::Clear)));
+            h.fake.take()
+        };
+        let text = FieldInfo { is_text_field: Some(true), is_password: Some(false), ..FieldInfo::default() };
+        assert!(clear(&mut h, text.clone()).contains(&"keys ClearField".to_string()));
+        for field in [
+            FieldInfo::default(),
+            FieldInfo { is_text_field: Some(false), ..FieldInfo::default() },
+            FieldInfo { is_password: Some(true), ..text },
+        ] {
+            let calls = clear(&mut h, field.clone());
+            assert!(!calls.iter().any(|c| c.starts_with("keys")), "{field:?}");
+            assert!(calls.iter().any(|c| c.contains(&t("native_bubbleClearNotField"))), "{calls:?}");
+        }
+    }
+
+    #[test]
+    fn the_templates_button_opens_the_menu_and_a_chosen_template_goes_in() {
+        let mut h = Harness::new();
+        h.connect();
+        h.core.config.templates = vec!["お世話になっております。".into(), "hello".into()];
+        h.fake.take();
+        h.core.handle(Event::Platform(PlatformEvent::MicButton(MicButton::Templates)));
+        assert_eq!(h.fake.take(), vec!["templates 2"]);
+        // No space in front of a template, even after English words.
+        h.core.last_char = Some('d');
+        h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::InsertTemplate(1))));
+        let calls = h.fake.take();
+        assert!(calls.contains(&"inject hello Auto".to_string()), "{calls:?}");
+        assert!(!calls.iter().any(|c| c.starts_with("keys")), "not sent unless asked");
+        // Sent right away when the user asked for that.
+        h.core.config.template_send_immediate = true;
+        h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::InsertTemplate(0))));
+        let calls = h.fake.take();
+        let inject = calls.iter().position(|c| c.starts_with("inject お世話")).unwrap();
+        let keys = calls.iter().position(|c| c == "keys Send(Enter)").unwrap();
+        assert!(inject < keys);
+        // Not into a password field, and then not sent either.
+        *h.fake.field.lock().unwrap() = FieldInfo { is_password: Some(true), ..FieldInfo::default() };
+        h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::InsertTemplate(0))));
+        assert!(!h.fake.take().iter().any(|c| c.starts_with("inject") || c.starts_with("keys")));
+        // An index that is gone does nothing.
+        h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::InsertTemplate(9))));
+    }
+
+    #[test]
+    fn the_selection_becomes_a_template_once() {
+        let mut h = Harness::new();
+        h.connect();
+        let add = |h: &mut Harness, selected: Option<&str>| {
+            *h.fake.selection.lock().unwrap() = selected.map(str::to_string);
+            h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::AddSelectionAsTemplate)));
+            h.fake.take()
+        };
+        let told = |calls: &[String], key: &str| calls.iter().any(|c| c.contains(&t(key)));
+        assert!(told(&add(&mut h, Some("  よろしくお願いします。\n")), "native_bubbleTemplateAdded"));
+        assert_eq!(h.core.config.templates, vec!["よろしくお願いします。".to_string()]);
+        assert!(told(&add(&mut h, Some("よろしくお願いします。")), "native_bubbleTemplateDuplicate"));
+        assert!(told(&add(&mut h, None), "native_bubbleNoSelection"));
+        assert!(told(&add(&mut h, Some("   ")), "native_bubbleNoSelection"));
+        h.core.config.templates = (0..config::MAX_TEMPLATES).map(|i| format!("t{i}")).collect();
+        assert!(told(&add(&mut h, Some("one more")), "native_bubbleTemplateFull"));
+        assert_eq!(h.core.config.templates.len(), config::MAX_TEMPLATES);
+    }
+
+    #[test]
+    fn what_the_recognizer_hears_moves_the_ripple() {
+        let mut h = Harness::new();
+        h.connect();
+        h.ext(json!({"type":"session","event":{"kind":"started"}}));
+        h.fake.take();
+        h.ext(json!({"type":"session","event":{"kind":"activity","activity":"speechstart"}}));
+        h.ext(json!({"type":"session","event":{"kind":"activity","activity":"audiostart"}}));
+        h.ext(json!({"type":"session","event":{"kind":"interim","text":"hel"}}));
+        h.ext(json!({"type":"session","event":{"kind":"activity","activity":"speechend"}}));
+        let voice: Vec<_> = h.fake.take().into_iter().filter(|c| c.starts_with("voice")).collect();
+        assert_eq!(voice, vec!["voice Speech", "voice Text", "voice SpeechEnd"]);
+    }
+
+    #[test]
     fn spaces_english_finals_apart_but_not_japanese() {
         let mut h = Harness::new();
         h.connect();
@@ -1295,7 +1547,7 @@ pub mod tests {
         let mut h = Harness::new();
         h.connect();
         *h.fake.field.lock().unwrap() =
-            FieldInfo { is_password: Some(true), caret_rect: Some(Rect::default()), app_id: None };
+            FieldInfo { is_password: Some(true), caret_rect: Some(Rect::default()), app_id: None, is_text_field: None };
         h.ext(json!({"type":"session","event":{"kind":"final","text":"secret words"}}));
         let calls = h.fake.take();
         assert!(!calls.iter().any(|c| c.starts_with("inject")));
@@ -1369,6 +1621,17 @@ pub mod tests {
         h.connect();
         h.cli(Request::OpenSettings);
         assert!(h.sent().is_empty());
+    }
+
+    #[test]
+    fn the_hidden_page_asks_for_the_settings_when_its_taskbar_button_is_clicked() {
+        let mut h = Harness::new();
+        h.connect();
+        h.fake.take();
+        h.ext(json!({"type":"open-settings"}));
+        let settings = "http://127.0.0.1:47213/t/0123456789abcdef0123456789abcdef/settings";
+        let expected = format!("chrome {}", chrome_launch::settings_args(Path::new("/p"), settings).join(" "));
+        assert_eq!(h.fake.take(), vec![expected]);
     }
 
     #[test]

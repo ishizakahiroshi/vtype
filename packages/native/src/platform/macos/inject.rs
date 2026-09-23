@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use objc2_core_graphics::{CGEvent, CGEventFlags, CGEventTapLocation, CGKeyCode};
 
-use crate::config::InjectMethod;
-use crate::platform::{InjectOutcome, PlatformError};
+use crate::config::{InjectMethod, SendKey};
+use crate::platform::{EditKeys, InjectOutcome, PlatformError};
 use crate::text_chunks::{key_steps, KeyStep, MAC_MAX_UNITS};
 
 /// How long the pasted text stays on the clipboard before the old content comes back.
@@ -20,6 +20,34 @@ const EVENT_GAP: Duration = Duration::from_millis(2);
 const KEY_RETURN: CGKeyCode = 36;
 const KEY_TAB: CGKeyCode = 48;
 const KEY_V: CGKeyCode = 9;
+const KEY_A: CGKeyCode = 0;
+const KEY_C: CGKeyCode = 8;
+const KEY_DELETE: CGKeyCode = 51;
+
+/// Cmd+C, to copy the front app's selection.
+pub fn press_copy() -> Result<(), PlatformError> {
+    if press(KEY_C, None, CGEventFlags::MaskCommand) {
+        Ok(())
+    } else {
+        Err(PlatformError::Failed("Cmd+C could not be sent".into()))
+    }
+}
+
+/// The floating mic's buttons: Cmd+A then Delete (Backspace), or the send key (Ctrl+Enter is
+/// Cmd+Enter on macOS).
+pub fn press_keys(keys: EditKeys) -> Result<(), PlatformError> {
+    let none = CGEventFlags(0);
+    let ok = match keys {
+        EditKeys::ClearField => press(KEY_A, None, CGEventFlags::MaskCommand) && press(KEY_DELETE, None, none),
+        EditKeys::Send(SendKey::Enter) => press(KEY_RETURN, None, none),
+        EditKeys::Send(SendKey::CtrlEnter) => press(KEY_RETURN, None, CGEventFlags::MaskCommand),
+    };
+    if ok {
+        Ok(())
+    } else {
+        Err(PlatformError::Failed("the keys could not be sent".into()))
+    }
+}
 
 /// Presses and releases `key`. With `text`, the press types that text instead of the key's own
 /// character (the key code is then only a carrier). No modifier flags, so a still-held Control or

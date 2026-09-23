@@ -92,6 +92,8 @@ fn embed_speech_page(dir: &Path) {
             "text/html; charset=utf-8"
         } else if rel.ends_with(".js") {
             "text/javascript; charset=utf-8"
+        } else if rel.ends_with(".png") {
+            "image/png"
         } else if rel.ends_with(".txt") || rel.ends_with(".md") {
             "text/plain; charset=utf-8"
         } else {
