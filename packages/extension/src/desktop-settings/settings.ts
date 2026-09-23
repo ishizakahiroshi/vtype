@@ -11,6 +11,10 @@
 // Every change sends the whole config and shows what the desktop app answers with, which is the
 // config as applied (the desktop app keeps what the page does not edit, such as the icon's
 // position and the consent).
+//
+// There is one settings window: every "open settings" starts a new one (Chrome has no way to
+// bring an `--app` window back), so a window that opens tells the others over a
+// BroadcastChannel, and the older ones hand it what they hold unsaved and close.
 
 import { isInputMode, type InputMode } from "vtype-core";
 import { translator } from "../shared/i18n";
@@ -28,6 +32,45 @@ export interface SettingsPageOptions {
   /** The page's own URL (the API sits next to it). Default: location.href. */
   href?: string;
   fetch?: Fetch;
+  /** Where settings windows meet (`SETTINGS_CHANNEL`). None by default: the page script passes one. */
+  channel?: SettingsChannel | null;
+  /** Closes this window. Default: window.close(). */
+  close?: () => void;
+  /** When this window opened, to tell the newer of two. Default: now. */
+  openedAt?: number;
+}
+
+/** The BroadcastChannel settings windows find each other on (the settings profile only). */
+export const SETTINGS_CHANNEL = "vtype-settings";
+
+/** The part of a BroadcastChannel the page uses. */
+export interface SettingsChannel {
+  postMessage(message: unknown): void;
+  addEventListener(type: "message", listener: (event: { data: unknown }) => void): void;
+}
+
+/** What a settings window holds unsaved, for the newer window that takes over. */
+export interface SettingsDraft {
+  replacements?: string;
+  /** The desktop app's own fields (`NATIVE_FIELDS`), by element id. */
+  native?: Record<string, string | boolean>;
+  newTemplate?: string;
+  /** A template being edited: the saved text (to find it again) and the text now. */
+  editing?: { original: string; text: string };
+}
+
+/** The form's fields for the desktop app's own settings (saved with its button). */
+const NATIVE_FIELDS = ["nc-hotkey", "nc-icon-visible", "nc-icon-fullscreen", "nc-inject", "nc-send-key", "nc-beside", "nc-beside-trigger"];
+
+type ChannelMessage =
+  | { type: "opened"; id: string; at: number }
+  | { type: "draft"; to: string; draft: SettingsDraft };
+
+function isChannelMessage(data: unknown): data is ChannelMessage {
+  if (typeof data !== "object" || data === null) return false;
+  const m = data as Record<string, unknown>;
+  if (m.type === "opened") return typeof m.id === "string" && typeof m.at === "number";
+  return m.type === "draft" && typeof m.to === "string" && typeof m.draft === "object" && m.draft !== null;
 }
 
 export interface SettingsPage {
@@ -412,7 +455,81 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
     }
   })();
 
+  /** What this window holds that is not saved; null when nothing. */
+  function draft(): SettingsDraft | null {
+    if (config === null) return null;
+    const d: SettingsDraft = {};
+    if (replText !== null && replText.value !== formatReplacementText(config.replacements ?? [])) {
+      d.replacements = replText.value;
+    }
+    const form = readNative(config);
+    const nativeEdited =
+      form.hotkey !== (config.hotkey ?? null) ||
+      form.icon.visible !== config.icon.visible ||
+      form.icon.hideOnFullscreen !== config.icon.hideOnFullscreen ||
+      form.inject !== config.inject ||
+      form.sendKey !== (config.sendKey ?? "enter") ||
+      form.besideField.enabled !== config.besideField.enabled ||
+      form.besideField.trigger !== config.besideField.trigger;
+    if (nativeEdited) {
+      d.native = {};
+      for (const id of NATIVE_FIELDS) {
+        const input = el(id, HTMLInputElement);
+        const select = el(id, HTMLSelectElement);
+        if (input !== null) d.native[id] = input.type === "checkbox" ? input.checked : input.value;
+        else if (select !== null) d.native[id] = select.value;
+      }
+    }
+    if (tplNew !== null && tplNew.value.trim() !== "") d.newTemplate = tplNew.value;
+    const original = editing === null ? undefined : templates()[editing];
+    const area = doc.querySelector<HTMLTextAreaElement>("#tpl-list textarea.tpl-edit");
+    if (original !== undefined && area !== null && area.value !== original) d.editing = { original, text: area.value };
+    return Object.keys(d).length === 0 ? null : d;
+  }
+
+  /** Puts an older window's unsaved edits into this one. A template this window was opened to edit comes first. */
+  function takeOver(d: SettingsDraft): void {
+    if (config === null) return;
+    if (typeof d.replacements === "string" && replText !== null) replText.value = d.replacements;
+    for (const [id, value] of Object.entries(d.native ?? {})) {
+      const input = el(id, HTMLInputElement);
+      const select = el(id, HTMLSelectElement);
+      if (input !== null && input.type === "checkbox" && typeof value === "boolean") input.checked = value;
+      else if (input !== null && typeof value === "string") input.value = value;
+      else if (select !== null && typeof value === "string") select.value = value;
+    }
+    if (typeof d.newTemplate === "string" && tplNew !== null) tplNew.value = d.newTemplate;
+    const edit = d.editing;
+    const index = edit === undefined ? -1 : templates().indexOf(edit.original);
+    if (edit !== undefined && index >= 0 && editing === null) {
+      editing = index;
+      renderTemplates(templates());
+      const area = doc.querySelector<HTMLTextAreaElement>("#tpl-list textarea.tpl-edit");
+      if (area !== null) area.value = edit.text;
+    }
+  }
+
+  const channel = options.channel ?? null;
+  if (channel !== null) {
+    const me = { id: globalThis.crypto?.randomUUID?.() ?? String(Math.random()), at: options.openedAt ?? Date.now() };
+    const close = options.close ?? (() => doc.defaultView?.close());
+    channel.addEventListener("message", (event) => {
+      const m = event.data;
+      if (!isChannelMessage(m)) return;
+      if (m.type === "opened" && m.id !== me.id && (m.at > me.at || (m.at === me.at && m.id > me.id))) {
+        const d = draft();
+        if (d !== null) channel.postMessage({ type: "draft", to: m.id, draft: d });
+        close();
+      } else if (m.type === "draft" && m.to === me.id) {
+        void loaded.then(() => takeOver(m.draft));
+      }
+    });
+    channel.postMessage({ type: "opened", id: me.id, at: me.at });
+  }
+
   return { loaded };
 }
 
-if (typeof document !== "undefined" && document.getElementById("nc-form") !== null) initSettingsPage();
+if (typeof document !== "undefined" && document.getElementById("nc-form") !== null) {
+  initSettingsPage({ channel: typeof BroadcastChannel === "function" ? new BroadcastChannel(SETTINGS_CHANNEL) : null });
+}

@@ -44,9 +44,40 @@ function fakeApp(initial: unknown = CONFIG) {
   };
 }
 
-function mount(): void {
+function settingsBody(): string {
   const html = readFileSync(join(__dirname, "..", "src", "desktop-settings", "settings.html"), "utf8");
-  document.body.innerHTML = html.slice(html.indexOf("<body>") + 6, html.indexOf("<script"));
+  return html.slice(html.indexOf("<body>") + 6, html.indexOf("<script"));
+}
+
+function mount(): void {
+  document.body.innerHTML = settingsBody();
+}
+
+/** Another settings window's document. */
+function secondWindow(): Document {
+  const doc = document.implementation.createHTMLDocument("");
+  doc.body.innerHTML = settingsBody();
+  return doc;
+}
+
+type Listener = (event: { data: unknown }) => void;
+
+/** BroadcastChannel as settings windows see it: a message reaches every other window, later. */
+function channels() {
+  const all: Listener[][] = [];
+  return () => {
+    const mine: Listener[] = [];
+    all.push(mine);
+    return {
+      postMessage(message: unknown) {
+        const data = structuredClone(message);
+        for (const other of all) if (other !== mine) for (const l of other) setTimeout(() => l({ data }), 0);
+      },
+      addEventListener(_type: "message", listener: Listener) {
+        mine.push(listener);
+      },
+    };
+  };
 }
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -265,5 +296,81 @@ describe("the desktop settings page", () => {
     await flush();
     expect($("status").textContent).toBe(translate("settings_failed", "en"));
     expect($<HTMLInputElement>("mode-normal").checked).toBe(true);
+  });
+});
+
+describe("one settings window at a time", () => {
+  const editFirstTemplate = (text: string) => {
+    const edit = [...document.querySelectorAll("#tpl-list li")][0]!.querySelectorAll("button");
+    [...edit].find((b) => b.textContent === translate("settings_templatesEdit", "en"))!.click();
+    document.querySelector<HTMLTextAreaElement>("#tpl-list .tpl-edit")!.value = text;
+  };
+  const settle = async () => {
+    for (let i = 0; i < 3; i++) await flush();
+  };
+
+  it("an older window hands what is not saved to the newer one and closes", async () => {
+    const app = fakeApp({ ...CONFIG, templates: ["one", "two"] });
+    const channel = channels();
+    let closed = 0;
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "en", channel: channel(), openedAt: 1, close: () => closed++ })
+      .loaded;
+    $<HTMLTextAreaElement>("repl-text").value = "a => b";
+    $<HTMLInputElement>("nc-hotkey").value = "Ctrl+Alt+V";
+    $<HTMLInputElement>("nc-beside").checked = true;
+    $<HTMLTextAreaElement>("tpl-new").value = "three";
+    editFirstTemplate("ONE");
+
+    const second = secondWindow();
+    let secondClosed = 0;
+    await initSettingsPage({
+      doc: second,
+      href: PAGE,
+      fetch: app.fetch,
+      language: "en",
+      channel: channel(),
+      openedAt: 2,
+      close: () => secondClosed++,
+    }).loaded;
+    await settle();
+    expect(closed).toBe(1);
+    expect(secondClosed).toBe(0);
+    const at = <T extends HTMLElement>(id: string) => second.getElementById(id) as T;
+    expect(at<HTMLTextAreaElement>("repl-text").value).toBe("a => b");
+    expect(at<HTMLInputElement>("nc-hotkey").value).toBe("Ctrl+Alt+V");
+    expect(at<HTMLInputElement>("nc-beside").checked).toBe(true);
+    expect(at<HTMLTextAreaElement>("tpl-new").value).toBe("three");
+    expect(second.querySelector<HTMLTextAreaElement>("#tpl-list .tpl-edit")?.value).toBe("ONE");
+    // Handed over, not saved: the user still decides.
+    expect(app.calls.filter((c) => c.method === "POST")).toEqual([]);
+  });
+
+  it("an older window with nothing unsaved just closes", async () => {
+    const app = fakeApp();
+    const channel = channels();
+    let closed = 0;
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "en", channel: channel(), openedAt: 1, close: () => closed++ })
+      .loaded;
+    const second = secondWindow();
+    await initSettingsPage({ doc: second, href: PAGE, fetch: app.fetch, language: "en", channel: channel(), openedAt: 2 }).loaded;
+    await settle();
+    expect(closed).toBe(1);
+    expect((second.getElementById("repl-text") as HTMLTextAreaElement).value).toBe("ぶいたいぷ => vtype");
+    expect((second.getElementById("nc-hotkey") as HTMLInputElement).value).toBe("");
+  });
+
+  it("the window opened to edit a template keeps that template", async () => {
+    const app = fakeApp({ ...CONFIG, templates: ["one", "two"] });
+    const channel = channels();
+    let closed = 0;
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "en", channel: channel(), openedAt: 1, close: () => closed++ })
+      .loaded;
+    editFirstTemplate("ONE");
+    const second = secondWindow();
+    await initSettingsPage({ doc: second, href: `${PAGE}#template-1`, fetch: app.fetch, language: "en", channel: channel(), openedAt: 2 })
+      .loaded;
+    await settle();
+    expect(closed).toBe(1);
+    expect(second.querySelector<HTMLTextAreaElement>("#tpl-list .tpl-edit")?.value).toBe("two");
   });
 });

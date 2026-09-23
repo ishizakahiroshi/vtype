@@ -9,6 +9,11 @@
 //! back onto the screen), but it can close itself; the daemon then starts it again off screen.
 //!
 //! No `--remote-debugging-port`, no headless mode (parent plan S6).
+//!
+//! The settings page runs in a second profile of its own. Opened in the speech page's running
+//! profile, a settings window took the speech page's off-screen position and size (400×300)
+//! rather than its own, and each try opened one more (measured 2026-09-23: four windows at
+//! -32000,-32000).
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -95,6 +100,10 @@ pub fn grant_microphone_in_profile(profile_dir: &Path, origin: &str) -> std::io:
     std::fs::write(path, text)
 }
 
+/// Where the hidden speech page is put. Windows also looks for it by this position to keep its
+/// window off the taskbar.
+pub const OFF_SCREEN_POSITION: &str = "--window-position=-32000,-32000";
+
 /// Chrome's arguments, one string each (a path or a URL with spaces stays one argument).
 pub fn speech_args(profile_dir: &Path, url: &str, placement: WindowPlacement) -> Vec<String> {
     let mut args = vec![
@@ -105,7 +114,7 @@ pub fn speech_args(profile_dir: &Path, url: &str, placement: WindowPlacement) ->
     ];
     match placement {
         WindowPlacement::Hidden => {
-            args.push("--window-position=-32000,-32000".to_string());
+            args.push(OFF_SCREEN_POSITION.to_string());
             args.push("--window-size=400,300".to_string());
         }
         WindowPlacement::Visible | WindowPlacement::Kept => {
@@ -124,10 +133,17 @@ pub fn settings_url(speech_page: &str) -> String {
     }
 }
 
-/// The settings page in the same profile, as an ordinary on-screen app window sized for a form.
-pub fn settings_args(profile_dir: &Path, url: &str) -> Vec<String> {
+/// The settings page's own profile, next to the speech page's `speech_profile`. It needs no
+/// microphone; it only keeps the settings windows out of the off-screen Chrome.
+pub fn settings_profile_dir(speech_profile: &Path) -> PathBuf {
+    speech_profile.with_file_name("chrome-settings-profile")
+}
+
+/// The settings page in its own profile (`settings_profile_dir`), as an ordinary on-screen app
+/// window sized for a form.
+pub fn settings_args(speech_profile: &Path, url: &str) -> Vec<String> {
     vec![
-        format!("--user-data-dir={}", profile_dir.display()),
+        format!("--user-data-dir={}", settings_profile_dir(speech_profile).display()),
         format!("--app={url}"),
         "--no-first-run".to_string(),
         "--no-default-browser-check".to_string(),
@@ -144,10 +160,18 @@ mod tests {
     #[test]
     fn the_settings_page_sits_next_to_the_speech_page() {
         assert_eq!(settings_url(BASE), "http://127.0.0.1:47213/t/0123456789abcdef0123456789abcdef/settings");
-        let args = settings_args(Path::new("/p"), &settings_url(BASE));
-        assert_eq!(args[0], "--user-data-dir=/p");
+        let args = settings_args(Path::new("/data/vtype/chrome-profile"), &settings_url(BASE));
         assert_eq!(args[1], format!("--app={}", settings_url(BASE)));
         assert!(!args.iter().any(|a| a.contains("-32000")));
+    }
+
+    #[test]
+    fn the_settings_page_has_a_profile_of_its_own_next_to_the_speech_pages() {
+        let speech = Path::new("/data/vtype/chrome-profile");
+        assert_eq!(settings_profile_dir(speech), Path::new("/data/vtype/chrome-settings-profile"));
+        let args = settings_args(speech, &settings_url(BASE));
+        assert_eq!(args[0], format!("--user-data-dir={}", settings_profile_dir(speech).display()));
+        assert_ne!(args[0], speech_args(speech, BASE, WindowPlacement::Hidden)[0]);
     }
 
     #[test]

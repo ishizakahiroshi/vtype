@@ -3,6 +3,15 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::thread;
+use std::time::{Duration, Instant};
+
+use windows_sys::Win32::Foundation::{HWND, LPARAM};
+use windows_sys::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONULL};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, GetClassNameW, GetWindowLongPtrW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
+    SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE, SW_HIDE, SW_SHOWNOACTIVATE, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+};
 
 use crate::platform::PlatformError;
 use crate::win_registry::{self, Hive};
@@ -64,7 +73,69 @@ pub fn launch_chrome(args: &[String]) -> Result<(), PlatformError> {
             windows_sys::Win32::UI::WindowsAndMessaging::ASFW_ANY,
         );
     }
-    Command::new(chrome).args(args).spawn().map(|_| ()).map_err(PlatformError::failed)
+    Command::new(chrome).args(args).spawn().map_err(PlatformError::failed)?;
+    if args.iter().any(|a| a == crate::chrome_launch::OFF_SCREEN_POSITION) {
+        thread::spawn(keep_off_screen_chrome_off_taskbar);
+    }
+    Ok(())
+}
+
+/// How long to look for the off-screen window after starting Chrome (a cold start is slow).
+const OFF_SCREEN_WAIT: Duration = Duration::from_secs(20);
+const OFF_SCREEN_POLL: Duration = Duration::from_millis(50);
+
+/// vtype lives in the tray: the off-screen speech page has no business on the taskbar (the
+/// requester, 2026-09-23). Once its window shows, it becomes a tool window. A style change only
+/// reaches the taskbar across a hide and show; the show does not take the focus.
+fn keep_off_screen_chrome_off_taskbar() {
+    let until = Instant::now() + OFF_SCREEN_WAIT;
+    while Instant::now() < until {
+        let found = off_screen_chrome_windows();
+        if !found.is_empty() {
+            for hwnd in found {
+                unsafe {
+                    let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+                    let tool = (ex | WS_EX_TOOLWINDOW as isize) & !(WS_EX_APPWINDOW as isize);
+                    ShowWindow(hwnd, SW_HIDE);
+                    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, tool);
+                    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                }
+            }
+            return;
+        }
+        thread::sleep(OFF_SCREEN_POLL);
+    }
+    tracing::warn!("the off-screen Chrome window did not show; it may stay on the taskbar");
+}
+
+/// Chrome's windows that are shown, not minimized, on no monitor and still on the taskbar. Only
+/// the speech page is put there (`chrome_launch::OFF_SCREEN_POSITION`); a minimized window is
+/// off screen too, which is why `IsIconic` is asked.
+fn off_screen_chrome_windows() -> Vec<HWND> {
+    unsafe extern "system" fn each(hwnd: HWND, data: LPARAM) -> i32 {
+        let found = &mut *(data as *mut Vec<HWND>);
+        if IsWindowVisible(hwnd) == 0
+            || IsIconic(hwnd) != 0
+            || GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW as isize != 0
+            || !MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL).is_null()
+        {
+            return 1;
+        }
+        let mut class = [0u16; 64];
+        let len = GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32);
+        if String::from_utf16_lossy(&class[..len.max(0) as usize]) != "Chrome_WidgetWin_1" {
+            return 1;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if super::system_process_name(pid).as_deref() == Some("chrome.exe") {
+            found.push(hwnd);
+        }
+        1
+    }
+    let mut found: Vec<HWND> = Vec::new();
+    unsafe { EnumWindows(Some(each), &mut found as *mut Vec<HWND> as LPARAM) };
+    found
 }
 
 pub fn notify(title: &str, body: &str) {
