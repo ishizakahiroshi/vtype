@@ -30,6 +30,11 @@ pub fn init(ui_language: &str) {
     let _ = LANG.set(lang_for(ui_language));
 }
 
+/// The language `init` set (English before that).
+pub fn lang() -> Lang {
+    *LANG.get().unwrap_or(&Lang::En)
+}
+
 fn table(lang: Lang) -> &'static [(&'static str, &'static str)] {
     match lang {
         Lang::En => tables::EN,
@@ -47,7 +52,7 @@ pub fn lookup(lang: Lang, key: &str) -> String {
 }
 
 pub fn t(key: &str) -> String {
-    lookup(*LANG.get().unwrap_or(&Lang::En), key)
+    lookup(lang(), key)
 }
 
 /// `t` with `{name}` placeholders filled in.

@@ -5,12 +5,14 @@
 //!
 //! Its window (`draw_floating`) adds the ripple while the user speaks and four small buttons at
 //! the corners: the templates top left (a list), the input mode top right ("A" English, "カ"
-//! katakana, a circular arrow for the normal mode), send bottom right, clear bottom left. The
+//! katakana, and for the normal mode "あ" in Japanese or a globe in English, since the normal mode
+//! hears the browser's language), send bottom right, clear bottom left. The
 //! glyphs are drawn as strokes, so no font is needed. The button under the pointer is lighter and
 //! a little bigger, so it reads as the one a click goes to.
 
-use tiny_skia::{Color, FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, PixmapPaint, Stroke, Transform};
+use tiny_skia::{Color, FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke, Transform};
 
+use crate::i18n::Lang;
 use crate::overlay_logic::{button_shown, MicButton, MicPart, BUTTON_RADIUS, ICON_SIZE, MIC_SIZE};
 use crate::platform::IconState;
 use crate::protocol::InputMode;
@@ -145,6 +147,18 @@ pub fn draw_floating(
     mode: InputMode,
     rings: &[(f32, f32)],
 ) -> Pixmap {
+    draw_floating_in(size, state, pointer, mode, rings, crate::i18n::lang())
+}
+
+/// `draw_floating` for the given UI language (the normal mode's badge depends on it).
+fn draw_floating_in(
+    size: u32,
+    state: IconState,
+    pointer: Option<MicPart>,
+    mode: InputMode,
+    rings: &[(f32, f32)],
+    lang: Lang,
+) -> Pixmap {
     let hover = pointer.is_some();
     let mut pm = Pixmap::new(size.max(8), size.max(8)).expect("non-zero size");
     let s = pm.width() as f32;
@@ -166,7 +180,7 @@ pub fn draw_floating(
     let mut buttons = Pixmap::new(pm.width(), pm.height()).expect("non-zero size");
     for button in MicButton::ALL {
         if button_shown(button, busy_or_hovered, mode == InputMode::Normal) {
-            draw_button(&mut buttons, button, mode, pointer == Some(MicPart::Button(button)));
+            draw_button(&mut buttons, button, mode, lang, pointer == Some(MicPart::Button(button)));
         }
     }
     // Like the mic, the lone mode badge is faint until the pointer comes.
@@ -177,7 +191,7 @@ pub fn draw_floating(
 }
 
 /// One corner button: a disc with a white rim, and its glyph. `hot`: the pointer is on it.
-fn draw_button(pm: &mut Pixmap, button: MicButton, mode: InputMode, hot: bool) {
+fn draw_button(pm: &mut Pixmap, button: MicButton, mode: InputMode, lang: Lang, hot: bool) {
     let s = pm.width() as f32;
     let (fx, fy) = button.center();
     let grow = if hot { HOT_GROW } else { 1.0 };
@@ -222,23 +236,34 @@ fn draw_button(pm: &mut Pixmap, button: MicButton, mode: InputMode, hot: bool) {
             pb.move_to(x - 0.05 * g, y - g);
             pb.quad_to(x - 0.1 * g, y + 0.4 * g, x - 0.85 * g, y + g);
         }
-        (MicButton::Mode, InputMode::Normal) => {
-            // A circular arrow: "click to change the mode".
-            let steps = 10;
-            for i in 0..=steps {
-                let a = (40.0 + 270.0 * i as f32 / steps as f32).to_radians();
-                let (px, py) = (x + 0.85 * g * a.cos(), y - 0.85 * g * a.sin());
-                if i == 0 {
-                    pb.move_to(px, py);
-                } else {
-                    pb.line_to(px, py);
-                }
+        (MicButton::Mode, InputMode::Normal) if lang == Lang::En => {
+            // A globe, "your language": the outline, a meridian and the equator. Three lines in the
+            // badge, so they are thinner than the other glyphs.
+            let mut globe = PathBuilder::new();
+            globe.push_circle(x, y, g);
+            if let Some(meridian) = Rect::from_xywh(x - 0.45 * g, y - g, 0.9 * g, 2.0 * g) {
+                globe.push_oval(meridian);
             }
-            let end = 310f32.to_radians();
-            let (ex, ey) = (x + 0.85 * g * end.cos(), y - 0.85 * g * end.sin());
-            pb.move_to(ex - 0.55 * g, ey - 0.05 * g);
-            pb.line_to(ex, ey);
-            pb.line_to(ex + 0.05 * g, ey - 0.6 * g);
+            globe.move_to(x - g, y);
+            globe.line_to(x + g, y);
+            if let Some(globe) = globe.finish() {
+                let thin = Stroke { width: stroke.width * 0.75, ..stroke.clone() };
+                pm.stroke_path(&globe, &white, &thin, Transform::identity(), None);
+            }
+        }
+        (MicButton::Mode, InputMode::Normal) => {
+            // あ, as the IME shows it next to "A" and "カ": the bar, the downstroke, then the
+            // stroke that falls left, loops back up and swells out to the right.
+            pb.move_to(x - 0.8 * g, y - 0.55 * g);
+            pb.line_to(x + 0.6 * g, y - 0.68 * g);
+            pb.move_to(x - 0.22 * g, y - g);
+            pb.quad_to(x - 0.3 * g, y + 0.25 * g, x - 0.05 * g, y + 0.8 * g);
+            pb.move_to(x + 0.35 * g, y - 0.2 * g);
+            pb.quad_to(x + 0.05 * g, y + 0.65 * g, x - 0.55 * g, y + 0.72 * g);
+            pb.quad_to(x - 0.95 * g, y + 0.72 * g, x - 0.75 * g, y + 0.3 * g);
+            pb.quad_to(x - 0.4 * g, y - 0.1 * g, x + 0.3 * g, y - 0.05 * g);
+            pb.quad_to(x + 0.95 * g, y + 0.05 * g, x + 0.85 * g, y + 0.5 * g);
+            pb.quad_to(x + 0.75 * g, y + 0.9 * g, x + 0.2 * g, y + g);
         }
         (MicButton::Templates, _) => {
             // A list: three lines, the last one shorter.
@@ -350,21 +375,22 @@ mod tests {
         let none = Vec::new();
         let on_mic = Some(MicPart::Mic);
         let looks = [
-            (IconState::Idle, None, InputMode::Normal, &none),
-            (IconState::Idle, on_mic, InputMode::Normal, &none),
-            (IconState::Idle, Some(MicPart::Button(MicButton::Send)), InputMode::Normal, &none),
-            (IconState::Idle, on_mic, InputMode::En, &none),
-            (IconState::Idle, on_mic, InputMode::Kana, &none),
-            (IconState::Recording, None, InputMode::Kana, &rings),
-            (IconState::Done, None, InputMode::Normal, &none),
+            (IconState::Idle, None, InputMode::Normal, &none, Lang::Ja),
+            (IconState::Idle, on_mic, InputMode::Normal, &none, Lang::Ja),
+            (IconState::Idle, on_mic, InputMode::Normal, &none, Lang::En),
+            (IconState::Idle, Some(MicPart::Button(MicButton::Send)), InputMode::Normal, &none, Lang::Ja),
+            (IconState::Idle, on_mic, InputMode::En, &none, Lang::Ja),
+            (IconState::Idle, on_mic, InputMode::Kana, &none, Lang::Ja),
+            (IconState::Recording, None, InputMode::Kana, &rings, Lang::Ja),
+            (IconState::Done, None, InputMode::Normal, &none, Lang::Ja),
         ];
         let (big, gap, small) = (168u32, 12u32, ICON_SIZE as u32);
         let mut sheet = Pixmap::new((big + gap) * looks.len() as u32 + gap, big + small + gap * 3).unwrap();
         sheet.fill(Color::from_rgba8(30, 30, 30, 255));
-        for (i, (state, pointer, mode, rings)) in looks.iter().enumerate() {
+        for (i, (state, pointer, mode, rings, lang)) in looks.iter().enumerate() {
             let x = (gap + (big + gap) * i as u32) as i32;
             for (size, y) in [(big, gap), (small, big + gap * 2)] {
-                let pm = draw_floating(size, *state, *pointer, *mode, rings);
+                let pm = draw_floating_in(size, *state, *pointer, *mode, rings, *lang);
                 sheet.draw_pixmap(x, y as i32, pm.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
             }
         }
@@ -442,11 +468,26 @@ mod tests {
         assert!(c.alpha() > 0 && c.alpha() < 255, "faint while idle: {}", c.alpha());
         assert_eq!(button_pixel(&en, MicButton::Send).alpha(), 0);
         let modes = [InputMode::Normal, InputMode::En, InputMode::Kana];
-        let drawn: Vec<_> =
-            modes.iter().map(|&m| draw_floating(56, IconState::Idle, Some(MicPart::Mic), m, &[])).collect();
-        assert_ne!(drawn[0].data(), drawn[1].data());
-        assert_ne!(drawn[1].data(), drawn[2].data());
-        assert_ne!(drawn[0].data(), drawn[2].data());
+        for lang in [Lang::Ja, Lang::En] {
+            let drawn: Vec<_> = modes
+                .iter()
+                .map(|&m| draw_floating_in(56, IconState::Idle, Some(MicPart::Mic), m, &[], lang))
+                .collect();
+            assert_ne!(drawn[0].data(), drawn[1].data(), "{lang:?}");
+            assert_ne!(drawn[1].data(), drawn[2].data(), "{lang:?}");
+            assert_ne!(drawn[0].data(), drawn[2].data(), "{lang:?}");
+        }
+    }
+
+    #[test]
+    fn the_normal_mode_badge_follows_the_ui_language() {
+        let normal = |lang| draw_floating_in(56, IconState::Idle, Some(MicPart::Mic), InputMode::Normal, &[], lang);
+        // あ in Japanese, a globe in English; the other modes do not change with the language.
+        assert_ne!(normal(Lang::Ja).data(), normal(Lang::En).data());
+        for mode in [InputMode::En, InputMode::Kana] {
+            let drawn = |lang| draw_floating_in(56, IconState::Idle, Some(MicPart::Mic), mode, &[], lang);
+            assert_eq!(drawn(Lang::Ja).data(), drawn(Lang::En).data(), "{mode:?}");
+        }
     }
 
     #[test]
