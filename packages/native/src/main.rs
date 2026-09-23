@@ -8,6 +8,7 @@ mod cli;
 mod config;
 mod daemon;
 mod diag;
+mod field_check;
 mod hotkey;
 mod i18n;
 mod icon_draw;

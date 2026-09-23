@@ -48,6 +48,8 @@ pub struct Snapshot<'a> {
     pub errors: &'a ErrorLog,
     /// Named facts the platform code wants on record (e.g. how far the Wayland fallback got).
     pub notes: &'a [(String, String)],
+    /// The last look at an app's text fields (`field_check::report`): kinds of elements, no text.
+    pub field_check: Option<&'a Value>,
 }
 
 pub fn report(s: &Snapshot<'_>) -> Value {
@@ -61,6 +63,7 @@ pub fn report(s: &Snapshot<'_>) -> Value {
         "config": s.config,
         "notes": s.notes.iter().map(|(k, v)| json!({"name": k, "value": v})).collect::<Vec<_>>(),
         "recentErrors": s.errors.entries().collect::<Vec<_>>(),
+        "lastFieldCheck": s.field_check,
     })
 }
 
@@ -122,11 +125,23 @@ mod tests {
             browser: Some("Chrome 140"),
             errors: &errors,
             notes: &[],
+            field_check: None,
         });
         let keys: Vec<_> = r.as_object().unwrap().keys().cloned().collect();
         assert_eq!(
             keys,
-            ["app", "browser", "config", "connected", "extensionVersion", "notes", "os", "recentErrors", "version"]
+            [
+                "app",
+                "browser",
+                "config",
+                "connected",
+                "extensionVersion",
+                "lastFieldCheck",
+                "notes",
+                "os",
+                "recentErrors",
+                "version"
+            ]
         );
     }
 }

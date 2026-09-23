@@ -422,6 +422,50 @@
     "message": "Clear the text field",
     "description": "Desktop app: bubble when the pointer rests on the bottom-left button of the floating mic, which empties the focused text field"
   },
+  "native_trayCheckFields": {
+    "message": "The mic does not come to this app's text fields",
+    "description": "Desktop app (Windows): menu item. Watches the app the user was in for a few seconds to find out why the mic does not come to its text fields"
+  },
+  "native_bubbleCheckFieldsOff": {
+    "message": "Turn on \"Mic beside text fields in other apps\" on the settings page, then choose this again.",
+    "description": "Desktop app (Windows): the check of an app's text fields needs the mic beside text fields switched on. The quoted name is optionsNativeBeside without \"(experimental)\""
+  },
+  "native_bubbleCheckFieldsNoApp": {
+    "message": "First click once in a text field of the app, then choose this again.",
+    "description": "Desktop app (Windows): no app has had the focus yet, so there is no app to check"
+  },
+  "native_bubbleCheckFieldsStart": {
+    "message": "Within {seconds} seconds, click once in a text field of {app}.",
+    "description": "Desktop app (Windows): the check of an app's text fields started. {seconds} is how long it watches, {app} the app's program name, e.g. line.exe"
+  },
+  "native_bubbleCheckFieldsReported": {
+    "message": "{app} tells when its text field gets the cursor. The mic should come next to the field.",
+    "description": "Desktop app (Windows): check result. The app reports its text field taking the focus. {app} is the app's program name"
+  },
+  "native_bubbleCheckFieldsAfterWindow": {
+    "message": "{app} tells only that its window got the cursor, and moves it into the text field a moment later. vtype waits for that, so the mic should come next to the field.",
+    "description": "Desktop app (Windows): check result. The app reports only its window, and its text field takes the focus a moment later. {app} is the app's program name"
+  },
+  "native_bubbleCheckFieldsOnlyWhenAsked": {
+    "message": "{app} did not tell that its text field got the cursor, but asking it found the field.",
+    "description": "Desktop app (Windows): check result. No report came, but asking for the focused element found the text field. {app} is the app's program name"
+  },
+  "native_bubbleCheckFieldsAlreadyThere": {
+    "message": "The cursor was in {app}'s text field from the start, so nothing could be seen. Click somewhere else in {app} first, then its text field, and check again.",
+    "description": "Desktop app (Windows): check result. The text field had the focus before the check began and kept it, so clicking it reported nothing; the user should click elsewhere first and run the check again. {app} is the app's program name"
+  },
+  "native_bubbleCheckFieldsNotTaken": {
+    "message": "Something in {app} looks like a text field, but vtype does not treat it as one.",
+    "description": "Desktop app (Windows): check result. Something that looks typeable had the focus, but vtype does not take it as a text field. {app} is the app's program name"
+  },
+  "native_bubbleCheckFieldsNothing": {
+    "message": "No text field of {app} was found in {seconds} seconds.",
+    "description": "Desktop app (Windows): check result. Nothing that looks like a text field was found. {seconds} is how long it watched, {app} the app's program name"
+  },
+  "native_bubbleCheckFieldsDetails": {
+    "message": "The details are in \"Copy diagnostic info\".",
+    "description": "Desktop app (Windows): second line of every check result. The quoted name is the menu item native_trayCopyDiagnostics"
+  },
   "optionsModeLegend": {
     "message": "Input mode",
     "description": "Options page: title of the input mode choice"

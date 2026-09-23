@@ -247,6 +247,12 @@ impl<W> BesideControl<W> {
     pub fn stop(&mut self) {
         self.watcher = None;
     }
+
+    /// The running watcher (none while the beside mic is off). Only Windows asks it for more.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn watcher_mut(&mut self) -> Option<&mut W> {
+        self.watcher.as_mut()
+    }
 }
 
 #[cfg(test)]

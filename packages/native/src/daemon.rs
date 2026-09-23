@@ -21,6 +21,7 @@ use crate::beside_field;
 use crate::chrome_launch::{self, WindowPlacement};
 use crate::config::{self, BesideFieldTrigger, NativeConfig};
 use crate::diag::{self, ErrorLog};
+use crate::field_check::{self, FieldCheck};
 use crate::i18n::{t, t_with};
 use crate::ipc;
 use crate::menu;
@@ -87,6 +88,10 @@ const HINT_HOLD: Duration = Duration::from_secs(10);
 /// were within 0.6 s (passing through, e.g. Tab over a button) and the rest 1.2 s or more.
 const HOME_DELAY: Duration = Duration::from_millis(700);
 
+/// How long the result of a look at an app's text fields stays in the bubble: longer than most
+/// messages, as it is read once and is two sentences.
+const FIELD_CHECK_HOLD: Duration = Duration::from_secs(12);
+
 pub struct Core {
     platform: Arc<dyn Platform>,
     config: NativeConfig,
@@ -115,6 +120,12 @@ pub struct Core {
     home_at: Option<Instant>,
     /// The pointer is on the floating mic (it may be held).
     mic_hovered: bool,
+    /// The app other than vtype (and the taskbar) that had the focus last: the one "the mic does
+    /// not come to this app's text fields" looks at. Not the foreground window, which is the
+    /// taskbar when the menu is opened from the tray.
+    last_app: Option<String>,
+    /// The last look at an app's text fields, and when (UTC), for the diagnostic info.
+    last_field_check: Option<(String, FieldCheck)>,
     /// The daemon's own speech page (speech_host.rs), when it could listen.
     speech_page: Option<String>,
     /// The daemon's own Chrome profile (chrome_launch.rs).
@@ -167,6 +178,8 @@ impl Core {
             followed_field: None,
             home_at: None,
             mic_hovered: false,
+            last_app: None,
+            last_field_check: None,
             speech_page: None,
             profile_dir: chrome_launch::profile_dir(),
             launched: None,
@@ -712,6 +725,7 @@ impl Core {
         let os = self.platform.os_description();
         let host = self.host.as_ref();
         let notes = self.platform.platform_notes();
+        let field_check = self.last_field_check.as_ref().map(|(at, check)| field_check::report(at, check));
         diag::report(&diag::Snapshot {
             os: &os,
             config: &self.config,
@@ -720,6 +734,7 @@ impl Core {
             browser: host.and_then(|h| h.browser.as_deref()),
             errors: &self.errors,
             notes: &notes,
+            field_check: field_check.as_ref(),
         })
     }
 
@@ -1019,6 +1034,9 @@ impl Core {
     /// floating mic comes to the field, and goes back to the corner once the focus has been off
     /// the fields for `HOME_DELAY`.
     fn field_changed(&mut self, probe: &FieldProbe, at: Instant) {
+        if let Some(app) = probe.app_id.as_ref().filter(|_| !probe.on_taskbar) {
+            self.last_app = Some(app.clone());
+        }
         if self.icon_follows_fields() {
             let Some(anchor) = beside_field::anchor(&self.config.beside_field, probe) else {
                 // Only a mic that came to a field goes back; one the focus never brought stays
@@ -1052,6 +1070,36 @@ impl Core {
         }
     }
 
+    /// "The mic does not come to this app's text fields" (plan C1): the app the user was in is
+    /// watched for `field_check::CHECK_FOR` while the user clicks into its text field. Nothing is
+    /// learnt from it yet; the bubble says what was found.
+    fn check_fields(&mut self) {
+        // Nothing reports fields while the mic beside them is off, so there would be nothing to see.
+        if !self.config.beside_field.enabled {
+            self.platform.tell(&t("native_bubbleCheckFieldsOff"), MESSAGE_HOLD, true);
+            return;
+        }
+        let Some(app) = self.last_app.clone() else {
+            self.platform.tell(&t("native_bubbleCheckFieldsNoApp"), MESSAGE_HOLD, true);
+            return;
+        };
+        tracing::info!(app = %app, "checking the app's text fields");
+        self.platform.check_fields(&app);
+        let seconds = field_check::CHECK_FOR.as_secs().to_string();
+        let text = t_with("native_bubbleCheckFieldsStart", &[("seconds", &seconds), ("app", &app)]);
+        // Held until the result takes its place.
+        self.platform.tell(&text, field_check::CHECK_FOR + Duration::from_secs(2), true);
+    }
+
+    /// The look at an app's text fields is over: the bubble says what was found, and the
+    /// diagnostic info keeps it.
+    fn fields_checked(&mut self, check: FieldCheck) {
+        let verdict = field_check::classify(&check.seen);
+        tracing::info!(app = %check.app_id, ?verdict, seen = check.seen.len(), "checked the app's text fields");
+        self.platform.tell(&field_check::message(verdict, &check.app_id), FIELD_CHECK_HOLD, true);
+        self.last_field_check = Some((diag::utc_now(), check));
+    }
+
     fn handle_platform(&mut self, ev: PlatformEvent) -> Flow {
         match ev {
             PlatformEvent::MicHover(_) | PlatformEvent::FieldChanged { .. } => {}
@@ -1073,6 +1121,7 @@ impl Core {
             }
             PlatformEvent::MicButton(button) => self.mic_button(button),
             PlatformEvent::FieldChanged { probe, at } => self.field_changed(&probe, at),
+            PlatformEvent::FieldsChecked(check) => self.fields_checked(check),
             PlatformEvent::IconMoved { x, y } => {
                 self.config.icon.x = Some(x);
                 self.config.icon.y = Some(y);
@@ -1134,6 +1183,7 @@ impl Core {
                         tracing::warn!(error = %e, "could not copy the diagnostic info");
                     }
                 }
+                MenuAction::CheckFields => self.check_fields(),
                 MenuAction::About => {
                     let _ = self.open_settings_at(Some("about"));
                 }
@@ -1401,6 +1451,9 @@ pub mod tests {
         }
         fn icon_home(&self) {
             self.log("icon home".into());
+        }
+        fn check_fields(&self, app_id: &str) {
+            self.log(format!("check fields {app_id}"));
         }
     }
 
@@ -2325,6 +2378,7 @@ pub mod tests {
             caret: Some(Rect { x: 100, y: 200, width: 1, height: 18 }),
             bounds: None,
             pointer: None,
+            on_taskbar: false,
         }
     }
 
@@ -2592,5 +2646,96 @@ pub mod tests {
         h.core.tick();
         assert!(!went_home(&h.fake.take()));
         assert!(h.core.next_deadline().is_none());
+    }
+
+    fn check_fields(h: &mut Harness) -> Vec<String> {
+        h.core.handle(Event::Platform(PlatformEvent::Menu(MenuAction::CheckFields)));
+        h.fake.take()
+    }
+
+    fn said(calls: &[String], text: &str) -> bool {
+        calls.iter().any(|c| c.starts_with(&format!("tell {text} ")))
+    }
+
+    #[test]
+    fn looking_at_an_app_needs_the_beside_mic_on_and_an_app_to_look_at() {
+        // Off (the default): nothing reports fields, so there is nothing to watch.
+        let mut h = Harness::new();
+        h.connect();
+        let calls = check_fields(&mut h);
+        assert!(said(&calls, &t("native_bubbleCheckFieldsOff")), "{calls:?}");
+        assert!(!calls.iter().any(|c| c.starts_with("check fields")), "{calls:?}");
+        // On, but no app has had the focus since.
+        let mut h = following_fields();
+        let calls = check_fields(&mut h);
+        assert!(said(&calls, &t("native_bubbleCheckFieldsNoApp")), "{calls:?}");
+        assert!(!calls.iter().any(|c| c.starts_with("check fields")), "{calls:?}");
+    }
+
+    #[test]
+    fn the_app_looked_at_is_the_one_the_user_was_in_not_the_taskbar() {
+        let mut h = following_fields();
+        focus(&mut h, FieldProbe { app_id: Some("line.exe".into()), ..FieldProbe::default() });
+        // The tray was clicked: the taskbar took the focus (vtype's own menu is not reported).
+        focus(&mut h, FieldProbe { app_id: Some("explorer.exe".into()), on_taskbar: true, ..FieldProbe::default() });
+        // The pointer leaving a field (hover) names no app.
+        focus(&mut h, FieldProbe::default());
+        h.fake.take();
+        let start = t_with("native_bubbleCheckFieldsStart", &[("seconds", "10"), ("app", "line.exe")]);
+        assert_eq!(
+            check_fields(&mut h),
+            vec!["check fields line.exe".to_string(), format!("tell {start} 12s notify=true")]
+        );
+        // File Explorer itself is an app like any other.
+        focus(&mut h, FieldProbe { app_id: Some("explorer.exe".into()), ..FieldProbe::default() });
+        assert!(check_fields(&mut h).contains(&"check fields explorer.exe".to_string()));
+    }
+
+    #[test]
+    fn what_was_found_is_said_and_kept_for_the_diagnostic_info() {
+        let mut h = following_fields();
+        assert_eq!(h.core.diagnostics()["lastFieldCheck"], Value::Null);
+        h.core.handle(Event::Platform(PlatformEvent::FieldsChecked(field_check::tests::line())));
+        let text = field_check::message(field_check::Verdict::AfterWindow, "line.exe");
+        assert_eq!(h.fake.take(), vec![format!("tell {text} 12s notify=true")]);
+        let check = &h.core.diagnostics()["lastFieldCheck"];
+        assert_eq!(check["appId"], "line.exe");
+        assert_eq!(check["verdict"], "after_window");
+        assert_eq!(check["seen"][3]["path"], "recheck");
+        assert_eq!(check["seen"][3]["class"], "AutoSuggestTextArea");
+    }
+
+    #[test]
+    fn diagnostics_carry_no_text_from_the_fields_looked_at() {
+        // A look at an app's fields keeps only these facts about each element: there is no room
+        // for its name or value, which can hold a chat's text.
+        let mut h = following_fields();
+        h.ext(json!({"type":"session","event":{"kind":"final","text":"do not keep this sentence"}}));
+        h.core.handle(Event::Platform(PlatformEvent::FieldsChecked(field_check::tests::line())));
+        let report = h.core.diagnostics();
+        assert!(!serde_json::to_string(&report).unwrap().contains("do not keep"));
+        let keys = |v: &Value| v.as_object().unwrap().keys().cloned().collect::<Vec<_>>();
+        let check = &report["lastFieldCheck"];
+        assert_eq!(keys(check), ["appId", "at", "seen", "verdict"]);
+        let seen = check["seen"].as_array().unwrap();
+        assert!(!seen.is_empty());
+        for s in seen {
+            assert_eq!(
+                keys(s),
+                [
+                    "afterMs",
+                    "bounds",
+                    "class",
+                    "hasText",
+                    "hasValue",
+                    "keyboardFocusable",
+                    "kind",
+                    "path",
+                    "readOnly",
+                    "takesText"
+                ]
+            );
+            assert_eq!(keys(&s["bounds"]), ["height", "width", "x", "y"]);
+        }
     }
 }

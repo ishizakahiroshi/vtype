@@ -41,6 +41,9 @@ pub struct FieldProbe {
     /// Where the pointer was when the field took the focus (screen pixels). Inside the field it
     /// is where the user clicked.
     pub pointer: Option<(i32, i32)>,
+    /// Part of the Windows taskbar, which takes the focus when the tray is clicked: not the app
+    /// the user was in.
+    pub on_taskbar: bool,
 }
 
 fn contains(r: Rect, (x, y): (i32, i32)) -> bool {
@@ -239,6 +242,7 @@ mod tests {
             caret: Some(Rect { x: 100, y: 200, width: 1, height: 18 }),
             bounds: Some(Rect { x: 50, y: 190, width: 400, height: 40 }),
             pointer: None,
+            on_taskbar: false,
         }
     }
 

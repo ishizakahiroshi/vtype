@@ -190,6 +190,7 @@ fn offline_diagnostics() -> serde_json::Value {
         browser: None,
         errors: &errors,
         notes: &[],
+        field_check: None,
     });
     report["running"] = serde_json::Value::Bool(false);
     report

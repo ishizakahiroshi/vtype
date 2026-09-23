@@ -13,6 +13,7 @@ use thiserror::Error;
 
 pub use crate::beside_field::{Anchor, FieldProbe};
 use crate::config::{BesideFieldConfig, InjectMethod};
+pub use crate::field_check::FieldCheck;
 pub use crate::overlay_logic::{MicButton, MicPart};
 use crate::protocol::InputMode;
 pub use crate::ripple::VoiceCue;
@@ -69,6 +70,9 @@ pub enum PlatformEvent {
         probe: FieldProbe,
         at: Instant,
     },
+    /// What `Platform::check_fields` saw of the app (only Windows checks).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    FieldsChecked(FieldCheck),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,6 +95,9 @@ pub enum MenuAction {
     OpenSettings,
     ReportBug,
     CopyDiagnostics,
+    /// "The mic does not come to this app's text fields": watch the app the user was in, and say
+    /// why (plan C1). Only in Windows' menu (`crate::menu::MENU_CHECKS_FIELDS`).
+    CheckFields,
     /// Open the settings page at "About vtype".
     About,
     Quit,
@@ -133,7 +140,7 @@ pub enum InjectOutcome {
     CopiedOnly,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Rect {
     pub x: i32,
     pub y: i32,
@@ -238,6 +245,10 @@ pub trait Platform: Send + Sync {
     /// screen the pointer is on, not saved as its position. Nothing when it is off screen, held,
     /// or under the pointer.
     fn icon_home(&self) {}
+    /// Watches `app_id` for `field_check::CHECK_FOR`: what it reports taking the focus, and what
+    /// its focused element is. The result comes back as `PlatformEvent::FieldsChecked`. Systems
+    /// that do not bring the mic to fields do nothing.
+    fn check_fields(&self, _app_id: &str) {}
 }
 
 /// The implementation for the OS this binary was built for.

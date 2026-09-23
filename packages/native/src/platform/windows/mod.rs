@@ -202,6 +202,13 @@ impl Platform for WindowsPlatform {
     fn icon_home(&self) {
         self.shared.run(|ui| ui.icon_home());
     }
+
+    fn check_fields(&self, app_id: &str) {
+        match self.beside().watcher_mut() {
+            Some(watcher) => watcher.check(app_id.to_string()),
+            None => tracing::warn!("field check: the fields are not being watched"),
+        }
+    }
 }
 
 /// A daemon started from the Run key or by double-click gets a console window of its own

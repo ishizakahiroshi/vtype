@@ -422,6 +422,50 @@
     "message": "入力欄の文字を全部消す",
     "description": "Desktop app: bubble when the pointer rests on the bottom-left button of the floating mic, which empties the focused text field"
   },
+  "native_trayCheckFields": {
+    "message": "このアプリで入力欄の近くに出ない",
+    "description": "Desktop app (Windows): menu item. Watches the app the user was in for a few seconds to find out why the mic does not come to its text fields"
+  },
+  "native_bubbleCheckFieldsOff": {
+    "message": "設定ページで「ほかのアプリの入力欄の横にマイクを出す」をオンにしてから、もう一度選んでください。",
+    "description": "Desktop app (Windows): the check of an app's text fields needs the mic beside text fields switched on. The quoted name is optionsNativeBeside without \"(experimental)\""
+  },
+  "native_bubbleCheckFieldsNoApp": {
+    "message": "先に、調べたいアプリの入力欄を 1 回クリックしてから、もう一度選んでください。",
+    "description": "Desktop app (Windows): no app has had the focus yet, so there is no app to check"
+  },
+  "native_bubbleCheckFieldsStart": {
+    "message": "{seconds} 秒以内に、{app} の入力欄を 1 回クリックしてください。",
+    "description": "Desktop app (Windows): the check of an app's text fields started. {seconds} is how long it watches, {app} the app's program name, e.g. line.exe"
+  },
+  "native_bubbleCheckFieldsReported": {
+    "message": "{app} は入力欄に入ったことを知らせてきます。マイクは入力欄の近くに来るはずです。",
+    "description": "Desktop app (Windows): check result. The app reports its text field taking the focus. {app} is the app's program name"
+  },
+  "native_bubbleCheckFieldsAfterWindow": {
+    "message": "{app} は窓に入ったことだけを知らせ、少し遅れて入力欄に移ります。vtype はこれを待つので、マイクは入力欄の近くに来るはずです。",
+    "description": "Desktop app (Windows): check result. The app reports only its window, and its text field takes the focus a moment later. {app} is the app's program name"
+  },
+  "native_bubbleCheckFieldsOnlyWhenAsked": {
+    "message": "{app} から、入力欄に入ったという知らせは届きませんでした。ただ、vtype から問い合わせると入力欄が分かりました。",
+    "description": "Desktop app (Windows): check result. No report came, but asking for the focused element found the text field. {app} is the app's program name"
+  },
+  "native_bubbleCheckFieldsAlreadyThere": {
+    "message": "調べ始めたときから {app} の入力欄にカーソルがあったため、違いが分かりませんでした。{app} の中でいったん別の場所を押してから入力欄を押す形で、もう一度調べてください。",
+    "description": "Desktop app (Windows): check result. The text field had the focus before the check began and kept it, so clicking it reported nothing; the user should click elsewhere first and run the check again. {app} is the app's program name"
+  },
+  "native_bubbleCheckFieldsNotTaken": {
+    "message": "{app} で入力欄らしい部品が見つかりましたが、vtype は入力欄として扱っていません。",
+    "description": "Desktop app (Windows): check result. Something that looks typeable had the focus, but vtype does not take it as a text field. {app} is the app's program name"
+  },
+  "native_bubbleCheckFieldsNothing": {
+    "message": "{seconds} 秒のあいだに、{app} の入力欄は見つかりませんでした。",
+    "description": "Desktop app (Windows): check result. Nothing that looks like a text field was found. {seconds} is how long it watched, {app} the app's program name"
+  },
+  "native_bubbleCheckFieldsDetails": {
+    "message": "詳しい記録は「診断情報をコピー」でコピーできます。",
+    "description": "Desktop app (Windows): second line of every check result. The quoted name is the menu item native_trayCopyDiagnostics"
+  },
   "optionsModeLegend": {
     "message": "入力モード",
     "description": "Options page: title of the input mode choice"

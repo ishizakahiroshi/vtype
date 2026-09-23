@@ -20,11 +20,15 @@ pub fn tooltip() -> String {
 /// Linux trays (AppIndicator) report no clicks, so there the menu itself starts and stops.
 pub const MENU_STARTS_RECORDING: bool = cfg!(target_os = "linux");
 
+/// Only Windows brings the floating mic to text fields, so only there can the user ask why it
+/// does not come to an app's (plan C1).
+pub const MENU_CHECKS_FIELDS: bool = cfg!(windows);
+
 pub fn tray_menu(state: &TrayState) -> Vec<MenuItem> {
-    menu_items(state, MENU_STARTS_RECORDING)
+    menu_items(state, MENU_STARTS_RECORDING, MENU_CHECKS_FIELDS)
 }
 
-pub fn menu_items(state: &TrayState, with_record_item: bool) -> Vec<MenuItem> {
+pub fn menu_items(state: &TrayState, with_record_item: bool, with_field_check: bool) -> Vec<MenuItem> {
     let mode = |m: InputMode, label: String| MenuItem::Radio {
         action: MenuAction::SetMode(m),
         label,
@@ -54,6 +58,11 @@ pub fn menu_items(state: &TrayState, with_record_item: bool) -> Vec<MenuItem> {
         MenuItem::Action { action: MenuAction::AddSelectionAsTemplate, label: t("native_menuAddSelection") },
         MenuItem::Action { action: MenuAction::OpenSettings, label: t("native_trayOpenSettings") },
         MenuItem::Action { action: MenuAction::ReportBug, label: t("native_trayReportBug") },
+    ]);
+    if with_field_check {
+        items.push(MenuItem::Action { action: MenuAction::CheckFields, label: t("native_trayCheckFields") });
+    }
+    items.extend([
         MenuItem::Action { action: MenuAction::CopyDiagnostics, label: t("native_trayCopyDiagnostics") },
         MenuItem::Action { action: MenuAction::About, label: t("native_trayAbout") },
         MenuItem::Separator,
@@ -343,12 +352,32 @@ mod tests {
         let state = TrayState::default();
         let first = |items: Vec<MenuItem>| items.into_iter().next();
         assert!(matches!(
-            first(menu_items(&state, true)),
+            first(menu_items(&state, true, false)),
             Some(MenuItem::Action { action: MenuAction::ToggleRecording, .. })
         ));
         assert!(matches!(
-            first(menu_items(&state, false)),
+            first(menu_items(&state, false, false)),
             Some(MenuItem::Check { action: MenuAction::ToggleIconVisible, .. })
         ));
+    }
+
+    #[test]
+    fn asking_why_the_mic_does_not_come_is_only_where_it_comes_to_fields() {
+        let state = TrayState::default();
+        let actions = |items: Vec<MenuItem>| -> Vec<MenuAction> {
+            items
+                .into_iter()
+                .filter_map(|item| match item {
+                    MenuItem::Action { action, .. } => Some(action),
+                    _ => None,
+                })
+                .collect()
+        };
+        let with = actions(menu_items(&state, false, true));
+        let at = with.iter().position(|a| *a == MenuAction::CheckFields).expect("the item");
+        // Next to "Copy diagnostic info", which then carries what it found.
+        assert_eq!(with[at + 1], MenuAction::CopyDiagnostics);
+        assert!(!actions(menu_items(&state, false, false)).contains(&MenuAction::CheckFields));
+        assert_eq!(actions(tray_menu(&state)).contains(&MenuAction::CheckFields), cfg!(windows));
     }
 }
