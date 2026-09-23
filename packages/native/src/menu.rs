@@ -207,15 +207,20 @@ pub fn list_after(list: &TemplateList, action: MenuAction) -> TemplateList {
 
 /// The two buttons of a template row, in the row's own units (pixels or points), measured from
 /// its right end: each is `ROW_BUTTON` wide with `ROW_BUTTON_GAP` between, `ROW_PAD_RIGHT` from
-/// the end.
+/// the end. Only the systems that draw the rows themselves (Windows, macOS) place the buttons by
+/// these; GTK lays its row out and asks the widgets where they are.
 pub const ROW_BUTTON: f64 = 24.0;
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub const ROW_BUTTON_GAP: f64 = 2.0;
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub const ROW_PAD_RIGHT: f64 = 6.0;
 /// Room the buttons take at the right end of a row, with a gap before the text.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub const ROW_BUTTONS_WIDTH: f64 = ROW_PAD_RIGHT + 2.0 * ROW_BUTTON + ROW_BUTTON_GAP + 8.0;
 
 /// The left and right edge of the edit and the delete button in a row `width` wide, with
 /// `scale` units per point.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub fn row_buttons(width: f64, scale: f64) -> [(RowPart, f64, f64); 2] {
     let right = width - ROW_PAD_RIGHT * scale;
     let delete = (right - ROW_BUTTON * scale, right);
@@ -224,6 +229,7 @@ pub fn row_buttons(width: f64, scale: f64) -> [(RowPart, f64, f64); 2] {
 }
 
 /// Which part of a template row `x` (from the row's left edge) is on.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub fn row_part(x: f64, width: f64, scale: f64) -> RowPart {
     row_buttons(width, scale)
         .into_iter()
