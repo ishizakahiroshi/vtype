@@ -38,6 +38,13 @@ pub fn plist(exe: &Path) -> String {
     )
 }
 
+/// The plist, rewritten to start `exe` when it starts another copy of vtype (moved, or another
+/// build); `None` when it starts `exe` already.
+pub fn repointed_plist(text: &str, exe: &Path) -> Option<String> {
+    let wanted = plist(exe);
+    (text != wanted).then_some(wanted)
+}
+
 fn xml_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -69,6 +76,14 @@ mod tests {
     #[test]
     fn escapes_the_path() {
         assert!(plist(Path::new("/opt/a&b<c>/vtype")).contains("<string>/opt/a&amp;b&lt;c&gt;/vtype</string>"));
+    }
+
+    #[test]
+    fn a_plist_for_another_copy_is_pointed_here() {
+        let here = Path::new("/Applications/vtype/vtype");
+        let old = plist(Path::new("/Volumes/Old/vtype/vtype"));
+        assert_eq!(repointed_plist(&old, here), Some(plist(here)));
+        assert_eq!(repointed_plist(&plist(here), here), None);
     }
 
     #[test]

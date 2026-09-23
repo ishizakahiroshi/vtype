@@ -13,7 +13,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE, SW_HIDE, SW_SHOWNOACTIVATE, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
 };
 
-use crate::platform::PlatformError;
+use crate::platform::{Autostart, PlatformError};
 use crate::win_registry::{self, Hive};
 
 pub const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -25,18 +25,50 @@ pub fn autostart_command(exe: &Path) -> String {
     format!("\"{}\" daemon", exe.display())
 }
 
+/// The Run value, rewritten to start `exe` when it starts another copy of vtype (moved, or another
+/// build); `None` when it starts `exe` already. Windows paths are compared without case.
+pub fn repointed_run_value(value: &str, exe: &Path) -> Option<String> {
+    let wanted = autostart_command(exe);
+    (!value.eq_ignore_ascii_case(&wanted)).then_some(wanted)
+}
+
+pub fn autostart() -> Result<Autostart, PlatformError> {
+    let exe = std::env::current_exe().map_err(PlatformError::failed)?;
+    if crate::install::is_msix_install(&exe) {
+        return super::startup_task::autostart();
+    }
+    let value = win_registry::get_string(Hive::CurrentUser, RUN_KEY, Some(RUN_VALUE)).map_err(PlatformError::failed)?;
+    Ok(Autostart { enabled: value.is_some(), can_change: true })
+}
+
 pub fn set_autostart(enabled: bool) -> Result<(), PlatformError> {
     let exe = std::env::current_exe().map_err(PlatformError::failed)?;
     // An MSIX install starts through its StartupTask (the package manifest); the Run key would
     // point into a folder that changes with every update.
     if crate::install::is_msix_install(&exe) {
-        return Err(PlatformError::Unsupported);
+        return super::startup_task::set_autostart(enabled);
     }
     if enabled {
         win_registry::set_string(Hive::CurrentUser, RUN_KEY, Some(RUN_VALUE), &autostart_command(&exe))
             .map_err(PlatformError::failed)
     } else {
         win_registry::delete_value(Hive::CurrentUser, RUN_KEY, RUN_VALUE).map_err(PlatformError::failed)
+    }
+}
+
+/// The Run value starting another copy of vtype now starts this one. (The Store version's
+/// StartupTask always starts the package's own.)
+pub fn autostart_here() {
+    let Ok(exe) = std::env::current_exe() else { return };
+    if crate::install::is_msix_install(&exe) {
+        return;
+    }
+    let Ok(Some(value)) = win_registry::get_string(Hive::CurrentUser, RUN_KEY, Some(RUN_VALUE)) else { return };
+    if let Some(value) = repointed_run_value(&value, &exe) {
+        match win_registry::set_string(Hive::CurrentUser, RUN_KEY, Some(RUN_VALUE), &value) {
+            Ok(()) => tracing::info!("starting at sign-in now starts this copy of vtype"),
+            Err(e) => tracing::warn!(error = %e, "could not point starting at sign-in here"),
+        }
     }
 }
 
@@ -194,6 +226,16 @@ mod tests {
     #[test]
     fn autostart_runs_the_daemon() {
         assert_eq!(autostart_command(Path::new(r"X:\Apps\vtype\vtype.exe")), r#""X:\Apps\vtype\vtype.exe" daemon"#);
+    }
+
+    #[test]
+    fn a_run_value_for_another_copy_is_pointed_here() {
+        let here = Path::new(r"X:\Apps\vtype\vtype.exe");
+        let old = autostart_command(Path::new(r"X:\Old\vtype\vtype.exe"));
+        assert_eq!(repointed_run_value(&old, here), Some(autostart_command(here)));
+        assert_eq!(repointed_run_value(&autostart_command(here), here), None);
+        // Windows paths ignore case.
+        assert_eq!(repointed_run_value(r#""x:\apps\VTYPE\vtype.exe" daemon"#, here), None);
     }
 
     #[test]

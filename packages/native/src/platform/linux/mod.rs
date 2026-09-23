@@ -159,8 +159,16 @@ impl Platform for LinuxPlatform {
         self.shared.run(move |ui| ui.show_kept(text));
     }
 
+    fn autostart(&self) -> Result<super::Autostart, PlatformError> {
+        system::autostart()
+    }
+
     fn set_autostart(&self, enabled: bool) -> Result<(), PlatformError> {
         system::set_autostart(enabled)
+    }
+
+    fn autostart_here(&self) {
+        system::autostart_here()
     }
 
     fn launch_chrome(&self, args: &[String]) -> Result<(), PlatformError> {

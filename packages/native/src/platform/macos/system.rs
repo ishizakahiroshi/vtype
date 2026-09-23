@@ -7,15 +7,34 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use objc2_foundation::NSLocale;
 
 use crate::launch_agent;
-use crate::platform::PlatformError;
+use crate::platform::{Autostart, PlatformError};
 
 const CHROME_APP: &str = "Google Chrome";
 
+fn plist_path() -> Result<std::path::PathBuf, PlatformError> {
+    directories::BaseDirs::new()
+        .map(|d| launch_agent::plist_path(d.home_dir()))
+        .ok_or_else(|| PlatformError::Failed("no home folder".into()))
+}
+
+pub fn autostart() -> Result<Autostart, PlatformError> {
+    Ok(Autostart { enabled: plist_path()?.is_file(), can_change: true })
+}
+
+/// The LaunchAgent starting another copy of vtype now starts this one.
+pub fn autostart_here() {
+    let (Ok(path), Ok(exe)) = (plist_path(), std::env::current_exe()) else { return };
+    let Ok(text) = std::fs::read_to_string(&path) else { return };
+    if let Some(text) = launch_agent::repointed_plist(&text, &exe) {
+        match std::fs::write(&path, text) {
+            Ok(()) => tracing::info!("starting at login now starts this copy of vtype"),
+            Err(e) => tracing::warn!(error = %e, "could not point starting at login here"),
+        }
+    }
+}
+
 pub fn set_autostart(enabled: bool) -> Result<(), PlatformError> {
-    let home = directories::BaseDirs::new()
-        .map(|d| d.home_dir().to_path_buf())
-        .ok_or_else(|| PlatformError::Failed("no home folder".into()))?;
-    let path = launch_agent::plist_path(&home);
+    let path = plist_path()?;
     if enabled {
         let exe = std::env::current_exe().map_err(PlatformError::failed)?;
         if let Some(dir) = path.parent() {

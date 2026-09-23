@@ -13,10 +13,11 @@
 //
 // First run: nothing is recognised before the user agrees that their voice goes to Google
 // through Chrome's speech recognition (Microsoft Store policy 10.5.2). The desktop app keeps the
-// answer in its config.json and says so with `?consent=1` in the URL. The microphone is then
-// allowed by the desktop app itself, in its own Chrome profile: Chrome's per-site prompt means
-// nothing to someone using a desktop app, and its "allow this time" would not survive the window
-// being started again.
+// answer in its config.json and says so with `?consent=1` in the URL. The same step asks whether
+// vtype starts when the user signs in (ticked unless unticked); the answer goes with `consent` and
+// the desktop app switches it. The microphone is then allowed by the desktop app itself, in its
+// own Chrome profile: Chrome's per-site prompt means nothing to someone using a desktop app, and
+// its "allow this time" would not survive the window being started again.
 //
 // The window: the first-run window (`setup=1`) only asks for consent and then closes itself; a page
 // cannot move its own window off screen (Chrome pulls `window.moveTo` back onto it), so the
@@ -362,10 +363,16 @@ export function createSpeechPage(options: SpeechPageOptions = {}): SpeechPage {
     placeWindow();
   }
 
+  /** "Start vtype when you sign in" on the consent step: yes unless the user unticked it. */
+  function autostartChosen(): boolean {
+    const box = doc?.getElementById("consent-autostart") as HTMLInputElement | null | undefined;
+    return box?.checked ?? true;
+  }
+
   async function consent(): Promise<void> {
     if (!consented) {
       consented = true;
-      post({ type: "consent" });
+      post({ type: "consent", autostart: autostartChosen() });
     }
     render();
     postPageState();
@@ -376,6 +383,7 @@ export function createSpeechPage(options: SpeechPageOptions = {}): SpeechPage {
 
   setText("title", t("speech_title"));
   setText("consent-lead", t("speech_consent_lead"));
+  setText("consent-autostart-label", t("settings_autostart"));
   setText("consent-button", t("speech_consent_button"));
   setText("microphone-lead", t("speech_mic_lead"));
   setText("microphone-button", t("speech_mic_button"));

@@ -206,6 +206,9 @@ fn serve(mut stream: TcpStream, token: &str, origin: &str, tx: Sender<Event>) ->
     if name == "api/open" {
         return serve_open(stream, head, origin, tx);
     }
+    if name == "api/autostart" {
+        return serve_autostart(stream, head, origin, tx);
+    }
     if head.method != "GET" || name.contains("..") {
         return not_found(&mut stream);
     }
@@ -309,6 +312,33 @@ fn serve_open(mut stream: TcpStream, head: Head, origin: &str, tx: Sender<Event>
     };
     match ask(&tx, Request::OpenLink { link }) {
         Some(Reply::Ok) => respond(&mut stream, "204 No Content", "text/plain; charset=utf-8", b""),
+        _ => unavailable(&mut stream),
+    }
+}
+
+/// `GET` / `POST /t/<token>/api/autostart` (`{"enabled": bool}`): whether vtype starts at sign-in
+/// (plan C12). Both answer `{"enabled", "canChange"}`, after switching for `POST`.
+fn serve_autostart(mut stream: TcpStream, head: Head, origin: &str, tx: Sender<Event>) -> io::Result<()> {
+    #[derive(serde::Deserialize)]
+    struct Switch {
+        enabled: bool,
+    }
+    let req = match head.method.as_str() {
+        "GET" => Request::GetAutostart,
+        "POST" => {
+            let Some(body) = page_post_body(&mut stream, &head, origin)? else { return Ok(()) };
+            match serde_json::from_slice(&body) {
+                Ok(Switch { enabled }) => Request::SetAutostart { enabled },
+                Err(_) => return respond(&mut stream, "400 Bad Request", "text/plain; charset=utf-8", b"bad switch"),
+            }
+        }
+        _ => return not_found(&mut stream),
+    };
+    match ask(&tx, req) {
+        Some(Reply::Autostart { autostart }) => {
+            let body = serde_json::to_vec(&autostart).map_err(io::Error::other)?;
+            respond(&mut stream, "200 OK", "application/json; charset=utf-8", &body)
+        }
         _ => unavailable(&mut stream),
     }
 }
@@ -641,6 +671,57 @@ mod tests {
         assert!(head.starts_with("HTTP/1.1 404"), "{head}");
         drop(h);
         assert_eq!(core.join().unwrap(), vec![Request::OpenLink { link: AboutLink::Source }]);
+    }
+
+    #[test]
+    fn the_settings_page_reads_and_switches_starting_at_sign_in() {
+        use crate::platform::Autostart;
+        let (tx, rx) = mpsc::channel();
+        let h = start_on(&[0], tx).unwrap();
+        // Like Core: off until switched; a switch to off fails.
+        let core = thread::spawn(move || {
+            let mut asked = Vec::new();
+            let mut state = Autostart { enabled: false, can_change: true };
+            while let Ok(ev) = rx.recv_timeout(Duration::from_secs(3)) {
+                if let Event::Request { req, out, .. } = ev {
+                    let reply = match req {
+                        Request::SetAutostart { enabled: false } => Reply::error("autostart_failed", "no"),
+                        Request::SetAutostart { enabled } => {
+                            state.enabled = enabled;
+                            Reply::Autostart { autostart: state }
+                        }
+                        _ => Reply::Autostart { autostart: state },
+                    };
+                    asked.push(req);
+                    let _ = out.send(reply);
+                }
+            }
+            asked
+        });
+        let path = format!("/t/{}/api/autostart", h.token);
+        let (head, body) = get(&h, &path);
+        assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+        assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), json!({"enabled": false, "canChange": true}));
+        let (head, body) = post_to(&h, &path, &h.origin(), "application/json", r#"{"enabled":true}"#);
+        assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+        assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), json!({"enabled": true, "canChange": true}));
+        let (head, _) = post_to(&h, &path, &h.origin(), "application/json", r#"{"enabled":false}"#);
+        assert!(head.starts_with("HTTP/1.1 503"), "{head}");
+        // Not a switch, or not from the settings page: the daemon is not asked.
+        let (head, _) = post_to(&h, &path, &h.origin(), "application/json", r#"{"enabled":"yes"}"#);
+        assert!(head.starts_with("HTTP/1.1 400"), "{head}");
+        let (head, _) = post_to(&h, &path, "https://example.com", "application/json", r#"{"enabled":true}"#);
+        assert!(head.starts_with("HTTP/1.1 403"), "{head}");
+        drop(h);
+        let asked = core.join().unwrap();
+        assert_eq!(
+            asked,
+            vec![
+                Request::GetAutostart,
+                Request::SetAutostart { enabled: true },
+                Request::SetAutostart { enabled: false }
+            ]
+        );
     }
 
     #[test]

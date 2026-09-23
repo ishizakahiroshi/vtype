@@ -694,6 +694,18 @@
     "message": "話している途中で新しい文字が出なくなってから、この秒数で録音を止めます。話し始める前は数えません。止まるだけで送信はしません。",
     "description": "Desktop app settings page: hint under the stop-after-speaking choice. Silence before speaking does not count; stopping does not send"
   },
+  "settings_autostart": {
+    "message": "サインインしたら vtype を起動する",
+    "description": "Desktop app settings page and the first-run consent step of its speech page: checkbox to start the desktop app when the user signs in to the computer"
+  },
+  "settings_autostartLocked": {
+    "message": "Windows の設定の［アプリ］→［スタートアップ］で切り替えてください。",
+    "description": "Desktop app settings page: under the start-at-sign-in checkbox when this page cannot switch it (Microsoft Store build, switched in Windows by the user or a policy). Name the menus as Windows Settings shows them"
+  },
+  "settings_autostartFailed": {
+    "message": "サインイン時の起動を切り替えられませんでした。",
+    "description": "Desktop app settings page: status when starting at sign-in could not be switched"
+  },
   "settings_templatesTitle": {
     "message": "テンプレート",
     "description": "Desktop app settings page: title of the templates section"

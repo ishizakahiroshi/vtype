@@ -67,6 +67,44 @@ pub fn autostart_entry(exe: &Path) -> String {
     )
 }
 
+/// The .deb's entry, for every user of the machine (Cargo.toml's `package.metadata.deb`).
+pub const SYSTEM_AUTOSTART: &str = "/etc/xdg/autostart/vtype.desktop";
+
+/// A user's entry that turns the system's off for them (the specification's `Hidden`).
+pub fn autostart_off_entry() -> String {
+    "[Desktop Entry]\nType=Application\nName=vtype\nHidden=true\n".to_string()
+}
+
+fn entry_is_off(entry: &str) -> bool {
+    entry.lines().map(str::trim).any(|l| l == "Hidden=true" || l == "X-GNOME-Autostart-enabled=false")
+}
+
+/// Whether vtype starts at login: the user's entry wins over the system's of the same name.
+pub fn autostart_on(user_entry: Option<&str>, system_entry: bool) -> bool {
+    match user_entry {
+        Some(entry) => !entry_is_off(entry),
+        None => system_entry,
+    }
+}
+
+/// What to write as the user's entry to switch starting at login, or `None` to remove it.
+pub fn autostart_user_entry(enabled: bool, exe: &Path, system_entry: bool) -> Option<String> {
+    match (enabled, system_entry) {
+        (true, _) => Some(autostart_entry(exe)),
+        (false, true) => Some(autostart_off_entry()),
+        (false, false) => None,
+    }
+}
+
+/// The user's entry, rewritten to start `exe` when it starts another copy of vtype (moved, or
+/// another build); `None` when it starts `exe` already or is off.
+pub fn repointed_entry(user_entry: &str, exe: &Path) -> Option<String> {
+    let wanted = autostart_entry(exe);
+    let exec = |entry: &str| entry.lines().find(|l| l.starts_with("Exec=")).map(str::to_string);
+    let differs = exec(user_entry).is_some_and(|line| Some(line) != exec(&wanted));
+    (!entry_is_off(user_entry) && differs).then_some(wanted)
+}
+
 // --- GNOME custom shortcut ------------------------------------------------------------------
 
 pub const MEDIA_KEYS_SCHEMA: &str = "org.gnome.settings-daemon.plugins.media-keys";
@@ -214,6 +252,39 @@ mod tests {
         assert!(autostart_path(Path::new("/var/lib/vtype-test/.config")).ends_with("autostart/vtype.desktop"));
         assert_eq!(desktop_exec_arg("/opt/my apps/vtype"), "\"/opt/my apps/vtype\"");
         assert_eq!(desktop_exec_arg("/opt/a$b/100%"), "\"/opt/a\\$b/100%%\"");
+    }
+
+    #[test]
+    fn the_users_entry_decides_over_the_systems() {
+        let on = autostart_entry(Path::new("/opt/vtype/vtype"));
+        let off = autostart_off_entry();
+        assert!(autostart_on(None, true), "the .deb's entry");
+        assert!(!autostart_on(None, false));
+        assert!(autostart_on(Some(&on), false));
+        assert!(!autostart_on(Some(&off), true), "turned off for this user");
+        assert!(!autostart_on(Some("[Desktop Entry]\nX-GNOME-Autostart-enabled=false\n"), true));
+    }
+
+    #[test]
+    fn switching_writes_or_removes_the_users_entry() {
+        let exe = Path::new("/opt/vtype/vtype");
+        assert_eq!(autostart_user_entry(true, exe, false), Some(autostart_entry(exe)));
+        assert_eq!(autostart_user_entry(true, exe, true), Some(autostart_entry(exe)));
+        // Off: a system entry needs overriding; without one there is nothing to leave behind.
+        assert_eq!(autostart_user_entry(false, exe, true), Some(autostart_off_entry()));
+        assert_eq!(autostart_user_entry(false, exe, false), None);
+        let off = autostart_user_entry(false, exe, true).unwrap();
+        assert!(!autostart_on(Some(&off), true));
+    }
+
+    #[test]
+    fn an_entry_for_another_copy_is_pointed_here() {
+        let old = autostart_entry(Path::new("/opt/old/vtype"));
+        let here = Path::new("/opt/vtype/vtype");
+        assert_eq!(repointed_entry(&old, here), Some(autostart_entry(here)));
+        assert_eq!(repointed_entry(&autostart_entry(here), here), None);
+        // Off stays off.
+        assert_eq!(repointed_entry(&autostart_off_entry(), here), None);
     }
 
     #[test]

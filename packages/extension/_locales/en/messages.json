@@ -694,6 +694,18 @@
     "message": "Stops recording when no new words have come for this long. Silence before you start speaking does not count. It only stops; nothing is sent.",
     "description": "Desktop app settings page: hint under the stop-after-speaking choice. Silence before speaking does not count; stopping does not send"
   },
+  "settings_autostart": {
+    "message": "Start vtype when you sign in",
+    "description": "Desktop app settings page and the first-run consent step of its speech page: checkbox to start the desktop app when the user signs in to the computer"
+  },
+  "settings_autostartLocked": {
+    "message": "Switch it in Windows Settings > Apps > Startup.",
+    "description": "Desktop app settings page: under the start-at-sign-in checkbox when this page cannot switch it (Microsoft Store build, switched in Windows by the user or a policy). Name the menus as Windows Settings shows them"
+  },
+  "settings_autostartFailed": {
+    "message": "Could not change whether vtype starts when you sign in.",
+    "description": "Desktop app settings page: status when starting at sign-in could not be switched"
+  },
   "settings_templatesTitle": {
     "message": "Templates",
     "description": "Desktop app settings page: title of the templates section"

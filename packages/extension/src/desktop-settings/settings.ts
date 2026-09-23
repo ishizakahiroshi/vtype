@@ -12,6 +12,11 @@
 // config as applied (the desktop app keeps what the page does not edit, such as the icon's
 // position and the consent).
 //
+// Starting at sign-in is the OS's, not config.json's, so it has `api/autostart` of its own: read
+// when the page opens (the field stays hidden when it cannot be), and switched by the same save
+// button only when the checkbox was changed. The Microsoft Store build cannot switch it back once
+// the user or a policy switched it in Windows; the checkbox is then locked and says where to go.
+//
 // There is one settings window: every "open settings" starts a new one (Chrome has no way to
 // bring an `--app` window back), so a window that opens tells the others over a
 // BroadcastChannel, and the older ones hand it what they hold unsaved and close.
@@ -55,6 +60,8 @@ export interface SettingsDraft {
   replacements?: string;
   /** The desktop app's own fields (`NATIVE_FIELDS`), by element id. */
   native?: Record<string, string | boolean>;
+  /** Start vtype at sign-in, when the checkbox was changed. */
+  autostart?: boolean;
   newTemplate?: string;
   /** A template being edited: the saved text (to find it again) and the text now. */
   editing?: { original: string; text: string };
@@ -103,6 +110,19 @@ export function apiUrl(href: string, name = "config"): string {
   return url.toString();
 }
 
+/** What `api/autostart` answers: whether vtype starts at sign-in, and whether this page may switch it. */
+interface Autostart {
+  readonly enabled: boolean;
+  /** False only in the Microsoft Store build, once the user or a policy switched it in Windows. */
+  readonly canChange: boolean;
+}
+
+function isAutostart(v: unknown): v is Autostart {
+  if (typeof v !== "object" || v === null) return false;
+  const r = v as Record<string, unknown>;
+  return typeof r.enabled === "boolean" && typeof r.canChange === "boolean";
+}
+
 /**
  * The template to open for editing: the desktop app opens `…/settings#template-<index>` when the
  * user chose "Edit" in the floating mic's templates menu.
@@ -135,7 +155,10 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
   const fetchJson: Fetch = options.fetch ?? ((url, init) => globalThis.fetch(url, init));
   const href = options.href ?? globalThis.location?.href ?? "http://127.0.0.1/settings";
   const url = apiUrl(href);
+  const autostartUrl = apiUrl(href, "autostart");
   let config: NativeConfig | null = null;
+  /** Starting at sign-in as the desktop app last said; null while it could not be read. */
+  let autostart: Autostart | null = null;
 
   const setText = (id: string, text: string, className?: string): void => {
     const el = doc.getElementById(id);
@@ -162,6 +185,8 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
   setText("repl-lead", t("optionsReplLead"));
   setText("repl-save", t("optionsReplSave"));
   setText("nc-legend", t("optionsNativeLegend"));
+  setText("nc-autostart-label", t("settings_autostart"));
+  setText("nc-autostart-hint", t("settings_autostartLocked"));
   setText("nc-hotkey-label", t("optionsNativeHotkey"));
   setText("nc-hotkey-hint", t("optionsNativeHotkeyHint"));
   setText("nc-icon-visible-label", t("optionsNativeIconVisible"));
@@ -377,6 +402,45 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
     }
   }
 
+  const autostartBox = el("nc-autostart", HTMLInputElement);
+
+  /** Shows starting at sign-in as the desktop app last said: hidden when unknown, locked when Windows decides. */
+  function fillAutostart(): void {
+    const field = doc.getElementById("nc-autostart-field");
+    if (field !== null) field.hidden = autostart === null;
+    const hint = doc.getElementById("nc-autostart-hint");
+    if (hint !== null) hint.hidden = autostart === null || autostart.canChange;
+    if (autostartBox === null) return;
+    autostartBox.checked = autostart?.enabled ?? false;
+    autostartBox.disabled = autostart === null || !autostart.canChange;
+  }
+
+  /** The checkbox says other than the desktop app, and this page may switch it. */
+  function autostartEdited(): boolean {
+    return autostart !== null && autostart.canChange && autostartBox !== null && autostartBox.checked !== autostart.enabled;
+  }
+
+  /** Switches starting at sign-in when the checkbox was changed, and shows what the desktop app answers. */
+  async function saveAutostart(): Promise<void> {
+    if (!autostartEdited()) return;
+    const wanted = autostartBox!.checked;
+    try {
+      const res = await fetchJson(autostartUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: wanted }),
+      });
+      const got = res.ok ? await res.json() : null;
+      if (!isAutostart(got)) throw new Error("not switched");
+      autostart = got;
+      // Windows may keep it as it was (the Microsoft Store build): shown as it is, and said so.
+      if (got.enabled !== wanted) throw new Error("not switched");
+    } catch {
+      setText("status", t("settings_autostartFailed"), "err");
+    }
+    fillAutostart();
+  }
+
   for (const radio of modeRadios()) {
     radio.addEventListener("change", () => {
       if (!radio.checked || !isInputMode(radio.value) || config === null) return;
@@ -457,8 +521,20 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
   doc.getElementById("nc-form")?.addEventListener("submit", (e) => {
     e.preventDefault();
     if (config === null) return;
-    void save(readNative(config), t("optionsSaved"));
+    // Starting at sign-in after the config; when the config was not saved, it is put back too.
+    void save(readNative(config), t("optionsSaved")).then((saved) => (saved ? saveAutostart() : fillAutostart()));
   });
+
+  const autostartLoaded = (async () => {
+    try {
+      const res = await fetchJson(autostartUrl);
+      const got = res.ok ? await res.json() : null;
+      if (isAutostart(got)) autostart = got;
+    } catch {
+      // An older desktop app, or the OS could not say: the field stays hidden.
+    }
+    fillAutostart();
+  })();
 
   const loaded = (async () => {
     try {
@@ -477,6 +553,7 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
     } catch {
       setText("status", t("settings_failed"), "err");
     }
+    await autostartLoaded;
   })();
 
   // About vtype. This window is a Chrome profile of its own, so its links are opened by the
@@ -540,6 +617,7 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
         else if (select !== null) d.native[id] = select.value;
       }
     }
+    if (autostartEdited()) d.autostart = autostartBox!.checked;
     if (tplNew !== null && tplNew.value.trim() !== "") d.newTemplate = tplNew.value;
     const original = editing === null ? undefined : templates()[editing];
     const area = doc.querySelector<HTMLTextAreaElement>("#tpl-list textarea.tpl-edit");
@@ -558,6 +636,8 @@ export function initSettingsPage(options: SettingsPageOptions = {}): SettingsPag
       else if (input !== null && typeof value === "string") input.value = value;
       else if (select !== null && typeof value === "string") select.value = value;
     }
+    // Only where this window may switch it too (not hidden, not locked by Windows).
+    if (typeof d.autostart === "boolean" && autostartBox !== null && !autostartBox.disabled) autostartBox.checked = d.autostart;
     if (typeof d.newTemplate === "string" && tplNew !== null) tplNew.value = d.newTemplate;
     const edit = d.editing;
     const index = edit === undefined ? -1 : templates().indexOf(edit.original);

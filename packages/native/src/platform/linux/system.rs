@@ -4,8 +4,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::linux_setup::{autostart_entry, autostart_path};
-use crate::platform::PlatformError;
+use crate::linux_setup::{autostart_on, autostart_path, autostart_user_entry, repointed_entry, SYSTEM_AUTOSTART};
+use crate::platform::{Autostart, PlatformError};
 
 /// In the order they are tried.
 const CHROME_COMMANDS: [&str; 4] = ["google-chrome-stable", "google-chrome", "chromium", "chromium-browser"];
@@ -16,19 +16,49 @@ fn config_dir() -> Result<PathBuf, PlatformError> {
         .ok_or_else(|| PlatformError::Failed("no home folder".into()))
 }
 
+/// The user's autostart entry, when there is one.
+fn user_entry(path: &Path) -> Result<Option<String>, PlatformError> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(Some(text)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(PlatformError::failed(e)),
+    }
+}
+
+pub fn autostart() -> Result<Autostart, PlatformError> {
+    let entry = user_entry(&autostart_path(&config_dir()?))?;
+    Ok(Autostart { enabled: autostart_on(entry.as_deref(), Path::new(SYSTEM_AUTOSTART).is_file()), can_change: true })
+}
+
+/// The user's entry decides; with the .deb's entry for everyone, switching off writes one that
+/// turns it off for this user.
 pub fn set_autostart(enabled: bool) -> Result<(), PlatformError> {
     let path = autostart_path(&config_dir()?);
-    if enabled {
-        let exe = std::env::current_exe().map_err(PlatformError::failed)?;
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).map_err(PlatformError::failed)?;
+    let exe = std::env::current_exe().map_err(PlatformError::failed)?;
+    match autostart_user_entry(enabled, &exe, Path::new(SYSTEM_AUTOSTART).is_file()) {
+        Some(entry) => {
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir).map_err(PlatformError::failed)?;
+            }
+            std::fs::write(&path, entry).map_err(PlatformError::failed)
         }
-        std::fs::write(&path, autostart_entry(&exe)).map_err(PlatformError::failed)
-    } else {
-        match std::fs::remove_file(&path) {
+        None => match std::fs::remove_file(&path) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(PlatformError::failed(e)),
+        },
+    }
+}
+
+/// The user's entry starting another copy of vtype now starts this one.
+pub fn autostart_here() {
+    let (Ok(dir), Ok(exe)) = (config_dir(), std::env::current_exe()) else { return };
+    let path = autostart_path(&dir);
+    let Ok(Some(entry)) = user_entry(&path) else { return };
+    if let Some(entry) = repointed_entry(&entry, &exe) {
+        match std::fs::write(&path, entry) {
+            Ok(()) => tracing::info!("starting at login now starts this copy of vtype"),
+            Err(e) => tracing::warn!(error = %e, "could not point starting at login here"),
         }
     }
 }

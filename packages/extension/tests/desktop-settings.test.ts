@@ -11,6 +11,7 @@ const PAGE = "http://127.0.0.1:47213/t/0123456789abcdef0123456789abcdef/settings
 const API = "http://127.0.0.1:47213/t/0123456789abcdef0123456789abcdef/api/config";
 const ABOUT_API = "http://127.0.0.1:47213/t/0123456789abcdef0123456789abcdef/api/about";
 const OPEN_API = "http://127.0.0.1:47213/t/0123456789abcdef0123456789abcdef/api/open";
+const AUTOSTART_API = "http://127.0.0.1:47213/t/0123456789abcdef0123456789abcdef/api/autostart";
 
 const CONFIG = {
   hotkey: null,
@@ -24,15 +25,22 @@ const CONFIG = {
 
 type Call = { url: string; method: string; body: unknown };
 
+type Autostart = { enabled: boolean; canChange: boolean };
+
 /**
  * A desktop app that stores what it is sent and answers with it (or fails). "About vtype" is
  * answered aside: its version, and the links it was asked to open in `opened`, not in `calls`.
+ * So is starting at sign-in: `os.autostart` is the OS's state, and what the page asked to switch
+ * (answered or not) is in `switched`. A locked one (`canChange: false`, the Store build) stays.
  */
-function fakeApp(initial: unknown = CONFIG) {
+function fakeApp(initial: unknown = CONFIG, startup: Autostart = { enabled: true, canChange: true }) {
   let stored: unknown = structuredClone(initial);
   const calls: Call[] = [];
   const opened: unknown[] = [];
+  const switched: unknown[] = [];
+  const os = { autostart: { ...startup } };
   let failing = false;
+  let autostartFailing = false;
   const fetch = async (url: string, init?: { method?: string; body?: string }) => {
     const method = init?.method ?? "GET";
     const body = init?.body === undefined ? undefined : (JSON.parse(init.body) as unknown);
@@ -40,6 +48,12 @@ function fakeApp(initial: unknown = CONFIG) {
     if (url === OPEN_API) {
       if (!failing) opened.push(body);
       return { ok: !failing, json: async () => ({}) };
+    }
+    if (url === AUTOSTART_API) {
+      if (method === "POST") switched.push(body);
+      if (failing || autostartFailing) return { ok: false, json: async () => ({}) };
+      if (method === "POST" && os.autostart.canChange) os.autostart.enabled = (body as Autostart).enabled;
+      return { ok: true, json: async () => ({ ...os.autostart }) };
     }
     calls.push({ url, method, body });
     if (failing) return { ok: false, json: async () => ({}) };
@@ -50,8 +64,13 @@ function fakeApp(initial: unknown = CONFIG) {
     fetch,
     calls,
     opened,
+    switched,
+    os,
     fail: () => {
       failing = true;
+    },
+    failAutostart: () => {
+      autostartFailing = true;
     },
   };
 }
@@ -352,6 +371,116 @@ describe("the desktop settings page", () => {
   });
 });
 
+describe("starting at sign-in on the desktop settings page", () => {
+  const box = () => $<HTMLInputElement>("nc-autostart");
+  const submit = () => $("nc-form").dispatchEvent(new Event("submit", { cancelable: true }));
+
+  it("shows it first in the desktop app's settings, as the OS has it", async () => {
+    const app = fakeApp(CONFIG, { enabled: false, canChange: true });
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "ja" }).loaded;
+    expect(document.querySelector("#nc-form fieldset .field")?.id).toBe("nc-autostart-field");
+    expect($("nc-autostart-field").hidden).toBe(false);
+    expect($("nc-autostart-label").textContent).toBe(translate("settings_autostart", "ja"));
+    expect(box().checked).toBe(false);
+    expect(box().disabled).toBe(false);
+    expect($("nc-autostart-hint").hidden).toBe(true);
+    // Reading it is not a settings call.
+    expect(app.calls).toEqual([{ url: API, method: "GET", body: undefined }]);
+  });
+
+  it("is switched by the save button, only when it was changed", async () => {
+    const app = fakeApp();
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "en" }).loaded;
+    expect(box().checked).toBe(true);
+    submit();
+    await flush();
+    expect(app.calls[1]).toMatchObject({ url: API, method: "POST" });
+    expect(app.switched).toEqual([]);
+
+    box().checked = false;
+    submit();
+    await flush();
+    expect(app.switched).toEqual([{ enabled: false }]);
+    expect(app.os.autostart.enabled).toBe(false);
+    expect(box().checked).toBe(false);
+    expect($("status").textContent).toBe(translate("optionsSaved", "en"));
+    expect($("status").className).toBe("ok");
+    // The rest of the form is saved as before, each time; starting at sign-in is not in the config.
+    expect(app.calls.filter((c) => c.method === "POST")).toHaveLength(2);
+    expect(app.calls.at(-1)!.body).not.toHaveProperty("autostart");
+  });
+
+  it("is locked, with where to switch it, when Windows decides (the Store build)", async () => {
+    const app = fakeApp(CONFIG, { enabled: false, canChange: false });
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "ja" }).loaded;
+    expect($("nc-autostart-field").hidden).toBe(false);
+    expect(box().checked).toBe(false);
+    expect(box().disabled).toBe(true);
+    expect($("nc-autostart-hint").hidden).toBe(false);
+    expect($("nc-autostart-hint").textContent).toBe(translate("settings_autostartLocked", "ja"));
+    // Not switched even when the box says otherwise.
+    box().checked = true;
+    submit();
+    await flush();
+    expect(app.switched).toEqual([]);
+  });
+
+  it("is hidden when the desktop app cannot say, and the rest of the page works", async () => {
+    const app = fakeApp();
+    app.failAutostart();
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "en" }).loaded;
+    expect($("nc-autostart-field").hidden).toBe(true);
+    expect($("status").textContent).toBe("");
+    expect($<HTMLInputElement>("mode-normal").checked).toBe(true);
+    submit();
+    await flush();
+    expect(app.calls[1]).toMatchObject({ url: API, method: "POST" });
+    expect(app.switched).toEqual([]);
+    expect($("status").textContent).toBe(translate("optionsSaved", "en"));
+  });
+
+  it("says so when it could not be switched, and shows it as it is", async () => {
+    const app = fakeApp();
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "en" }).loaded;
+    app.failAutostart();
+    box().checked = false;
+    submit();
+    await flush();
+    expect(app.calls[1]).toMatchObject({ url: API, method: "POST" });
+    expect(app.switched).toEqual([{ enabled: false }]);
+    expect($("status").textContent).toBe(translate("settings_autostartFailed", "en"));
+    expect($("status").className).toBe("err");
+    expect(box().checked).toBe(true);
+  });
+
+  it("says so when Windows kept it as it was, and locks it", async () => {
+    const app = fakeApp(CONFIG, { enabled: false, canChange: true });
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "en" }).loaded;
+    // Meanwhile the user switched it off in Task Manager (the Store build): Windows keeps it off.
+    app.os.autostart.canChange = false;
+    box().checked = true;
+    submit();
+    await flush();
+    expect(app.switched).toEqual([{ enabled: true }]);
+    expect($("status").textContent).toBe(translate("settings_autostartFailed", "en"));
+    expect(box().checked).toBe(false);
+    expect(box().disabled).toBe(true);
+    expect($("nc-autostart-hint").hidden).toBe(false);
+  });
+
+  it("is not switched when the settings could not be saved, and is put back", async () => {
+    const app = fakeApp();
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "en" }).loaded;
+    app.fail();
+    box().checked = false;
+    submit();
+    await flush();
+    expect(app.switched).toEqual([]);
+    expect($("status").textContent).toBe(translate("settings_failed", "en"));
+    expect(box().checked).toBe(true);
+  });
+});
+
 describe("one settings window at a time", () => {
   const editFirstTemplate = (text: string) => {
     const edit = [...document.querySelectorAll("#tpl-list li")][0]!.querySelectorAll("button");
@@ -426,6 +555,21 @@ describe("one settings window at a time", () => {
     expect(closed).toBe(1);
     expect((second.getElementById("nc-beside-chrome") as HTMLInputElement).checked).toBe(false);
     expect(app.calls.filter((c) => c.method === "POST")).toEqual([]);
+  });
+
+  it("a changed start-at-sign-in alone is handed over too", async () => {
+    const app = fakeApp();
+    const channel = channels();
+    let closed = 0;
+    await initSettingsPage({ href: PAGE, fetch: app.fetch, language: "en", channel: channel(), openedAt: 1, close: () => closed++ })
+      .loaded;
+    $<HTMLInputElement>("nc-autostart").checked = false;
+    const second = secondWindow();
+    await initSettingsPage({ doc: second, href: PAGE, fetch: app.fetch, language: "en", channel: channel(), openedAt: 2 }).loaded;
+    await settle();
+    expect(closed).toBe(1);
+    expect((second.getElementById("nc-autostart") as HTMLInputElement).checked).toBe(false);
+    expect(app.switched).toEqual([]);
   });
 
   it("an older window with nothing unsaved just closes", async () => {

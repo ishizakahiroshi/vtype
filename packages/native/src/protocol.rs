@@ -57,6 +57,12 @@ pub enum Request {
     OpenLink {
         link: crate::about::AboutLink,
     },
+    /// The settings page reads whether vtype starts at sign-in (plan C12).
+    GetAutostart,
+    /// The settings page switches it; the reply is the state after.
+    SetAutostart {
+        enabled: bool,
+    },
     /// A recognizer connected: the speech page, with `origin` `http://127.0.0.1:<port>`.
     HostHello {
         origin: String,
@@ -87,6 +93,9 @@ pub enum Reply {
     },
     Config {
         config: crate::config::NativeConfig,
+    },
+    Autostart {
+        autostart: crate::platform::Autostart,
     },
     /// A message for the speech page; speech_host.rs sends it unchanged.
     ToExtension {
@@ -155,8 +164,12 @@ pub enum FromExtension {
     Error {
         code: String,
     },
-    /// The daemon's speech page (standalone plan C2): the user pressed "agree and start".
-    Consent,
+    /// The daemon's speech page (standalone plan C2): the user pressed "agree and start", with
+    /// the first-run screen's "start vtype when you sign in" (plan C12; absent from older pages).
+    Consent {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        autostart: Option<bool>,
+    },
     /// Where the speech page's first-run setup stands.
     PageState {
         consented: bool,

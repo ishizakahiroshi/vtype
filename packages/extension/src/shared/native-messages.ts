@@ -67,8 +67,11 @@ export type ExtensionToNative =
   | { readonly type: "get-native-config" }
   | { readonly type: "error"; readonly code: string }
   // The desktop app's own speech page (standalone plan C2). The Rust side reads these from C4 on.
-  /** The user pressed "agree and start" on the speech page. */
-  | { readonly type: "consent" }
+  /**
+   * The user pressed "agree and start" on the speech page, with "start vtype when you sign in"
+   * ticked or not (older pages leave `autostart` out).
+   */
+  | { readonly type: "consent"; readonly autostart?: boolean }
   /** Where the speech page's first-run setup stands. */
   | { readonly type: "page-state"; readonly consented: boolean; readonly micGranted: boolean }
   /** The user clicked the hidden speech window's taskbar button: open the desktop app's settings. */
@@ -177,9 +180,10 @@ export function isExtensionToNative(m: unknown): m is ExtensionToNative {
     case "set-native-config":
       return isNativeConfig(r.config);
     case "get-native-config":
-    case "consent":
     case "open-settings":
       return true;
+    case "consent":
+      return r.autostart === undefined || typeof r.autostart === "boolean";
     case "page-state":
       return typeof r.consented === "boolean" && typeof r.micGranted === "boolean";
     case "error":

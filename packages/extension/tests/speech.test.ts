@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSpeechRecognizer } from "vtype-core";
+import { translate } from "../src/shared/i18n";
 import { RETRY_FIRST_MS, SETUP_CLOSE_MS, createSpeechPage, socketUrl, type SocketLike, type SpeechPage } from "../src/speech/speech";
 import { FakeSpeechRecognition, flush } from "./fake-chrome";
 
@@ -214,6 +215,14 @@ describe("the speech page and the desktop app", () => {
   });
 });
 
+/** The real speech.html in the test's document, without its script. */
+function mountPage(): void {
+  document.body.innerHTML = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "src", "speech", "speech.html"),
+    "utf8",
+  ).replace(/<script[^>]*><\/script>/, "");
+}
+
 describe("first run", () => {
   it("before consent a start is refused and nothing is recognised", async () => {
     page = makePage(PAGE, "prompt");
@@ -226,21 +235,39 @@ describe("first run", () => {
   });
 
   it("in a window that stays, the consent button sends consent, then asks for the microphone", async () => {
-    document.body.innerHTML = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), "..", "src", "speech", "speech.html"),
-      "utf8",
-    ).replace(/<script[^>]*><\/script>/, "");
+    mountPage();
     page = makePage(`${PAGE}?stay=1`, "prompt", document);
     const s = await connected();
     expect(document.getElementById("consent-lead")?.textContent).toContain("Google へ送られ");
     expect(document.getElementById("consent-step")?.hidden).toBe(false);
     document.getElementById("consent-button")?.click();
     await flush(vi);
-    expect(s.ofType("consent")).toHaveLength(1);
+    // Starting at sign-in is ticked unless the user unticks it.
+    expect(s.ofType("consent")).toEqual([{ type: "consent", autostart: true }]);
     expect(s.ofType("page-state").at(-1)).toEqual({ type: "page-state", consented: true, micGranted: true });
     expect(page.step).toBe("ready");
     expect(document.getElementById("ready-step")?.hidden).toBe(false);
     expect(document.getElementById("consent-step")?.hidden).toBe(true);
+  });
+
+  it("the consent step asks to start vtype at sign-in, ticked, and an unticked box goes with consent", async () => {
+    mountPage();
+    page = makePage(`${PAGE}?setup=1`, "prompt", document);
+    const s = await connected();
+    const box = document.getElementById("consent-autostart") as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    expect(document.getElementById("consent-autostart-label")?.textContent).toBe(translate("settings_autostart", "ja"));
+    box.checked = false;
+    document.getElementById("consent-button")?.click();
+    await flush(vi);
+    expect(s.ofType("consent")).toEqual([{ type: "consent", autostart: false }]);
+  });
+
+  it("without the page's box (no document), consent says to start at sign-in", async () => {
+    page = makePage(`${PAGE}?setup=1`, "prompt");
+    const s = await connected();
+    await page.consent();
+    expect(s.ofType("consent")).toEqual([{ type: "consent", autostart: true }]);
   });
 
   it("with consent in the URL and the microphone granted, the page is ready at once", async () => {

@@ -262,6 +262,27 @@ impl Core {
         self.register_hotkey();
         self.platform.watch_fields(&self.config.beside_field);
         self.update_tray();
+        // A copy moved or built elsewhere: starting at sign-in follows it (plan C12).
+        self.platform.autostart_here();
+    }
+
+    /// Whether vtype starts at sign-in, for the settings page (plan C12).
+    fn autostart(&self) -> Reply {
+        match self.platform.autostart() {
+            Ok(autostart) => Reply::Autostart { autostart },
+            Err(e) => Reply::error("autostart_unavailable", e.to_string()),
+        }
+    }
+
+    /// Switches starting at sign-in; the reply is the state after.
+    fn set_autostart(&mut self, enabled: bool) -> Reply {
+        if let Err(e) = self.platform.set_autostart(enabled) {
+            tracing::warn!(error = %e, enabled, "could not switch starting at sign-in");
+            self.errors.push("autostart_failed");
+            return Reply::error("autostart_failed", e.to_string());
+        }
+        tracing::info!(enabled, "starting at sign-in switched");
+        self.autostart()
     }
 
     fn icon_position(&self) -> Option<(i32, i32)> {
@@ -450,6 +471,8 @@ impl Core {
                 Ok(()) => Reply::Ok,
                 Err(e) => Reply::error("open_failed", e.to_string()),
             }),
+            Request::GetAutostart => Some(self.autostart()),
+            Request::SetAutostart { enabled } => Some(self.set_autostart(enabled)),
             Request::Quit => {
                 let _ = out.send(Reply::Ok);
                 return Flow::Quit;
@@ -791,11 +814,15 @@ impl Core {
                 }
                 self.update_tray();
             }
-            FromExtension::Consent => {
+            FromExtension::Consent { autostart } => {
                 tracing::info!("the user agreed on the speech page");
                 if !self.config.consented {
                     self.config.consented = true;
                     self.save_config();
+                }
+                // The first-run screen's "start vtype when you sign in".
+                if let Some(enabled) = autostart {
+                    let _ = self.set_autostart(enabled);
                 }
             }
             FromExtension::PageState { consented, mic_granted } => {
@@ -1444,7 +1471,7 @@ pub fn run() -> Result<()> {
 pub mod tests {
     use super::*;
     use crate::config::InjectMethod;
-    use crate::platform::FieldInfo;
+    use crate::platform::{Autostart, FieldInfo};
     use serde_json::json;
     use std::path::Path;
     use std::sync::Mutex;
@@ -1463,6 +1490,10 @@ pub mod tests {
         pub icon_follows: Mutex<bool>,
         /// Acts like Wayland: no mic to keep words above.
         pub cannot_keep: Mutex<bool>,
+        /// Whether vtype starts at sign-in (off, and changeable, until set).
+        pub autostart: Mutex<Option<Autostart>>,
+        /// Switching starting at sign-in fails.
+        pub autostart_fails: Mutex<bool>,
     }
 
     impl FakePlatform {
@@ -1537,9 +1568,19 @@ pub mod tests {
                 None => self.log("kept gone".into()),
             }
         }
+        fn autostart(&self) -> Result<Autostart, PlatformError> {
+            Ok(self.autostart.lock().unwrap().unwrap_or(Autostart { enabled: false, can_change: true }))
+        }
         fn set_autostart(&self, enabled: bool) -> Result<(), PlatformError> {
             self.log(format!("autostart {enabled}"));
+            if *self.autostart_fails.lock().unwrap() {
+                return Err(PlatformError::Failed("no".into()));
+            }
+            *self.autostart.lock().unwrap() = Some(Autostart { enabled, can_change: true });
             Ok(())
+        }
+        fn autostart_here(&self) {
+            self.log("autostart here".into());
         }
         fn launch_chrome(&self, args: &[String]) -> Result<(), PlatformError> {
             self.log(format!("chrome {}", args.join(" ")));
@@ -2634,6 +2675,42 @@ pub mod tests {
         let settings = "http://127.0.0.1:47213/t/0123456789abcdef0123456789abcdef/settings#about";
         let expected = format!("chrome {}", chrome_launch::settings_args(Path::new("/p"), settings).join(" "));
         assert_eq!(h.fake.take(), vec![expected]);
+    }
+
+    #[test]
+    fn the_settings_page_reads_and_switches_starting_at_sign_in() {
+        let mut h = Harness::new();
+        let off = Autostart { enabled: false, can_change: true };
+        assert_eq!(h.cli(Request::GetAutostart), Reply::Autostart { autostart: off });
+        let on = Autostart { enabled: true, can_change: true };
+        assert_eq!(h.cli(Request::SetAutostart { enabled: true }), Reply::Autostart { autostart: on });
+        assert!(h.fake.take().contains(&"autostart true".to_string()));
+        // A failure is said as such, not as a state.
+        *h.fake.autostart_fails.lock().unwrap() = true;
+        let reply = h.cli(Request::SetAutostart { enabled: false });
+        assert!(matches!(reply, Reply::Error { ref code, .. } if code == "autostart_failed"), "{reply:?}");
+    }
+
+    #[test]
+    fn the_first_run_screen_decides_starting_at_sign_in() {
+        let mut h = Harness::new();
+        h.connect();
+        h.ext(json!({"type":"consent","autostart":true}));
+        assert!(h.fake.take().contains(&"autostart true".to_string()));
+        assert!(h.core.config().consented);
+        // A page from before the choice existed says nothing about it: nothing is switched.
+        let mut h = Harness::new();
+        h.connect();
+        h.ext(json!({"type":"consent"}));
+        assert!(!h.fake.take().iter().any(|c| c.starts_with("autostart")));
+        assert!(h.core.config().consented);
+    }
+
+    #[test]
+    fn starting_up_points_sign_in_at_this_copy() {
+        let mut h = Harness::new();
+        h.core.start();
+        assert!(h.fake.take().contains(&"autostart here".to_string()));
     }
 
     #[test]

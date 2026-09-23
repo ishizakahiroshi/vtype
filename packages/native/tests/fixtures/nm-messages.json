@@ -54,6 +54,8 @@
     { "type": "get-native-config" },
     { "type": "error", "code": "offscreen-unavailable" },
     { "type": "consent" },
+    { "type": "consent", "autostart": true },
+    { "type": "consent", "autostart": false },
     { "type": "page-state", "consented": true, "micGranted": false },
     { "type": "open-settings" }
   ],
@@ -67,6 +69,7 @@
     { "type": "session", "event": { "kind": "final" } },
     { "type": "session", "event": { "kind": "activity" } },
     { "type": "set-native-config" },
-    { "type": "page-state", "consented": true }
+    { "type": "page-state", "consented": true },
+    { "type": "consent", "autostart": "yes" }
   ]
 }

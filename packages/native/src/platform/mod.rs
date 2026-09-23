@@ -29,9 +29,10 @@ pub mod windows;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum PlatformError {
-    /// (Every macOS feature is there, so the macOS code never says this.)
+    /// (Every macOS and Windows feature is there, so their code never says this; the Store
+    /// version switches starting at sign-in through its StartupTask, plan C12.)
     #[error("not supported on this system")]
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    #[cfg_attr(any(target_os = "macos", windows), allow(dead_code))]
     Unsupported,
     #[error("{0}")]
     Failed(String),
@@ -164,6 +165,16 @@ pub struct FieldInfo {
     pub is_text_field: Option<bool>,
 }
 
+/// Whether vtype starts at sign-in (plan C12), for the settings page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Autostart {
+    pub enabled: bool,
+    /// False when only the OS can change it: the Store version after the user or a policy decided
+    /// in Windows.
+    pub can_change: bool,
+}
+
 /// Keys the floating mic's buttons press in the foreground app.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EditKeys {
@@ -223,7 +234,12 @@ pub trait Platform: Send + Sync {
     /// `None` takes them away. Live text and messages cover them while they show, and the words
     /// come back after. Called again, it shows them where the mic is now.
     fn show_kept(&self, _text: Option<&str>) {}
+    /// Whether vtype starts at sign-in, as the OS has it.
+    fn autostart(&self) -> Result<Autostart, PlatformError>;
     fn set_autostart(&self, enabled: bool) -> Result<(), PlatformError>;
+    /// When vtype starts at sign-in from another copy of itself (moved, or another build), makes
+    /// it start this one. Nothing when it does not start at sign-in.
+    fn autostart_here(&self) {}
     /// Starts Chrome with `args` (e.g. `--no-startup-window`, or a URL to open).
     fn launch_chrome(&self, args: &[String]) -> Result<(), PlatformError>;
     fn open_url(&self, url: &str) -> Result<(), PlatformError>;
