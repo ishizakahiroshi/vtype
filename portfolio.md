@@ -1,4 +1,11 @@
 ---
+cover:
+  path: portfolio/overview-2026-09-28.jpg
+  alt: {ja: "vtype の紹介動画", en: "vtype overview video"}
+video:
+  provider: youtube
+  id: "_SgX7JzClJ8"
+  durationSeconds: 20
 schemaVersion: 1
 color: "#6366f1"
 initials: "vt"
