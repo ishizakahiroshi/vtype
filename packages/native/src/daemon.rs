@@ -407,7 +407,7 @@ impl Core {
             }
         }
         let url = chrome_launch::page_url(&base, self.config.consented, placement);
-        let args = chrome_launch::speech_args(&self.profile_dir, &url, placement);
+        let args = chrome_launch::speech_args(&self.profile_dir, &crate::speech_host::launch_url(&url), placement);
         tracing::info!(?placement, "not connected; starting Chrome");
         if let Err(e) = self.platform.launch_chrome(&args) {
             tracing::warn!(error = %e, "could not start Chrome");
@@ -770,7 +770,7 @@ impl Core {
         if let Some(part) = part {
             url.push_str(&format!("#{part}"));
         }
-        let args = chrome_launch::settings_args(&self.profile_dir, &url);
+        let args = chrome_launch::settings_args(&self.profile_dir, &crate::speech_host::launch_url(&url));
         match self.platform.launch_chrome(&args) {
             Ok(()) => Reply::Ok,
             Err(e) => Reply::error("chrome_launch_failed", e.to_string()),
@@ -1511,8 +1511,19 @@ pub mod tests {
         fn log(&self, s: String) {
             self.calls.lock().unwrap().push(s);
         }
+        /// The calls so far. A single-use launch address (`/b/<nonce>/`) reads as the page's own
+        /// (`/t/<token>/`), so the tests compare the page that was opened, not the nonce.
         pub fn take(&self) -> Vec<String> {
-            std::mem::take(&mut *self.calls.lock().unwrap())
+            let calls = std::mem::take(&mut *self.calls.lock().unwrap());
+            calls
+                .into_iter()
+                .map(|call| match call.find("/b/") {
+                    Some(i) if call.len() >= i + 3 + 33 => {
+                        format!("{}/t/0123456789abcdef0123456789abcdef{}", &call[..i], &call[i + 3 + 32..])
+                    }
+                    _ => call,
+                })
+                .collect()
         }
     }
 

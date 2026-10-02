@@ -18,9 +18,9 @@ use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender, TryRecvError};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use serde_json::Value;
@@ -151,6 +151,7 @@ fn new_token() -> Result<String> {
 struct Head {
     method: String,
     path: String,
+    query: Option<String>,
     headers: HashMap<String, String>,
     /// Bytes read past the end of the head.
     rest: Vec<u8>,
@@ -183,6 +184,7 @@ fn read_head(stream: &mut TcpStream) -> io::Result<Option<Head>> {
     Ok(Some(Head {
         method: method.to_string(),
         path: target.split('?').next().unwrap_or_default().to_string(),
+        query: target.split_once('?').map(|(_, q)| q.to_string()),
         headers,
         rest: buf[end + 4..].to_vec(),
     }))
@@ -220,12 +222,58 @@ fn not_found(stream: &mut TcpStream) -> io::Result<()> {
     respond(stream, "404 Not Found", "text/plain; charset=utf-8", b"not found")
 }
 
+/// How long a launch address stays valid.
+const LAUNCH_TTL: Duration = Duration::from_secs(30);
+/// Launch addresses handed out and not yet used (with when they expire).
+static LAUNCH_NONCES: Mutex<Vec<(String, Instant)>> = Mutex::new(Vec::new());
+
+/// The address to give the browser's command line for `url` (`.../t/<token>/<rest>`): a
+/// single-use, short-lived address (`/b/<nonce>/<rest>`) that redirects to `url`.
+/// Anything else is returned unchanged.
+pub fn launch_url(url: &str) -> String {
+    let Some((origin, rest)) = url.split_once("/t/") else { return url.to_string() };
+    let Some((_, tail)) = rest.split_once('/') else { return url.to_string() };
+    let Ok(nonce) = new_token() else { return url.to_string() };
+    let now = Instant::now();
+    let mut live = LAUNCH_NONCES.lock().unwrap_or_else(|e| e.into_inner());
+    live.retain(|(_, until)| *until > now);
+    live.push((nonce.clone(), now + LAUNCH_TTL));
+    format!("{origin}/b/{nonce}/{tail}")
+}
+
+/// Uses up a launch address. True once, and only before it expires.
+fn take_launch_nonce(nonce: &str) -> bool {
+    let now = Instant::now();
+    let mut live = LAUNCH_NONCES.lock().unwrap_or_else(|e| e.into_inner());
+    live.retain(|(_, until)| *until > now);
+    match live.iter().position(|(n, _)| n == nonce) {
+        Some(i) => {
+            live.swap_remove(i);
+            true
+        }
+        None => false,
+    }
+}
+
 fn serve(mut stream: TcpStream, port: u16, token: &str, origin: &str, tx: Sender<Event>) -> io::Result<()> {
     stream.set_read_timeout(Some(HEAD_TIMEOUT))?;
     let Some(head) = read_head(&mut stream)? else { return Ok(()) };
     let host_hdr = head.headers.get("host").map(String::as_str);
     if !valid_host(host_hdr, port) {
         return refuse(&mut stream, "403 Forbidden", b"forbidden");
+    }
+    if let Some(rest) = head.path.strip_prefix("/b/") {
+        let Some((nonce, name)) = rest.split_once('/') else { return not_found(&mut stream) };
+        if head.method != "GET" || name.contains("..") || !take_launch_nonce(nonce) {
+            return not_found(&mut stream);
+        }
+        let query = head.query.as_deref().map(|q| format!("?{q}")).unwrap_or_default();
+        let reply = format!(
+            "HTTP/1.1 302 Found\r\nLocation: /t/{token}/{name}{query}\r\nContent-Length: 0\r\n\
+             Cache-Control: no-store\r\nConnection: close\r\n\r\n"
+        );
+        stream.write_all(reply.as_bytes())?;
+        return stream.flush();
     }
     // Everything that is not this start's token gets the same answer.
     let Some(name) =
@@ -534,6 +582,22 @@ mod tests {
             assert!(head.starts_with("HTTP/1.1 404"), "{path}: {head}");
             assert_eq!(body, b"not found", "{path}");
         }
+    }
+
+    #[test]
+    fn a_launch_address_works_once() {
+        let (h, _rx) = host();
+        let page = format!("{}?consent=1", h.page_url());
+        let launch = launch_url(&page);
+        assert!(!launch.contains(&h.token), "{launch}");
+        let path = launch.strip_prefix(&h.origin()).unwrap();
+        let (head, _) = get(&h, path);
+        assert!(head.starts_with("HTTP/1.1 302"), "{head}");
+        assert!(head.contains(&format!("Location: /t/{}/speech?consent=1", h.token)), "{head}");
+        let (head, _) = get(&h, path);
+        assert!(head.starts_with("HTTP/1.1 404"), "{head}");
+        let (head, _) = get(&h, "/b/not-issued/speech");
+        assert!(head.starts_with("HTTP/1.1 404"), "{head}");
     }
 
     #[test]
