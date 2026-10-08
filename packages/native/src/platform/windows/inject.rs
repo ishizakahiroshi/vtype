@@ -175,22 +175,25 @@ pub fn press_keys(keys: EditKeys) -> Result<(), PlatformError> {
     }
 }
 
-/// `Auto` types, and pastes when typing did not go through.
-pub fn should_fall_back_to_paste(method: InjectMethod, typed_all: bool) -> bool {
-    method == InjectMethod::Auto && !typed_all
+pub fn inject(text: &str, method: InjectMethod) -> Result<InjectOutcome, PlatformError> {
+    inject_with(text, method, type_text, paste_text)
 }
 
-pub fn inject(text: &str, method: InjectMethod) -> Result<InjectOutcome, PlatformError> {
-    if method == InjectMethod::Paste {
+/// SendInput accepting every event does not mean the app inserted the same text: an active
+/// Japanese IME can interpret the Latin letters as romaji. Auto pastes the recognized text
+/// directly, without changing the user's IME mode. Only explicit Type uses Unicode key events.
+fn inject_with(
+    text: &str,
+    method: InjectMethod,
+    type_text: impl FnOnce(&str) -> bool,
+    paste_text: impl FnOnce(&str) -> Result<(), PlatformError>,
+) -> Result<InjectOutcome, PlatformError> {
+    if method != InjectMethod::Type {
         return paste_text(text).map(|()| InjectOutcome::Pasted);
     }
     let typed_all = type_text(text);
     if typed_all {
         return Ok(InjectOutcome::Typed);
-    }
-    if should_fall_back_to_paste(method, typed_all) {
-        tracing::info!("typing was blocked; pasting instead");
-        return paste_text(text).map(|()| InjectOutcome::Pasted);
     }
     Err(PlatformError::Failed("typing was blocked".into()))
 }
@@ -235,9 +238,42 @@ mod tests {
     }
 
     #[test]
-    fn only_auto_falls_back_to_pasting() {
-        assert!(should_fall_back_to_paste(InjectMethod::Auto, false));
-        assert!(!should_fall_back_to_paste(InjectMethod::Auto, true));
-        assert!(!should_fall_back_to_paste(InjectMethod::Type, false));
+    fn auto_pastes_literal_text_without_sending_letters_to_the_ime() {
+        for text in ["ExampleBrowser", "日本語 ExampleBrowser 🎤\n次の行"] {
+            let outcome = inject_with(
+                text,
+                InjectMethod::Auto,
+                |_| panic!("typing can report success even when the IME changes the text"),
+                |pasted| {
+                    assert_eq!(pasted, text);
+                    Ok(())
+                },
+            );
+            assert!(matches!(outcome, Ok(InjectOutcome::Pasted)));
+        }
+    }
+
+    #[test]
+    fn auto_does_not_retry_a_failed_paste_as_ime_key_input() {
+        let outcome = inject_with(
+            "ExampleBrowser",
+            InjectMethod::Auto,
+            |_| panic!("must not type after a failed paste"),
+            |_| Err(PlatformError::Failed("Ctrl+V was blocked".into())),
+        );
+        assert!(outcome.is_err());
+    }
+
+    #[test]
+    fn explicit_methods_keep_their_selected_transport() {
+        let pasted = inject_with("abc", InjectMethod::Paste, |_| panic!("must paste"), |_| Ok(()));
+        assert!(matches!(pasted, Ok(InjectOutcome::Pasted)));
+        for accepted in [true, false] {
+            let typed = inject_with("abc", InjectMethod::Type, |_| accepted, |_| panic!("must type"));
+            assert_eq!(typed.is_ok(), accepted);
+            if accepted {
+                assert!(matches!(typed, Ok(InjectOutcome::Typed)));
+            }
+        }
     }
 }

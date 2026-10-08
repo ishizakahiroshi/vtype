@@ -134,6 +134,8 @@ pub struct Core {
     now: Box<dyn Fn() -> Instant + Send>,
     /// Last character typed in this recording (to space English finals apart).
     last_char: Option<char>,
+    /// Receive order within a recording; diagnostics never include recognized text.
+    received_final_count: u64,
     /// The send button was pressed while recording: the recording stops, and the send key is
     /// pressed once the last text went in (when the session ends).
     send_after_stop: bool,
@@ -205,6 +207,7 @@ impl Core {
             errors: ErrorLog::default(),
             now: Box::new(Instant::now),
             last_char: None,
+            received_final_count: 0,
             send_after_stop: false,
             deleted_template: None,
             beside_shown: false,
@@ -866,7 +869,23 @@ impl Core {
                 }
                 self.update_tray();
             }
-            FromExtension::Session { event } => self.session_event(event),
+            FromExtension::Session { event, recognition_id, is_current } => {
+                if matches!(event, SessionEvent::Final { .. }) {
+                    self.received_final_count += 1;
+                    let span = tracing::info_span!(
+                        "voice_segment",
+                        receive_order = self.received_final_count,
+                        recognition_id = ?recognition_id,
+                        is_current = ?is_current
+                    );
+                    let _entered = span.enter();
+                    tracing::info!("recognized segment received");
+                    self.session_event(event);
+                    tracing::info!("recognized segment handled");
+                } else {
+                    self.session_event(event);
+                }
+            }
             FromExtension::SetNativeConfig { config } => {
                 self.apply_config(config);
                 self.send(&ToExtension::NativeConfig { config: self.config.clone() });
@@ -989,6 +1008,7 @@ impl Core {
             SessionEvent::Started => {
                 self.recording = true;
                 self.last_char = None;
+                self.received_final_count = 0;
                 self.silence_stop_at = None;
                 self.stop_sent = false;
                 self.show_icon(IconState::Recording);
@@ -2427,6 +2447,71 @@ pub mod tests {
                 "inject again Auto"
             ]
         );
+    }
+
+    #[test]
+    fn source_order_metadata_does_not_reorder_or_drop_received_segments() {
+        // tracing's callsite registry is shared by all tests. Exercise the actual log output
+        // in a fresh test process so concurrent subscriber-free tests cannot affect it.
+        const CHILD: &str = "VTYPE_ORDER_LOG_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "daemon::tests::source_order_metadata_does_not_reorder_or_drop_received_segments"])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "isolated log test failed:\n{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        #[derive(Clone)]
+        struct Capture(Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for Capture {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let writer = Capture(bytes.clone());
+        let subscriber =
+            tracing_subscriber::fmt().without_time().with_ansi(false).with_writer(move || writer.clone()).finish();
+        let mut h = Harness::new();
+        h.connect();
+        session(&mut h, json!({"kind":"started"}));
+        tracing::subscriber::with_default(subscriber, || {
+            for (source, current, text) in [(1, true, "甲"), (2, true, "丙"), (1, false, "乙")] {
+                h.ext(json!({
+                    "type":"session", "recognitionId": source, "isCurrent": current,
+                    "event":{"kind":"final","text": text}
+                }));
+            }
+        });
+        let injected: Vec<String> = h.fake.take().into_iter().filter(|c| c.starts_with("inject ")).collect();
+        assert_eq!(injected, vec!["inject 甲 Auto", "inject 丙 Auto", "inject 乙 Auto"]);
+        assert_eq!(h.core.received_final_count, 3);
+        session(&mut h, json!({"kind":"started"}));
+        assert_eq!(h.core.received_final_count, 0);
+        let log = String::from_utf8(bytes.lock().unwrap().clone()).unwrap();
+        let mut previous = 0;
+        for order in 1..=3 {
+            let marker = format!("receive_order={order}");
+            let at = log.find(&marker).expect("receive order missing from diagnostics");
+            assert!(at >= previous);
+            previous = at;
+            assert!(log.lines().any(|line| line.contains(&marker) && line.contains("inserted")));
+        }
+        assert!(log.contains("recognition_id=Some(1) is_current=Some(false)"));
+        for text in ["甲", "乙", "丙"] {
+            assert!(!log.contains(text), "recognized text must not be logged");
+        }
     }
 
     #[test]

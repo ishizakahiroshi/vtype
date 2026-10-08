@@ -155,6 +155,10 @@ pub enum FromExtension {
     },
     Session {
         event: SessionEvent,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        recognition_id: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        is_current: Option<bool>,
     },
     /// The options page changed the desktop app's settings.
     SetNativeConfig {
@@ -281,5 +285,15 @@ mod tests {
     fn a_missing_mode_reads_as_none() {
         let req: Request = serde_json::from_str(r#"{"type":"toggle"}"#).unwrap();
         assert_eq!(req, Request::Toggle { mode: None });
+    }
+
+    #[test]
+    fn source_order_metadata_round_trips_without_breaking_old_pages() {
+        for metadata in [json!({}), json!({"recognitionId": 2, "isCurrent": false})] {
+            let mut message = json!({"type":"session","event":{"kind":"final","text":"synthetic"}});
+            message.as_object_mut().unwrap().extend(metadata.as_object().unwrap().clone());
+            let parsed: FromExtension = serde_json::from_value(message.clone()).unwrap();
+            assert_eq!(serde_json::to_value(parsed).unwrap(), message);
+        }
     }
 }

@@ -62,7 +62,13 @@ export type NativeSessionEvent =
 export type ExtensionToNative =
   | { readonly type: "hello"; readonly extensionVersion: string; readonly browser?: string }
   | { readonly type: "state"; readonly mode: InputMode; readonly recording: boolean }
-  | { readonly type: "session"; readonly event: NativeSessionEvent }
+  | {
+      readonly type: "session";
+      readonly event: NativeSessionEvent;
+      /** Source cycle, for diagnosing late results without logging what was said. */
+      readonly recognitionId?: number;
+      readonly isCurrent?: boolean;
+    }
   | { readonly type: "set-native-config"; readonly config: NativeConfig }
   | { readonly type: "get-native-config" }
   | { readonly type: "error"; readonly code: string }
@@ -176,7 +182,9 @@ export function isExtensionToNative(m: unknown): m is ExtensionToNative {
     case "state":
       return isInputMode(r.mode) && typeof r.recording === "boolean";
     case "session":
-      return isNativeSessionEvent(r.event);
+      return isNativeSessionEvent(r.event) &&
+        (r.recognitionId === undefined || (Number.isSafeInteger(r.recognitionId) && (r.recognitionId as number) >= 0)) &&
+        (r.isCurrent === undefined || typeof r.isCurrent === "boolean");
     case "set-native-config":
       return isNativeConfig(r.config);
     case "get-native-config":

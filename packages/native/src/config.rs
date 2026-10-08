@@ -181,7 +181,8 @@ fn lenient_scale<'de, D: Deserializer<'de>>(d: D) -> Result<u16, D::Error> {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum InjectMethod {
-    /// Type it, and fall back to pasting if typing did not go through.
+    /// Use the platform's automatic transport: paste on Windows to avoid IME conversion;
+    /// type with a paste fallback on macOS and Linux.
     #[default]
     Auto,
     Type,

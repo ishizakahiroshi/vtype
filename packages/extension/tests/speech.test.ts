@@ -141,6 +141,29 @@ describe("the speech page and the desktop app", () => {
     expect(s.events()).toContainEqual({ kind: "activity", activity: "speechstart" });
   });
 
+  it("keeps source cycle numbers when an older recognition delivers a late final", async () => {
+    page = makePage();
+    const s = await connected();
+    const first = await started(s);
+    first.fireResult("segment-a", true);
+    first.fireEnd();
+    await flush(vi);
+    const second = FakeSpeechRecognition.started();
+    second.fireStart();
+    second.fireResult("segment-c", true);
+    first.fireResult("segment-b", true);
+    await flush(vi);
+
+    const finals = s.ofType("session").filter((m) => (m.event as Record<string, unknown>).kind === "final");
+    expect(finals.map((m) => (m.event as Record<string, unknown>).text)).toEqual([
+      "segment-a", "segment-c", "segment-b",
+    ]);
+    expect(finals[0]!.recognitionId).toEqual(expect.any(Number));
+    expect(finals[1]!.recognitionId as number).toBeGreaterThan(finals[0]!.recognitionId as number);
+    expect(finals[2]!.recognitionId).toBe(finals[0]!.recognitionId);
+    expect(finals.map((m) => m.isCurrent)).toEqual([true, true, false]);
+  });
+
   it("stop ends the session with ended:user and reports not recording", async () => {
     page = makePage();
     const s = await connected();

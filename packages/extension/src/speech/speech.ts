@@ -177,7 +177,13 @@ export function createSpeechPage(options: SpeechPageOptions = {}): SpeechPage {
     const event = toNativeEvent(message.event);
     if (event === null) return;
     if (event.kind === "ended") sessionId = null;
-    post({ type: "session", event });
+    post({
+      type: "session",
+      event,
+      ...(message.event.kind === "result"
+        ? { recognitionId: message.event.recognitionId, isCurrent: message.event.isCurrent }
+        : {}),
+    });
     if (event.kind === "started" || event.kind === "ended") postState();
   }
 
