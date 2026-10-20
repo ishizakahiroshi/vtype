@@ -97,10 +97,10 @@ path and do not silently fall back to `docs/local` when the entry is missing.
 
 書く瞬間の責務（固有名詞の一般化・fixture は合成データ等）は上記「AI 作業共通ルール」の参照先に従う。このリポジトリ固有の配線は以下:
 
-- scanner: `scripts/secrets-scan.mjs`（手動実行: `node scripts/secrets-scan.mjs --staged --block`）
+- scanner: doxguard と gitleaks（手動実行: `node scripts/secrets-scan.dual.mjs --native-only --staged`）
 - layer 2: `.githooks/pre-commit`（`git config core.hooksPath .githooks` で有効化済み。clone した第三者は `scripts/install-hooks.sh` or `.ps1` を 1 回実行する）
 - layer 3: `.github/workflows/secrets-scan.yml` / layer 4: release ゲート
-- env (full coverage に必要・未設定なら構造 regex のみで継続): `KB_ROOT` / `FAMILY_ROOT`。設定詳細は `scripts/secrets-scan.mjs` の冒頭コメント
+- env (full coverage に必要・未設定なら構造 regex のみで継続): `KB_ROOT` / `FAMILY_ROOT`。設定詳細は doxguard の README
 - 参照実装・設計詳細: `worklog-bridge` リポの `docs/local/secrets-scan-design/`（gitignored・公開しない）
 
 ## 関連ドキュメント
