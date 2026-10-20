@@ -264,7 +264,7 @@ Test-RepoFile 'docs/store/listing.en.md' 'what goes in the dashboard fields'
 Test-RepoFile 'docs/store/privacy-policy.ja.md' 'the source of PRIVACY.md'
 Test-RepoFile 'docs/store/privacy-policy.en.md' 'the English privacy policy'
 Test-RepoFile 'scripts/package-webstore.ps1' 'the packaging step'
-Test-RepoFile 'scripts/secrets-scan.mjs' 'the layer 4 gate inside the packaging step'
+Test-RepoFile 'scripts/secrets-scan.dual.mjs' 'the doxguard layer 4 gate inside the packaging step'
 
 $submissionNotesJa = Join-Path $root "docs/store/submission-notes-v$($manifest.version).ja.md"
 $submissionNotesEn = Join-Path $root "docs/store/submission-notes-v$($manifest.version).en.md"

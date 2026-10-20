@@ -1,7 +1,7 @@
 # Builds the Chrome Web Store upload from the built extension (house pipeline: chrome-webstore-publish).
 #
 # What ships is packages/extension/dist, produced by the build. This script never builds: it
-# validates, stages exactly what the validation approved, runs the layer 4 secrets-scan against
+# validates, stages exactly what the validation approved, runs the layer 4 doxguard scan against
 # those staged copies, and only then writes the zip and its SHA256.
 #
 #   pnpm -F vtype-core build
@@ -52,13 +52,23 @@ $staged = Get-ChildItem -LiteralPath $stagingDir -Recurse -File
 
 # Layer 4 gate: scan exactly the bytes that go into the zip. Fail closed without Node.
 $node = Get-Command node -ErrorAction SilentlyContinue
-if (-not $node) { throw 'Node.js was not found; refusing to package without the secrets-scan gate.' }
+if (-not $node) { throw 'Node.js was not found; refusing to package without the doxguard gate.' }
 
 $listPath = Join-Path ([System.IO.Path]::GetTempPath()) "$slug-package-$PID.list"
 $staged | ForEach-Object { $_.FullName } | Set-Content -LiteralPath $listPath -Encoding UTF8
 try {
-  & $node.Source (Join-Path $PSScriptRoot 'secrets-scan.mjs') '--files-from-list' $listPath '--block'
-  if ($LASTEXITCODE -ne 0) { throw "secrets-scan blocked packaging (exit code $LASTEXITCODE)" }
+  # doxguard (exact 0.2.0) through the shared adapter. It resolves doxguard from DOXGUARD_PACKAGE_ROOT
+  # or node_modules, and must run from the repo root (it reads doxguard.ci.json and checks git HEAD there).
+  # A missing doxguard, any hit or any error exits nonzero, so packaging stops (fail closed).
+  Push-Location -LiteralPath $root
+  try {
+    & $node.Source (Join-Path $PSScriptRoot 'secrets-scan.dual.mjs') '--native-only' '--path-from' $listPath
+    $scanExit = $LASTEXITCODE
+  } finally { Pop-Location }
+  if ($scanExit -ne 0) {
+    throw ("doxguard scan blocked packaging (exit code $scanExit)." + [Environment]::NewLine +
+      'If doxguard is not installed: run "npm install doxguard@0.2.0 --prefix <dir>" and set DOXGUARD_PACKAGE_ROOT to <dir>/node_modules/doxguard, then run this script again. Otherwise fix the reported hits.')
+  }
 } finally {
   Remove-Item -LiteralPath $listPath -Force -ErrorAction SilentlyContinue
 }
